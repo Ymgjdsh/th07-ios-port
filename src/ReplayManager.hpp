@@ -4,6 +4,12 @@
 #include "Supervisor.hpp"
 #include "inttypes.hpp"
 
+#ifdef __EMSCRIPTEN__
+#define TH_REPLAY_DIR "/savesth07/replay"
+#else
+#define TH_REPLAY_DIR "./replay"
+#endif
+
 struct ReplayDataInput
 {
     u16 frameNum;

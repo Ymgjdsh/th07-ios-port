@@ -605,7 +605,7 @@ void ResultScreen::WriteScore()
         bytes++;
         remainingSize--;
     }
-    FileSystem::WriteDataToFile("score.dat", fileBuffer, sizeOfFile);
+    FileSystem::WriteDataToFile(TH_SCORE_PATH, fileBuffer, sizeOfFile);
     free(fileBuffer);
 }
 
@@ -1362,7 +1362,7 @@ ZunResult ResultScreen::HandleReplaySaveKeyboard()
             std::filesystem::create_directory("replay");
             for (vmIdx = 0; vmIdx < 15; vmIdx++)
             {
-                sprintf(replayPath, "./replay/th7_%.2d.rpy", vmIdx + 1);
+                sprintf(replayPath, "%s/th7_%.2d.rpy", TH_REPLAY_DIR, vmIdx + 1);
                 replayFile = (ReplayFile *)FileSystem::OpenFile(replayPath, 1);
                 if (!replayFile)
                 {
@@ -1511,7 +1511,7 @@ ZunResult ResultScreen::HandleReplaySaveKeyboard()
             }
             else
             {
-                sprintf(replayPath2, "./replay/th7_%.2d.rpy", this->chosenReplayIdx + 1);
+                sprintf(replayPath2, "%s/th7_%.2d.rpy", TH_REPLAY_DIR, this->chosenReplayIdx + 1);
                 ReplayManager::SaveReplay(replayPath2, this->replayName);
                 this->frameTimer = 0;
                 this->resultScreenState = 2;
@@ -2420,7 +2420,7 @@ ZunResult ResultScreen::AddedCallback(ResultScreen *arg)
         }
     }
     arg->prevCursor = 0;
-    arg->scoreDat = OpenScore("score.dat");
+    arg->scoreDat = OpenScore(TH_SCORE_PATH);
     for (i = 0; i < 6; i++)
     {
         for (j = 0; j < 6; j++)

@@ -2,7 +2,7 @@
 
 A cross-platform port of 東方妖々夢　～ Perfect Cherry Blossom 1.00b by Team Shanghai Alice using SDL2 and OpenGL ES.
 
-This is the portable branch of the Touhou 7 decompilation. Unless you're looking specifically for an attempted cross-platform port of th07, you probably want the [main branch](https://github.com/some100/th07/tree/main). This is a drop-in replacement for the original Touhou 7 binary that plays identically to the original, but is more portable to other platforms outside of Windows. There are a few bugs/incompatibilities though, namely:
+This is the reallyportable branch of the Touhou 7 decompilation. This is where changes go that I thought were too big for the standard portable branch, like web support, possibly mobile support, etc. This is a drop-in replacement for the original Touhou 7 binary that plays identically to the original, but is more portable to other platforms outside of Windows. There are a few bugs/incompatibilities though, namely:
 
 * You cannot load into stages on big endian machines. This is because the way ecl files, stg files, etc. are loaded in the original game is not endian independent, resulting in it breaking on any system not on little endian.
 * Text rendering looks off. To be clear it does "work" but the text looks too big.

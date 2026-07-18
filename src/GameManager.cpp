@@ -431,7 +431,7 @@ ZunResult ResultScreen::ParseScores()
             local_8->highScorePerShot[local_14] = 0;
         }
     }
-    scoreDat = OpenScore("score.dat");
+    scoreDat = OpenScore(TH_SCORE_PATH);
     if (!scoreDat)
     {
         g_GameErrorContext.Log("error : スコアファイルの読み取りに失敗しました\n");

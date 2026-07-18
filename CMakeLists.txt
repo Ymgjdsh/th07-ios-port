@@ -6,9 +6,6 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-find_package(SDL2 REQUIRED)
-find_package(SDL2_ttf REQUIRED)
-find_package(SDL2_image REQUIRED)
 find_package(OpenGL COMPONENTS GLES3 REQUIRED)
 
 set(SOURCES
@@ -55,4 +52,40 @@ add_executable(th07 ${SOURCES})
 
 target_include_directories(th07 PRIVATE src src/pbg4)
 
-target_link_libraries(th07 PRIVATE SDL2::SDL2 SDL2_ttf::SDL2_ttf SDL2_image::SDL2_image OpenGL::GLES3)
+if(EMSCRIPTEN)
+    target_compile_options(th07 PRIVATE
+        "--use-port=sdl2"
+        "--use-port=sdl2_image:formats=jpg"
+        "--use-port=sdl2_ttf"
+        "-O2"
+    )
+    target_link_options(th07 PRIVATE
+        "--use-port=sdl2"
+        "--use-port=sdl2_image:formats=jpg"
+        "--use-port=sdl2_ttf"
+        "--use-preload-plugins"
+        "--preload-file"
+        "${CMAKE_SOURCE_DIR}/assets@/"
+        "-sALLOW_MEMORY_GROWTH"
+        "-sMAX_WEBGL_VERSION=2"
+        "--use-preload-cache"
+        "-O2"
+        "-sINVOKE_RUN=0"
+        "-sEXPORTED_RUNTIME_METHODS=['callMain']"
+        "-lidbfs.js"
+        "--shell-file"
+        "${CMAKE_SOURCE_DIR}/resources/shell.html"
+    )
+    set(CMAKE_EXECUTABLE_SUFFIX ".html")
+else()
+    find_package(SDL2 REQUIRED)
+    find_package(SDL2_ttf REQUIRED)
+    find_package(SDL2_image REQUIRED)
+
+    target_link_libraries(th07 PRIVATE
+        SDL2::SDL2
+        SDL2_ttf::SDL2_ttf
+        SDL2_image::SDL2_image
+        OpenGL::GLES3
+    )
+endif()

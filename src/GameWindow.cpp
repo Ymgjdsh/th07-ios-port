@@ -180,10 +180,13 @@ ZunResult GameWindow::CreateGameWindow()
     }
 
     u32 flags = SDL_WINDOW_SHOWN | SDL_WINDOW_OPENGL;
+
+#ifndef __EMSCRIPTEN__
     if (!g_Supervisor.cfg.windowed)
     {
         flags |= SDL_WINDOW_FULLSCREEN;
     }
+#endif
 
     g_GameWindow.isAppActive = 1;
     g_GameWindow.isAppInactive = 0;

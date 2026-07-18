@@ -3,6 +3,7 @@
 *.lock
 *.rep
 .venv*
+assets
 build
 thirdparty/*
 resources/custom.exe

@@ -15,6 +15,19 @@
 #include "ZunResult.hpp"
 #include "dxutil.hpp"
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#define TH_CONFIG_PATH "/savesth07/th07.cfg"
+#else
+#define TH_CONFIG_PATH "th07.cfg"
+#endif
+
+void main_loop();
+bool cleanup();
+bool stop();
+
+static i32 renderRes = RENDER_RESULT_KEEP_RUNNING;
+
 void AnmManager::TakeScreenshotIfRequested()
 {
     if (this->screenshotTextureId >= 0)
@@ -26,117 +39,70 @@ void AnmManager::TakeScreenshotIfRequested()
     }
 }
 
-int main(int argc, char *argv[])
+void main_loop()
 {
-    (void)argc;
-    (void)argv;
+    SDL_Event e;
 
-    i32 res;
-
-    res = RENDER_RESULT_KEEP_RUNNING;
-
-    if (g_Supervisor.LoadConfig("th07.cfg") != ZUN_SUCCESS)
+    while (SDL_PollEvent(&e))
     {
-        goto stop;
-    }
-
-    GameWindow::ChecksumExecutable();
-    g_GameWindow.frequency = SDL_GetPerformanceFrequency();
-
-start:
-    if (GameWindow::CreateGameWindow())
-    {
-        goto stop;
-    }
-
-    if (GameWindow::InitInterface())
-    {
-        goto stop;
-    }
-
-    if (GameWindow::InitRendering())
-    {
-        goto stop;
-    }
-
-    g_SoundPlayer.InitializeSound();
-    Controller::ResetKeyboard();
-    g_AnmManager = new AnmManager();
-    if (!g_Supervisor.cfg.windowed)
-    {
-        SDL_ShowCursor(SDL_DISABLE);
-    }
-    res = g_Supervisor.RegisterChain();
-    if (res != ZUN_SUCCESS)
-    {
-        if (res == ZUN_ERROR)
+        switch (e.type)
         {
-            goto cleanup;
-        }
-        res = RENDER_RESULT_EXIT_ERROR;
-        goto cleanup;
-    }
-    res = RENDER_RESULT_KEEP_RUNNING;
-    g_GameWindow.curFrame = -30;
-    while (!g_GameWindow.isAppClosing)
-    {
-        SDL_Event e;
-
-        while (SDL_PollEvent(&e))
-        {
-            switch (e.type)
+        case SDL_WINDOWEVENT:
+            switch (e.window.event)
             {
-            case SDL_WINDOWEVENT:
-                switch (e.window.event)
+            case SDL_WINDOWEVENT_FOCUS_GAINED:
+                g_GameWindow.isAppActive = 1;
+                g_GameWindow.isAppInactive = 0;
+                if (!g_Supervisor.cfg.windowed)
                 {
-                case SDL_WINDOWEVENT_FOCUS_GAINED:
-                    g_GameWindow.isAppActive = 1;
-                    g_GameWindow.isAppInactive = 0;
-                    if (!g_Supervisor.cfg.windowed)
-                    {
-                        SDL_ShowCursor(SDL_DISABLE);
-                    }
-                    break;
-                case SDL_WINDOWEVENT_FOCUS_LOST:
-                    g_GameWindow.isAppActive = 0;
-                    g_GameWindow.isAppInactive = 1;
-                    SDL_ShowCursor(SDL_ENABLE);
-                    break;
+                    SDL_ShowCursor(SDL_DISABLE);
                 }
                 break;
-            case SDL_CONTROLLERDEVICEADDED:
-                if (!g_Supervisor.controller)
-                {
-                    g_Supervisor.controller = SDL_GameControllerOpen(e.cdevice.which);
-                }
-                break;
-            case SDL_CONTROLLERDEVICEREMOVED:
-                if (g_Supervisor.controller)
-                {
-                    SDL_Joystick *joy = SDL_GameControllerGetJoystick(g_Supervisor.controller);
-
-                    if (SDL_JoystickInstanceID(joy) == e.cdevice.which)
-                    {
-                        SDL_GameControllerClose(g_Supervisor.controller);
-                        g_Supervisor.controller = nullptr;
-                    }
-                }
-                break;
-            case SDL_QUIT:
-                g_GameWindow.isAppClosing = true;
+            case SDL_WINDOWEVENT_FOCUS_LOST:
+                g_GameWindow.isAppActive = 0;
+                g_GameWindow.isAppInactive = 1;
+                SDL_ShowCursor(SDL_ENABLE);
                 break;
             }
-        }
+            break;
+        case SDL_CONTROLLERDEVICEADDED:
+            if (!g_Supervisor.controller)
+            {
+                g_Supervisor.controller = SDL_GameControllerOpen(e.cdevice.which);
+            }
+            break;
+        case SDL_CONTROLLERDEVICEREMOVED:
+            if (g_Supervisor.controller)
+            {
+                SDL_Joystick *joy = SDL_GameControllerGetJoystick(g_Supervisor.controller);
 
-        res = g_GameWindow.Render();
-        if (res != RENDER_RESULT_KEEP_RUNNING)
-        {
+                if (SDL_JoystickInstanceID(joy) == e.cdevice.which)
+                {
+                    SDL_GameControllerClose(g_Supervisor.controller);
+                    g_Supervisor.controller = nullptr;
+                }
+            }
+            break;
+        case SDL_QUIT:
+            g_GameWindow.isAppClosing = true;
             break;
         }
-        g_Supervisor.flags = g_Supervisor.flags & 0xffffffef;
     }
 
-cleanup:
+    renderRes = g_GameWindow.Render();
+    if (renderRes != RENDER_RESULT_KEEP_RUNNING)
+    {
+        g_GameWindow.isAppClosing = true;
+#ifdef __EMSCRIPTEN__
+        cleanup();
+        emscripten_cancel_main_loop();
+#endif
+    }
+    g_Supervisor.flags = g_Supervisor.flags & 0xffffffef;
+}
+
+bool cleanup()
+{
     if (g_GameManager.plst.base.magic != 0)
     {
         ResultScreen::RegisterChain(2);
@@ -144,8 +110,11 @@ cleanup:
     g_Chain.Release();
     while (g_SoundPlayer.ProcessQueues())
         ;
+    return stop();
+}
 
-stop:
+bool stop()
+{
     g_SoundPlayer.Release();
     delete g_AnmManager;
     g_AnmManager = NULL;
@@ -157,14 +126,88 @@ stop:
         g_GameWindow.window = NULL;
     }
     SDL_ShowCursor(SDL_ENABLE);
-    if (res == RENDER_RESULT_EXIT_ERROR)
+    if (renderRes == RENDER_RESULT_EXIT_ERROR)
     {
         g_GameErrorContext.m_BufferEnd = g_GameErrorContext.m_Buffer;
         *g_GameErrorContext.m_BufferEnd = '\0';
         g_GameErrorContext.Log("再起動を要するオプションが変更されたので再起動します\n");
+        return false;
+    }
+    FileSystem::WriteDataToFile(TH_CONFIG_PATH, &g_Supervisor.cfg, sizeof(GameConfiguration));
+    g_GameErrorContext.Flush();
+    return true;
+}
+
+int main(int argc, char *argv[])
+{
+    (void)argc;
+    (void)argv;
+
+    if (g_Supervisor.LoadConfig(TH_CONFIG_PATH) != ZUN_SUCCESS)
+    {
+        stop();
+        return 0;
+    }
+
+    GameWindow::ChecksumExecutable();
+    g_GameWindow.frequency = SDL_GetPerformanceFrequency();
+
+start:
+    if (GameWindow::CreateGameWindow())
+    {
+        stop();
+        return 0;
+    }
+
+    if (GameWindow::InitInterface())
+    {
+        stop();
+        return 0;
+    }
+
+    if (GameWindow::InitRendering())
+    {
+        stop();
+        return 0;
+    }
+
+    g_SoundPlayer.InitializeSound();
+    Controller::ResetKeyboard();
+    g_AnmManager = new AnmManager();
+    if (!g_Supervisor.cfg.windowed)
+    {
+        SDL_ShowCursor(SDL_DISABLE);
+    }
+    renderRes = g_Supervisor.RegisterChain();
+    if (renderRes != ZUN_SUCCESS)
+    {
+        if (renderRes == ZUN_ERROR)
+        {
+            cleanup();
+            return 0;
+        }
+        renderRes = RENDER_RESULT_EXIT_ERROR;
+        if (!cleanup())
+        {
+            goto start;
+        }
+    }
+    renderRes = RENDER_RESULT_KEEP_RUNNING;
+    g_GameWindow.curFrame = -30;
+
+#ifdef __EMSCRIPTEN__
+    emscripten_set_main_loop(main_loop, 0, true);
+#else
+    while (!g_GameWindow.isAppClosing)
+    {
+        main_loop();
+    }
+#endif
+
+    if (!cleanup())
+    {
         goto start;
     }
-    FileSystem::WriteDataToFile("th07.cfg", &g_Supervisor.cfg, sizeof(GameConfiguration));
-    g_GameErrorContext.Flush();
+
     return 0;
 }

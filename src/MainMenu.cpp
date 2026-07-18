@@ -1851,7 +1851,7 @@ u32 MainMenu::OnUpdateSelectReplay()
             local_10 = 0;
             for (i = 0; i < 15; i++)
             {
-                sprintf(local_54, "./replay/th7_%.2d.rpy", i + 1);
+                sprintf(local_54, "%s/th7_%.2d.rpy", TH_REPLAY_DIR, i + 1);
                 file = (ReplayFile *)FileSystem::OpenFile(local_54, 1);
                 if (!file)
                 {
@@ -1869,7 +1869,7 @@ u32 MainMenu::OnUpdateSelectReplay()
                 }
             }
 
-            const fs::path replay = "./replay";
+            const fs::path replay = TH_REPLAY_DIR;
             fs::create_directory(replay);
 
             std::vector<fs::directory_entry> entries(fs::directory_iterator(replay),
@@ -1888,7 +1888,7 @@ u32 MainMenu::OnUpdateSelectReplay()
                 {
                     break;
                 }
-                file = (ReplayFile *)FileSystem::OpenFile(("./replay/" + filename).c_str(), 1);
+                file = (ReplayFile *)FileSystem::OpenFile(((std::string)TH_REPLAY_DIR + "/" + filename).c_str(), 1);
                 if (!file)
                 {
                     continue;
@@ -1897,7 +1897,7 @@ u32 MainMenu::OnUpdateSelectReplay()
                 if (file)
                 {
                     this->replays[local_10] = *file;
-                    sprintf(this->replayFilenames[local_10], "./replay/%s", filename.c_str());
+                    sprintf(this->replayFilenames[local_10], "%s/%s", TH_REPLAY_DIR, filename.c_str());
                     sprintf(this->replayLabels[local_10], "User ");
                     ReplayManager::FreeReplay(file);
                     local_10++;
@@ -2358,7 +2358,7 @@ ZunResult MainMenu::ActualAddedCallback()
     {
         g_GameManager.replay = 0;
     }
-    local_8 = ResultScreen::OpenScore("score.dat");
+    local_8 = ResultScreen::OpenScore(TH_SCORE_PATH);
     ResultScreen::ParseClrd(local_8, g_GameManager.clrd);
     ResultScreen::ParsePscr(local_8, &g_GameManager.pscr[0][0][0]);
     ResultScreen::ParseCatk(local_8, g_GameManager.catk);
