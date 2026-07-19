@@ -10,7 +10,7 @@ u32 g_LastFileSize;
 
 u8 *FileSystem::OpenFile(const char *filepath, i32 isExternalResource)
 {
-    FILE *file;
+    SDL_RWops *file;
     u8 *buf;
     u32 fsize;
     const char *filename;
@@ -57,41 +57,41 @@ u8 *FileSystem::OpenFile(const char *filepath, i32 isExternalResource)
         }
     }
     Supervisor::DebugPrint("%s Load ... \n", filepath);
-    file = fopen(filepath, "rb");
+    file = SDL_RWFromFile(filepath, "rb");
     if (!file)
     {
         Supervisor::DebugPrint("error : %s is not found.\n", filepath);
         return NULL;
     }
 
-    fseek(file, 0, SEEK_END);
-    fsize = ftell(file);
+    SDL_RWseek(file, 0, RW_SEEK_END);
+    fsize = SDL_RWtell(file);
     buf = (u8 *)malloc(fsize);
     if (!buf)
     {
-        fclose(file);
+        SDL_RWclose(file);
         return NULL;
     }
 
-    fseek(file, 0, SEEK_SET);
-    if (fread(buf, 1, fsize, file) != fsize)
+    SDL_RWseek(file, 0, RW_SEEK_SET);
+    if (SDL_RWread(file, buf, 1, fsize) != fsize)
     {
-        fclose(file);
+        SDL_RWclose(file);
         return NULL;
     }
     g_LastFileSize = fsize;
-    fclose(file);
+    SDL_RWclose(file);
     return buf;
 }
 
 i32 FileSystem::CheckFileExists(const char *file)
 {
-    FILE *fp;
+    SDL_RWops *fp;
 
-    fp = fopen(file, "rb");
+    fp = SDL_RWFromFile(file, "rb");
     if (fp)
     {
-        fclose(fp);
+        SDL_RWclose(fp);
         return true;
     }
     return false;
@@ -99,24 +99,24 @@ i32 FileSystem::CheckFileExists(const char *file)
 
 i32 FileSystem::WriteDataToFile(const char *filename, const void *out, u32 bytesToWrite)
 {
-    FILE *file;
+    SDL_RWops *file;
     u32 bytesWritten;
 
-    file = fopen(filename, "wb");
+    file = SDL_RWFromFile(filename, "wb");
     if (!file)
     {
         Supervisor::DebugPrint("error : %s write error\n", filename);
         return -1;
     }
 
-    bytesWritten = fwrite(out, 1, bytesToWrite, file);
+    bytesWritten = SDL_RWwrite(file, out, 1, bytesToWrite);
     if (bytesToWrite != bytesWritten)
     {
-        fclose(file);
+        SDL_RWclose(file);
         Supervisor::DebugPrint("error : %s write error\n", filename);
         return -2;
     }
-    fclose(file);
+    SDL_RWclose(file);
     Supervisor::DebugPrint("%s write ...\n", filename);
     return 0;
 }

@@ -63,7 +63,7 @@ bool Pbg4File::Open(const char *path, const char *mode)
     else
     {
         GetFullPath(local_114, path);
-        this->file = fopen(local_114, this->access);
+        this->file = SDL_RWFromFile(local_114, this->access);
         if (!this->file)
         {
             return false;
@@ -71,7 +71,7 @@ bool Pbg4File::Open(const char *path, const char *mode)
 
         if (local_c != 0)
         {
-            fseek(this->file, 0, SEEK_END);
+            SDL_RWseek(this->file, 0, RW_SEEK_END);
         }
         return true;
     }
@@ -81,7 +81,7 @@ void Pbg4File::Close()
 {
     if (this->file)
     {
-        fclose(this->file);
+        SDL_RWclose(this->file);
         this->file = NULL;
         this->access = 0;
     }
@@ -97,7 +97,7 @@ u32 Pbg4File::Read(void *data, u32 len)
         return 0;
     }
 
-    local_8 = fread(data, 1, len, this->file);
+    local_8 = SDL_RWread(this->file, data, 1, len);
     return local_8;
 }
 
@@ -111,7 +111,7 @@ bool Pbg4File::Write(void *data, u32 len)
         return false;
     }
 
-    local_8 = fwrite(data, 1, len, this->file);
+    local_8 = SDL_RWwrite(this->file, data, 1, len);
     return len == local_8;
 }
 
@@ -123,7 +123,7 @@ u32 Pbg4File::Tell()
     }
     else
     {
-        return ftell(this->file);
+        return SDL_RWtell(this->file);
     }
 }
 
@@ -135,10 +135,10 @@ u32 Pbg4File::GetSize()
     }
     else
     {
-        long cur = ftell(this->file);
-        fseek(this->file, 0, SEEK_END);
-        u32 size = ftell(this->file);
-        fseek(this->file, cur, SEEK_SET);
+        long cur = SDL_RWtell(this->file);
+        SDL_RWseek(this->file, 0, RW_SEEK_END);
+        u32 size = SDL_RWtell(this->file);
+        SDL_RWseek(this->file, cur, RW_SEEK_SET);
         return size;
     }
 }
@@ -150,7 +150,7 @@ bool Pbg4File::Seek(u32 offset, u32 seekFrom)
         return false;
     }
 
-    fseek(this->file, offset, seekFrom);
+    SDL_RWseek(this->file, offset, seekFrom);
     return true;
 }
 

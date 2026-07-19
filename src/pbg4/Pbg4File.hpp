@@ -1,6 +1,6 @@
 #pragma once
 
-#include <cstdio>
+#include <SDL_rwops.h>
 
 #include "inttypes.hpp"
 
@@ -52,6 +52,6 @@ struct Pbg4File : IPbg4File
 
     static void GetFullPath(char *out, const char *filename);
 
-    FILE *file;
+    SDL_RWops *file;
     const char *access;
 };

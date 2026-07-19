@@ -63,10 +63,10 @@ static ma_result ThBgmDataSource_read(ma_data_source *pDataSource, void *pFrames
             {
                 if (pBgm->file)
                 {
-                    fseek(pBgm->file,
-                          g_SoundPlayer.bgmSeekOffset + pBgm->pFmt->startOffset +
-                              pBgm->pFmt->introLength,
-                          SEEK_SET);
+                    SDL_RWseek(pBgm->file,
+                               g_SoundPlayer.bgmSeekOffset + pBgm->pFmt->startOffset +
+                                   pBgm->pFmt->introLength,
+                               RW_SEEK_SET);
                     pBgm->currentOffset = pBgm->pFmt->introLength;
                 }
             }
@@ -111,8 +111,8 @@ static ma_result ThBgmDataSource_read(ma_data_source *pDataSource, void *pFrames
         {
             if (pBgm->file)
             {
-                bytesActuallyRead = fread(pByteOut + (totalFramesRead * frameSize), 1,
-                                          (size_t)bytesToReadThisStep, pBgm->file);
+                bytesActuallyRead = SDL_RWread(pBgm->file, pByteOut + (totalFramesRead * frameSize),
+                                               1, (size_t)bytesToReadThisStep);
                 pBgm->currentOffset += (u32)bytesActuallyRead;
             }
         }
@@ -158,9 +158,9 @@ static ma_result ThBgmDataSource_seek(ma_data_source *pDataSource, ma_uint64 fra
         pBgm->currentOffset = (u32)targetByteOffset;
         if (!pBgm->isMemory && pBgm->file)
         {
-            fseek(pBgm->file,
-                  g_SoundPlayer.bgmSeekOffset + pBgm->pFmt->startOffset + pBgm->currentOffset,
-                  SEEK_SET);
+            SDL_RWseek(pBgm->file,
+                       g_SoundPlayer.bgmSeekOffset + pBgm->pFmt->startOffset + pBgm->currentOffset,
+                       RW_SEEK_SET);
         }
         pBgm->segmentBytesRemaining = pBgm->pFmt->totalLength - pBgm->currentOffset;
     }
@@ -181,9 +181,9 @@ static ma_result ThBgmDataSource_seek(ma_data_source *pDataSource, ma_uint64 fra
         pBgm->currentOffset = (u32)finalByteOffset;
         if (!pBgm->isMemory && pBgm->file)
         {
-            fseek(pBgm->file,
-                  g_SoundPlayer.bgmSeekOffset + pBgm->pFmt->startOffset + pBgm->currentOffset,
-                  SEEK_SET);
+            SDL_RWseek(pBgm->file,
+                       g_SoundPlayer.bgmSeekOffset + pBgm->pFmt->startOffset + pBgm->currentOffset,
+                       RW_SEEK_SET);
         }
         pBgm->segmentBytesRemaining = (u32)(loopEnd - pBgm->currentOffset);
     }
@@ -240,7 +240,7 @@ static ma_result ThBgmDataSource_get_cursor(ma_data_source *pDataSource, ma_uint
     {
         if (pBgm->file)
         {
-            long pos = ftell(pBgm->file);
+            long pos = SDL_RWtell(pBgm->file);
             long baseOffset = g_SoundPlayer.bgmSeekOffset + pBgm->pFmt->startOffset;
             if (pos >= baseOffset)
             {
@@ -296,19 +296,19 @@ static bool ThBgmDataSource_init_file(ThBgmDataSource *pBgm, const char *path, T
     InitBgmData(pBgm, pFmt);
     pBgm->isMemory = false;
 
-    pBgm->file = fopen(path, "rb");
+    pBgm->file = SDL_RWFromFile(path, "rb");
     if (!pBgm->file)
     {
         return false;
     }
 
-    fseek(pBgm->file, g_SoundPlayer.bgmSeekOffset + pFmt->startOffset, SEEK_SET);
+    SDL_RWseek(pBgm->file, g_SoundPlayer.bgmSeekOffset + pFmt->startOffset, RW_SEEK_SET);
 
     ma_data_source_config config = ma_data_source_config_init();
     config.vtable = &g_ThBgmDataSourceVtable;
     if (ma_data_source_init(&config, &pBgm->base) != MA_SUCCESS)
     {
-        fclose(pBgm->file);
+        SDL_RWclose(pBgm->file);
         return false;
     }
     return true;
@@ -533,7 +533,7 @@ ZunResult SoundPlayer::ReopenBGM(const char *name)
         SAFE_DELETE(this->backgroundMusic);
         if (this->bgmDataSource->file)
         {
-            fclose(this->bgmDataSource->file);
+            SDL_RWclose(this->bgmDataSource->file);
         }
         ma_data_source_uninit(&this->bgmDataSource->base);
         SAFE_DELETE(this->bgmDataSource);
@@ -546,7 +546,7 @@ ZunResult SoundPlayer::ReopenBGM(const char *name)
 ZunResult SoundPlayer::PreloadBGM(i32 idx, const char *path)
 {
     u8 *lpBuffer;
-    FILE *file;
+    SDL_RWops *file;
     i32 fmtIdx;
 
     if (this->bgmPreloadData[idx])
@@ -569,7 +569,7 @@ ZunResult SoundPlayer::PreloadBGM(i32 idx, const char *path)
 
     SAFE_FREE(this->bgmPreloadData[idx]);
     Supervisor::DebugPrint("Streming BGM PreLoad %d\n", idx);
-    file = fopen(this->bgmArchivePath, "rb");
+    file = SDL_RWFromFile(this->bgmArchivePath, "rb");
     if (!file)
     {
         Supervisor::DebugPrint("error : bgmfile is not find %s\n", this->bgmArchivePath);
@@ -577,17 +577,17 @@ ZunResult SoundPlayer::PreloadBGM(i32 idx, const char *path)
     }
 
     fmtIdx = GetFmtIndexByName(path);
-    fseek(file, this->bgmFmtData[fmtIdx].startOffset, SEEK_SET);
+    SDL_RWseek(file, this->bgmFmtData[fmtIdx].startOffset, RW_SEEK_SET);
     lpBuffer = (u8 *)malloc(this->bgmFmtData[fmtIdx].preloadAllocSize);
     if (!lpBuffer)
     {
-        fclose(file);
+        SDL_RWclose(file);
         Supervisor::DebugPrint("error : bgmfile is not find %s\n", this->bgmArchivePath);
         return ZUN_ERROR;
     }
 
-    fread(lpBuffer, this->bgmFmtData[fmtIdx].preloadAllocSize, 1, file);
-    fclose(file);
+    SDL_RWread(file, lpBuffer, this->bgmFmtData[fmtIdx].preloadAllocSize, 1);
+    SDL_RWclose(file);
     this->bgmPreloadFmtData[idx] = &this->bgmFmtData[fmtIdx];
     this->bgmPreloadData[idx] = lpBuffer;
     this->bgmPreloadDataCursor[idx] = lpBuffer;
@@ -655,7 +655,7 @@ void SoundPlayer::StopBGM()
     {
         if (this->bgmDataSource->file)
         {
-            fclose(this->bgmDataSource->file);
+            SDL_RWclose(this->bgmDataSource->file);
         }
         ma_data_source_uninit(&this->bgmDataSource->base);
         SAFE_DELETE(this->bgmDataSource);

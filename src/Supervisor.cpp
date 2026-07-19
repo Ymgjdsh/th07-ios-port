@@ -861,9 +861,9 @@ i32 Supervisor::SnapshotScreen(const char *param_1)
 ZunResult Supervisor::LoadConfig(const char *configFilename)
 {
     i32 bgmData[4];
-    FILE *bgm;
+    SDL_RWops *bgm;
     i32 bgm2Data[4];
-    FILE *bgm2;
+    SDL_RWops *bgm2;
     u32 *configFile;
 
     memset(&g_Supervisor.cfg, 0, sizeof(GameConfiguration));
@@ -878,11 +878,11 @@ ZunResult Supervisor::LoadConfig(const char *configFilename)
         g_Supervisor.cfg.version = 0x70002;
         g_Supervisor.cfg.padAxisX = 600;
         g_Supervisor.cfg.padAxisY = 600;
-        bgm2 = fopen("./thbgm.dat", "rb");
+        bgm2 = SDL_RWFromFile("./thbgm.dat", "rb");
         if (bgm2)
         {
-            fread(bgm2Data, 16, 1, bgm2);
-            fclose(bgm2);
+            SDL_RWread(bgm2, bgm2Data, 16, 1);
+            SDL_RWclose(bgm2);
             if (bgm2Data[0] != 0x5641575a || bgm2Data[1] != 1 || bgm2Data[2] != 0x700)
             {
                 g_GameErrorContext.Fatal("BGM データのバージョンが違います\n");
@@ -909,11 +909,11 @@ ZunResult Supervisor::LoadConfig(const char *configFilename)
         g_Supervisor.cfg = *(GameConfiguration *)configFile;
         free(configFile);
 
-        bgm = fopen("./thbgm.dat", "rb");
+        bgm = SDL_RWFromFile("./thbgm.dat", "rb");
         if (bgm)
         {
-            fread(bgmData, 16, 1, bgm);
-            fclose(bgm);
+            SDL_RWread(bgm, bgmData, 16, 1);
+            SDL_RWclose(bgm);
             if (bgmData[0] != 0x5641575a || bgmData[1] != 1 || bgmData[2] != 0x700)
             {
                 g_GameErrorContext.Fatal("BGM データのバージョンが違います\n");
