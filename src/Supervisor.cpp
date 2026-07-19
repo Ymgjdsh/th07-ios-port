@@ -571,7 +571,7 @@ ZunResult Supervisor::AddedCallback(Supervisor *arg)
     {
         memcpy(g_SoundPlayer.bgmArchivePath, "th07.dat", 9);
     }
-    scoreDat = ResultScreen::OpenScore(TH_SCORE_PATH);
+    scoreDat = ResultScreen::OpenScore(FileSystem::GetPrefPath("score.dat").c_str());
     memset(&g_GameManager.plst, 0, sizeof(g_GameManager.plst));
     g_GameManager.plst.base.th7kLen2 = g_GameManager.plst.base.th7kLen = sizeof(Plst);
     g_GameManager.plst.base.magic = PLST_MAGIC;

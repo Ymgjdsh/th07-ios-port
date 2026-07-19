@@ -19,12 +19,6 @@
 #define LSNM_MAGIC 'MNSL'
 #define VRSM_MAGIC 'MSRV'
 
-#ifdef __EMSCRIPTEN__
-#define TH_SCORE_PATH "/savesth07/score.dat"
-#else
-#define TH_SCORE_PATH "score.dat"
-#endif
-
 struct Th7k
 {
     u32 magic;

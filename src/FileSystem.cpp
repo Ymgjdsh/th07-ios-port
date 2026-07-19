@@ -120,3 +120,17 @@ i32 FileSystem::WriteDataToFile(const char *filename, const void *out, u32 bytes
     Supervisor::DebugPrint("%s write ...\n", filename);
     return 0;
 }
+
+std::string FileSystem::GetPrefPath(const char* filename) {
+    #if defined(__EMSCRIPTEN__)
+        return std::string("/savesth07/") + filename;
+    #elif defined(__ANDROID__) || defined(__IPHONEOS__)
+        static char* prefPath = SDL_GetPrefPath("TeamShanghaiAlice", "th07");
+        if (prefPath) {
+            return std::string(prefPath) + filename;
+        }
+        return std::string(filename);
+    #else
+        return std::string(filename);
+    #endif
+}

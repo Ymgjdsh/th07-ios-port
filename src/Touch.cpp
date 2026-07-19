@@ -39,7 +39,7 @@ bool g_UsedThisRun = false;
 
 bool IsGameplayTouchMode()
 {
-    return g_GameManager.notInMenu && !g_GameManager.isInPauseMenu && !g_GameManager.isInRetryMenu;
+    return g_GameManager.notInMenu && !g_GameManager.isInPauseMenu && !g_GameManager.isInRetryMenu && !g_GameManager.replay;
 }
 
 void GetWindowSize(i32 *w, i32 *h)

@@ -18,9 +18,6 @@
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
-#define TH_CONFIG_PATH "/savesth07/th07.cfg"
-#else
-#define TH_CONFIG_PATH "th07.cfg"
 #endif
 
 void main_loop();
@@ -143,7 +140,7 @@ bool stop()
         g_GameErrorContext.Log("再起動を要するオプションが変更されたので再起動します\n");
         return false;
     }
-    FileSystem::WriteDataToFile(TH_CONFIG_PATH, &g_Supervisor.cfg, sizeof(GameConfiguration));
+    FileSystem::WriteDataToFile(FileSystem::GetPrefPath("th07.cfg").c_str(), &g_Supervisor.cfg, sizeof(GameConfiguration));
     g_GameErrorContext.Flush();
     return true;
 }
@@ -153,7 +150,7 @@ int main(int argc, char *argv[])
     (void)argc;
     (void)argv;
 
-    if (g_Supervisor.LoadConfig(TH_CONFIG_PATH) != ZUN_SUCCESS)
+    if (g_Supervisor.LoadConfig(FileSystem::GetPrefPath("th07.cfg").c_str()) != ZUN_SUCCESS)
     {
         stop();
         return 0;

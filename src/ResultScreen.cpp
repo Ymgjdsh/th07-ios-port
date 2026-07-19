@@ -606,7 +606,7 @@ void ResultScreen::WriteScore()
         bytes++;
         remainingSize--;
     }
-    FileSystem::WriteDataToFile(TH_SCORE_PATH, fileBuffer, sizeOfFile);
+    FileSystem::WriteDataToFile(FileSystem::GetPrefPath("score.dat").c_str(), fileBuffer, sizeOfFile);
     free(fileBuffer);
 }
 
@@ -1365,7 +1365,7 @@ ZunResult ResultScreen::HandleReplaySaveKeyboard()
             std::filesystem::create_directory("replay");
             for (vmIdx = 0; vmIdx < 15; vmIdx++)
             {
-                sprintf(replayPath, "%s/th7_%.2d.rpy", TH_REPLAY_DIR, vmIdx + 1);
+                sprintf(replayPath, "%s/th7_%.2d.rpy", FileSystem::GetPrefPath("replay").c_str(), vmIdx + 1);
                 replayFile = (ReplayFile *)FileSystem::OpenFile(replayPath, 1);
                 if (!replayFile)
                 {
@@ -1514,7 +1514,7 @@ ZunResult ResultScreen::HandleReplaySaveKeyboard()
             }
             else
             {
-                sprintf(replayPath2, "%s/th7_%.2d.rpy", TH_REPLAY_DIR, this->chosenReplayIdx + 1);
+                sprintf(replayPath2, "%s/th7_%.2d.rpy", FileSystem::GetPrefPath("replay").c_str(), this->chosenReplayIdx + 1);
                 ReplayManager::SaveReplay(replayPath2, this->replayName);
                 this->frameTimer = 0;
                 this->resultScreenState = 2;
@@ -2423,7 +2423,7 @@ ZunResult ResultScreen::AddedCallback(ResultScreen *arg)
         }
     }
     arg->prevCursor = 0;
-    arg->scoreDat = OpenScore(TH_SCORE_PATH);
+    arg->scoreDat = OpenScore(FileSystem::GetPrefPath("score.dat").c_str());
     for (i = 0; i < 6; i++)
     {
         for (j = 0; j < 6; j++)
