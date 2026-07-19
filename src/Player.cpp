@@ -14,6 +14,7 @@
 #include "Rng.hpp"
 #include "SoundPlayer.hpp"
 #include "Stage.hpp"
+#include "Touch.hpp"
 #include "ZunMath.hpp"
 #include "dxutil.hpp"
 #include "utils.hpp"
@@ -1155,6 +1156,10 @@ i32 Player::HandlePlayerInputs()
     f32 horizontalSpeed;
     f32 verticalSpeed;
 
+    f32 touchDx;
+    f32 touchDy;
+    bool touchFocus;
+
     horizontalSpeed = 0.0f;
     verticalSpeed = 0.0f;
     this->playerDirection = MOVEMENT_NONE;
@@ -1267,6 +1272,143 @@ i32 Player::HandlePlayerInputs()
             break;
         case MOVEMENT_NONE:
             break;
+        }
+    }
+
+    if (Touch::GetPlayerDelta(&touchDx, &touchDy))
+    {
+        f32 focusRatio = 1.0f;
+        if (this->isFocus && this->shooterData && this->shooterData->speed != 0.0f)
+        {
+            focusRatio = this->shooterData->speedFocus / this->shooterData->speed;
+        }
+
+        f32 reqGameDx = touchDx * focusRatio;
+        f32 reqGameDy = touchDy * focusRatio;
+
+        f32 minX = g_GameManager.playerMovementAreaTopLeftPos.x;
+        f32 maxX =
+            g_GameManager.playerMovementAreaTopLeftPos.x + g_GameManager.playerMovementAreaSize.x;
+        f32 minY = g_GameManager.playerMovementAreaTopLeftPos.y;
+        f32 maxY =
+            g_GameManager.playerMovementAreaTopLeftPos.y + g_GameManager.playerMovementAreaSize.y;
+
+        f32 targetX = this->positionCenter.x + reqGameDx;
+        f32 targetY = this->positionCenter.y + reqGameDy;
+
+        if (targetX < minX)
+        {
+            reqGameDx = minX - this->positionCenter.x;
+        }
+        else if (targetX > maxX)
+        {
+            reqGameDx = maxX - this->positionCenter.x;
+        }
+
+        if (targetY < minY)
+        {
+            reqGameDy = minY - this->positionCenter.y;
+        }
+        else if (targetY > maxY)
+        {
+            reqGameDy = maxY - this->positionCenter.y;
+        }
+
+        if (focusRatio != 0.0f)
+        {
+            Touch::SetPlayerDelta(reqGameDx / focusRatio, reqGameDy / focusRatio);
+        }
+
+        f32 hx = this->horizontalMovementSpeedMultiplierDuringBomb *
+                 g_Supervisor.effectiveFramerateMultiplier;
+        f32 vy = this->verticalMovementSpeedMultiplierDuringBomb *
+                 g_Supervisor.effectiveFramerateMultiplier;
+
+        f32 requestedHorizontalSpeed = hx != 0.0f ? reqGameDx / hx : 0.0f;
+        f32 requestedVerticalSpeed = vy != 0.0f ? reqGameDy / vy : 0.0f;
+
+        f32 currentSpeedSq = requestedHorizontalSpeed * requestedHorizontalSpeed +
+                             requestedVerticalSpeed * requestedVerticalSpeed;
+
+        f32 maxSpeed = this->isFocus ? this->shooterData->speedFocus : this->shooterData->speed;
+
+        if (currentSpeedSq > maxSpeed * maxSpeed && currentSpeedSq > 0.0f)
+        {
+            f32 currentSpeed = sqrtf(currentSpeedSq);
+            horizontalSpeed = (requestedHorizontalSpeed / currentSpeed) * maxSpeed;
+            verticalSpeed = (requestedVerticalSpeed / currentSpeed) * maxSpeed;
+        }
+        else
+        {
+            horizontalSpeed = requestedHorizontalSpeed;
+            verticalSpeed = requestedVerticalSpeed;
+        }
+
+        f32 consumedGameDx = 0.0f;
+        f32 consumedGameDy = 0.0f;
+
+        if (hx != 0.0f)
+        {
+            consumedGameDx = horizontalSpeed * hx;
+        }
+        if (vy != 0.0f)
+        {
+            consumedGameDy = verticalSpeed * vy;
+        }
+
+        if (focusRatio != 0.0f)
+        {
+            if (currentSpeedSq > maxSpeed * maxSpeed && currentSpeedSq > 0.0f)
+            {
+                f32 consumeX = (hx != 0.0f) ? consumedGameDx / focusRatio : touchDx;
+                f32 consumeY = (vy != 0.0f) ? consumedGameDy / focusRatio : touchDy;
+                Touch::ConsumePlayerDelta(consumeX, consumeY);
+            }
+            else
+            {
+                Touch::SetPlayerDelta(0.0f, 0.0f);
+            }
+        }
+
+        this->playerDirection = MOVEMENT_NONE;
+
+        const f32 dirDeadzone = 0.01f;
+        bool left = touchDx < -dirDeadzone;
+        bool right = touchDx > dirDeadzone;
+        bool up = touchDy < -dirDeadzone;
+        bool down = touchDy > dirDeadzone;
+
+        if (up)
+        {
+            this->playerDirection = MOVEMENT_UP;
+            if (left)
+            {
+                this->playerDirection = MOVEMENT_UP_LEFT;
+            }
+            else if (right)
+            {
+                this->playerDirection = MOVEMENT_UP_RIGHT;
+            }
+        }
+        else if (down)
+        {
+            this->playerDirection = MOVEMENT_DOWN;
+            if (left)
+            {
+                this->playerDirection = MOVEMENT_DOWN_LEFT;
+            }
+            else if (right)
+            {
+                this->playerDirection = MOVEMENT_DOWN_RIGHT;
+            }
+        }
+        else if (left)
+        {
+            this->playerDirection = MOVEMENT_LEFT;
+        }
+        else if (right)
+        {
+            this->playerDirection = MOVEMENT_RIGHT;
         }
     }
 

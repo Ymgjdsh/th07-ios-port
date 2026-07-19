@@ -39,6 +39,7 @@ set(SOURCES
     src/Stage.cpp
     src/Supervisor.cpp
     src/TextHelper.cpp
+    src/Touch.cpp
     src/main.cpp
     src/graphics/Gles.cpp
     src/graphics/Software.cpp

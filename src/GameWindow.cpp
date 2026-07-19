@@ -173,6 +173,9 @@ ZunResult GameWindow::InitInterface()
 
 ZunResult GameWindow::CreateGameWindow()
 {
+    SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+    SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "0");
+
     if (SDL_Init(SDL_INIT_VIDEO) < 0)
     {
         g_GameErrorContext.Fatal("Direct3D オブジェクトは何故か作成出来なかった\n");

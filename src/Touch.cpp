@@ -1,0 +1,346 @@
+#include "Touch.hpp"
+
+#include <SDL_events.h>
+#include <cmath>
+
+#include "Controller.hpp"
+#include "GameManager.hpp"
+#include "GameWindow.hpp"
+
+struct FingerSlot
+{
+    bool active;
+    SDL_FingerID id;
+    f32 lastPxX;
+    f32 lastPxY;
+};
+
+struct MenuGestureTracker
+{
+    bool active;
+    SDL_FingerID primaryId;
+    f32 startX;
+    f32 startY;
+    f32 currentX;
+    f32 currentY;
+    i32 maxFingers;
+    u16 pendingButton;
+};
+
+FingerSlot g_MoveFinger;
+FingerSlot g_FocusFinger;
+MenuGestureTracker g_MenuGesture;
+
+f32 g_AccumDx = 0.0f;
+f32 g_AccumDy = 0.0f;
+
+bool g_BombPending = false;
+bool g_UsedThisRun = false;
+
+bool IsGameplayTouchMode()
+{
+    return g_GameManager.notInMenu && !g_GameManager.isInPauseMenu && !g_GameManager.isInRetryMenu;
+}
+
+void GetWindowSize(i32 *w, i32 *h)
+{
+    *w = 640;
+    *h = 480;
+    if (g_GameWindow.window)
+    {
+        SDL_GetWindowSize(g_GameWindow.window, w, h);
+    }
+}
+
+void GetContainedRenderRect(f32 *outX, f32 *outY, f32 *outW, f32 *outH, f32 *outScale)
+{
+    i32 winW, winH;
+    GetWindowSize(&winW, &winH);
+
+    f32 sx = (f32)winW / 640.0f;
+    f32 sy = (f32)winH / 480.0f;
+    f32 scale = sx < sy ? sx : sy;
+
+    f32 rw = 640.0f * scale;
+    f32 rh = 480.0f * scale;
+    f32 rx = ((f32)winW - rw) * 0.5f;
+    f32 ry = ((f32)winH - rh) * 0.5f;
+
+    *outX = rx;
+    *outY = ry;
+    *outW = rw;
+    *outH = rh;
+    *outScale = scale;
+}
+
+void FingerToWindowPx(const SDL_TouchFingerEvent &f, f32 *px, f32 *py)
+{
+    i32 winW, winH;
+    GetWindowSize(&winW, &winH);
+
+    *px = f.x * (f32)winW;
+    *py = f.y * (f32)winH;
+}
+
+f32 GetSwipeThreshold()
+{
+    i32 winW, winH;
+    GetWindowSize(&winW, &winH);
+    return (f32)winH * 0.05f;
+}
+
+bool IsBombZone(f32 px, f32 py)
+{
+    i32 winW, winH;
+    GetWindowSize(&winW, &winH);
+
+    f32 rx, ry, rw, rh, scale;
+    GetContainedRenderRect(&rx, &ry, &rw, &rh, &scale);
+
+    if (rx > 1.0f && (px < rx || px > (f32)winW - rx))
+    {
+        return true;
+    }
+
+    return px < (f32)winW * 0.15f && py > (f32)winH * 0.85f;
+}
+
+bool IsFinger(const FingerSlot &slot, SDL_FingerID id)
+{
+    return slot.active && slot.id == id;
+}
+
+void AssignFinger(FingerSlot *slot, SDL_FingerID id, f32 px, f32 py)
+{
+    slot->active = true;
+    slot->id = id;
+    slot->lastPxX = px;
+    slot->lastPxY = py;
+}
+
+void ReleaseFinger(FingerSlot *slot)
+{
+    slot->active = false;
+}
+
+void Touch::ResetRunUsage()
+{
+    g_UsedThisRun = false;
+}
+
+bool Touch::WasUsedThisRun()
+{
+    return g_UsedThisRun;
+}
+
+void Touch::FingerDown(const SDL_TouchFingerEvent &f)
+{
+    f32 px, py;
+    FingerToWindowPx(f, &px, &py);
+
+    if (!IsGameplayTouchMode())
+    {
+        if (!g_MenuGesture.active)
+        {
+            g_MenuGesture.active = true;
+            g_MenuGesture.primaryId = f.fingerId;
+            g_MenuGesture.startX = px;
+            g_MenuGesture.startY = py;
+            g_MenuGesture.currentX = px;
+            g_MenuGesture.currentY = py;
+            g_MenuGesture.maxFingers = 1;
+        }
+        else
+        {
+            g_MenuGesture.maxFingers++;
+        }
+    }
+    else
+    {
+        if (IsBombZone(px, py))
+        {
+            g_BombPending = true;
+            g_UsedThisRun = true;
+            return;
+        }
+
+        if (!g_MoveFinger.active)
+        {
+            AssignFinger(&g_MoveFinger, f.fingerId, px, py);
+            g_UsedThisRun = true;
+            return;
+        }
+
+        if (!g_FocusFinger.active && f.fingerId != g_MoveFinger.id)
+        {
+            AssignFinger(&g_FocusFinger, f.fingerId, px, py);
+            g_UsedThisRun = true;
+            return;
+        }
+    }
+}
+
+void Touch::FingerUp(const SDL_TouchFingerEvent &f)
+{
+    f32 px, py;
+    FingerToWindowPx(f, &px, &py);
+
+    if (!IsGameplayTouchMode())
+    {
+        if (g_MenuGesture.active && f.fingerId == g_MenuGesture.primaryId)
+        {
+            f32 dx = g_MenuGesture.currentX - g_MenuGesture.startX;
+            f32 dy = g_MenuGesture.currentY - g_MenuGesture.startY;
+
+            if (std::abs(dx) <= GetSwipeThreshold() && std::abs(dy) <= GetSwipeThreshold())
+            {
+                if (g_MenuGesture.maxFingers >= 2)
+                {
+                    g_MenuGesture.pendingButton = TH_BUTTON_RETURNMENU;
+                }
+                else
+                {
+                    g_MenuGesture.pendingButton = TH_BUTTON_SELECTMENU;
+                }
+            }
+
+            g_MenuGesture.active = false;
+        }
+    }
+    else
+    {
+        if (IsFinger(g_MoveFinger, f.fingerId))
+        {
+            ReleaseFinger(&g_MoveFinger);
+            g_AccumDx = 0.0f;
+            g_AccumDy = 0.0f;
+        }
+        if (IsFinger(g_FocusFinger, f.fingerId))
+        {
+            ReleaseFinger(&g_FocusFinger);
+        }
+    }
+}
+
+void Touch::FingerMotion(const SDL_TouchFingerEvent &f)
+{
+    f32 px, py;
+    FingerToWindowPx(f, &px, &py);
+
+    if (!IsGameplayTouchMode())
+    {
+        if (g_MenuGesture.active && f.fingerId == g_MenuGesture.primaryId)
+        {
+            g_MenuGesture.currentX = px;
+            g_MenuGesture.currentY = py;
+        }
+    }
+    else
+    {
+        if (IsFinger(g_MoveFinger, f.fingerId))
+        {
+            f32 rx, ry, rw, rh, scale;
+            GetContainedRenderRect(&rx, &ry, &rw, &rh, &scale);
+
+            f32 dxPx = px - g_MoveFinger.lastPxX;
+            f32 dyPx = py - g_MoveFinger.lastPxY;
+
+            if (scale > 0.0f)
+            {
+                g_AccumDx += dxPx / scale;
+                g_AccumDy += dyPx / scale;
+            }
+            g_MoveFinger.lastPxX = px;
+            g_MoveFinger.lastPxY = py;
+        }
+
+        if (IsFinger(g_FocusFinger, f.fingerId))
+        {
+            g_FocusFinger.lastPxX = px;
+            g_FocusFinger.lastPxY = py;
+        }
+    }
+}
+
+u16 Touch::GetButtonBits()
+{
+    u16 buttons = 0;
+
+    if (!IsGameplayTouchMode())
+    {
+        if (g_MenuGesture.pendingButton != 0)
+        {
+            buttons |= g_MenuGesture.pendingButton;
+            g_MenuGesture.pendingButton = 0;
+        }
+
+        if (g_MenuGesture.active)
+        {
+            f32 dx = g_MenuGesture.currentX - g_MenuGesture.startX;
+            f32 dy = g_MenuGesture.currentY - g_MenuGesture.startY;
+            f32 threshold = GetSwipeThreshold();
+
+            if (std::abs(dx) > threshold || std::abs(dy) > threshold)
+            {
+                if (std::abs(dx) > std::abs(dy))
+                {
+                    buttons |= (dx > 0) ? TH_BUTTON_RIGHT : TH_BUTTON_LEFT;
+                }
+                else
+                {
+                    buttons |= (dy > 0) ? TH_BUTTON_DOWN : TH_BUTTON_UP;
+                }
+            }
+        }
+    }
+
+    if (g_MoveFinger.active)
+    {
+        buttons |= TH_BUTTON_SHOOT;
+    }
+
+    if (g_FocusFinger.active)
+    {
+        buttons |= TH_BUTTON_FOCUS;
+    }
+
+    if (g_BombPending)
+    {
+        buttons |= TH_BUTTON_BOMB;
+        g_BombPending = false;
+    }
+
+    return buttons;
+}
+
+bool Touch::IsFocus()
+{
+    return g_FocusFinger.active;
+}
+
+bool Touch::GetPlayerDelta(f32 *dx, f32 *dy)
+{
+    if (!g_MoveFinger.active)
+    {
+        *dx = 0.0f;
+        *dy = 0.0f;
+        return false;
+    }
+
+    *dx = g_AccumDx;
+    *dy = g_AccumDy;
+
+    return true;
+}
+
+void Touch::SetPlayerDelta(f32 dx, f32 dy)
+{
+    g_AccumDx = dx;
+    g_AccumDy = dy;
+}
+
+void Touch::ConsumePlayerDelta(f32 dx, f32 dy)
+{
+    g_AccumDx -= dx;
+    g_AccumDy -= dy;
+}

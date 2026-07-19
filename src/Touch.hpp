@@ -1,0 +1,22 @@
+#pragma once
+
+#include "inttypes.hpp"
+#include <SDL2/SDL.h>
+
+namespace Touch
+{
+void FingerDown(const SDL_TouchFingerEvent &f);
+void FingerUp(const SDL_TouchFingerEvent &f);
+void FingerMotion(const SDL_TouchFingerEvent &f);
+
+u16 GetButtonBits();
+
+bool IsFocus();
+
+bool GetPlayerDelta(f32 *dx, f32 *dy);
+void SetPlayerDelta(f32 dx, f32 dy);
+void ConsumePlayerDelta(f32 dx, f32 dy);
+
+bool WasUsedThisRun();
+void ResetRunUsage();
+} // namespace Touch

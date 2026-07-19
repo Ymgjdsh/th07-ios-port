@@ -394,6 +394,9 @@ ZunResult Supervisor::LoadGameData()
 
 i32 Supervisor::CheckVSync()
 {
+#ifdef __EMSCRIPTEN__
+    return 0;
+#endif
     f32 fpsSum;
     i32 j;
     f32 fps;

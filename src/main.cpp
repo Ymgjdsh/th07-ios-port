@@ -12,6 +12,7 @@
 #include "ResultScreen.hpp"
 #include "SoundPlayer.hpp"
 #include "Supervisor.hpp"
+#include "Touch.hpp"
 #include "ZunResult.hpp"
 #include "dxutil.hpp"
 
@@ -82,6 +83,15 @@ void main_loop()
                     g_Supervisor.controller = nullptr;
                 }
             }
+            break;
+        case SDL_FINGERDOWN:
+            Touch::FingerDown(e.tfinger);
+            break;
+        case SDL_FINGERUP:
+            Touch::FingerUp(e.tfinger);
+            break;
+        case SDL_FINGERMOTION:
+            Touch::FingerMotion(e.tfinger);
             break;
         case SDL_QUIT:
             g_GameWindow.isAppClosing = true;

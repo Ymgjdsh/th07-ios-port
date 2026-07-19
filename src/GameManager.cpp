@@ -15,6 +15,7 @@
 #include "SoundPlayer.hpp"
 #include "Stage.hpp"
 #include "Supervisor.hpp"
+#include "Touch.hpp"
 #include "ZunResult.hpp"
 #include "dxutil.hpp"
 #include "graphics/ZunGraphics.hpp"
@@ -476,6 +477,8 @@ ZunResult GameManager::AddedCallback(GameManager *arg)
     u16 oldSeed;
     i32 shotTypeAndChar;
     u32 size;
+
+    Touch::ResetRunUsage();
 
     g_Supervisor.checkTiming = 0;
     arg->difficultyMask = 1 << arg->difficulty;
