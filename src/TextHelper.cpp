@@ -1,7 +1,7 @@
 #include "TextHelper.hpp"
 
-#include <SDL2/SDL_surface.h>
-#include <SDL2/SDL_ttf.h>
+#include <SDL3/SDL_surface.h>
+#include <SDL3_ttf/SDL_ttf.h>
 
 #include "GameErrorContext.hpp"
 #include "Supervisor.hpp"
@@ -68,7 +68,7 @@ bool TextHelper::ReleaseBuffer()
 {
     if (this->buffer)
     {
-        SDL_FreeSurface(this->buffer);
+        SDL_DestroySurface(this->buffer);
         this->buffer = NULL;
         this->width = 0;
         this->height = 0;
@@ -80,12 +80,12 @@ bool TextHelper::ReleaseBuffer()
 bool TextHelper::AllocateBuffer(i32 width, i32 height)
 {
     ReleaseBuffer();
-    this->buffer = SDL_CreateRGBSurfaceWithFormat(0, width, height, 32, SDL_PIXELFORMAT_RGBA32);
+    this->buffer = SDL_CreateSurface(width, height, SDL_PIXELFORMAT_RGBA32);
     if (!this->buffer)
     {
         return false;
     }
-    SDL_FillRect(this->buffer, NULL, 0);
+    SDL_FillSurfaceRect(this->buffer, NULL, 0);
     this->width = width;
     this->height = height;
     return true;
@@ -166,13 +166,12 @@ bool TextHelper::InvertAlpha(i32 x, i32 y, i32 spriteWidth, i32 fontHeight, i32 
 bool TextHelper::CopyTextToTexture(i32 yPos, i32 spriteWidth, i32 spriteHeight, i32 fontHeight,
                                    i32 fontWidth, GfxTextureHandle outTexture)
 {
-    SDL_Surface *outSurface =
-        SDL_CreateRGBSurfaceWithFormat(0, spriteWidth, spriteHeight, 32, SDL_PIXELFORMAT_RGBA32);
+    SDL_Surface *outSurface = SDL_CreateSurface(spriteWidth, spriteHeight, SDL_PIXELFORMAT_RGBA32);
     if (!outSurface)
     {
         return false;
     }
-    SDL_FillRect(outSurface, NULL, 0);
+    SDL_FillSurfaceRect(outSurface, NULL, 0);
 
     SDL_Rect srcRect;
     srcRect.x = 0;
@@ -194,27 +193,27 @@ bool TextHelper::CopyTextToTexture(i32 yPos, i32 spriteWidth, i32 spriteHeight, 
     dstRect.w = spriteWidth;
     dstRect.h = fontWidth;
 
-    SDL_SoftStretchLinear(this->buffer, &srcRect, outSurface, &dstRect);
+    SDL_StretchSurface(this->buffer, &srcRect, outSurface, &dstRect, SDL_SCALEMODE_LINEAR);
 
     g_Supervisor.gfxDevice->BindTexture(outTexture);
     g_Supervisor.gfxDevice->SetTextureSubImage(0, yPos, outSurface->w, fontWidth,
                                                outSurface->pixels);
-    SDL_FreeSurface(outSurface);
+    SDL_DestroySurface(outSurface);
     return true;
 }
 
 ZunResult TextHelper::CreateTextBuffer()
 {
-    if (TTF_Init() < 0)
+    if (!TTF_Init())
     {
-        g_GameErrorContext.Log("TTF_Init fail : %s\n", TTF_GetError());
+        g_GameErrorContext.Log("TTF_Init fail : %s\n", SDL_GetError());
         return ZUN_ERROR;
     }
 
     g_Font = TTF_OpenFont("msgothic.ttc", 10);
     if (!g_Font)
     {
-        g_GameErrorContext.Log("TTF_OpenFont fail : %s\n", TTF_GetError());
+        g_GameErrorContext.Log("TTF_OpenFont fail : %s\n", SDL_GetError());
         return ZUN_ERROR;
     }
     TTF_SetFontStyle(g_Font, TTF_STYLE_BOLD);
@@ -243,7 +242,7 @@ void TextHelper::RenderTextToTextureBold(i32 xPos, i32 yPos, i32 spriteWidth, i3
         g_Font = TTF_OpenFont("msgothic.ttc", 10);
         if (!g_Font)
         {
-            g_GameErrorContext.Fatal("TTF_OpenFont fail : %s\n", TTF_GetError());
+            g_GameErrorContext.Fatal("TTF_OpenFont fail : %s\n", SDL_GetError());
             return;
         }
         TTF_SetFontStyle(g_Font, TTF_STYLE_BOLD);
@@ -264,7 +263,7 @@ void TextHelper::RenderTextToTextureBold(i32 xPos, i32 yPos, i32 spriteWidth, i3
     }
 
     SDL_Color white = {255, 255, 255, 255};
-    SDL_Surface *textSurf = TTF_RenderUTF8_Blended(g_Font, convStr, white);
+    SDL_Surface *textSurf = TTF_RenderText_Blended(g_Font, convStr, 0, white);
     if (needsFree)
     {
         SDL_free(convStr);
@@ -286,7 +285,7 @@ void TextHelper::RenderTextToTextureBold(i32 xPos, i32 yPos, i32 spriteWidth, i3
     }
     if (dWidth <= 0 || dHeight <= 0)
     {
-        SDL_FreeSurface(textSurf);
+        SDL_DestroySurface(textSurf);
         return;
     }
 
@@ -325,7 +324,7 @@ void TextHelper::RenderTextToTextureBold(i32 xPos, i32 yPos, i32 spriteWidth, i3
     dstRect = {xPos * 2 + 2, 2, textSurf->w, textSurf->h};
     SDL_BlitSurface(textSurf, NULL, textHelper.buffer, &dstRect);
 
-    SDL_FreeSurface(textSurf);
+    SDL_DestroySurface(textSurf);
 
     textHelper.InvertAlpha(0, 0, spriteWidth << 1, fontHeight * 2 + 6,
                            (u32)(outlineType == 0xffffffff));

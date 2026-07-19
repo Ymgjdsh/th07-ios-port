@@ -92,7 +92,7 @@ struct ThBgmDataSource
     ThBgmFormat *pFmt;
     bool isMemory;
 
-    SDL_RWops *file;
+    SDL_IOStream *file;
     const u8 *pData;
     u32 dataSize;
     u32 currentOffset;

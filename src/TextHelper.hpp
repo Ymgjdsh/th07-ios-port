@@ -1,7 +1,7 @@
 #pragma once
 
-#include <SDL2/SDL_pixels.h>
-#include <SDL2/SDL_surface.h>
+#include <SDL3/SDL_pixels.h>
+#include <SDL3/SDL_surface.h>
 
 #include "ZunResult.hpp"
 #include "graphics/ZunGraphics.hpp"

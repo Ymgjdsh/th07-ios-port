@@ -10,9 +10,9 @@ u32 g_LastFileSize;
 
 u8 *FileSystem::OpenFile(const char *filepath, i32 isExternalResource)
 {
-    SDL_RWops *file;
+    SDL_IOStream *file;
     u8 *buf;
-    u32 fsize;
+    i64 fsize;
     const char *filename;
 
     if (!isExternalResource)
@@ -57,41 +57,41 @@ u8 *FileSystem::OpenFile(const char *filepath, i32 isExternalResource)
         }
     }
     Supervisor::DebugPrint("%s Load ... \n", filepath);
-    file = SDL_RWFromFile(filepath, "rb");
+    file = SDL_IOFromFile(filepath, "rb");
     if (!file)
     {
         Supervisor::DebugPrint("error : %s is not found.\n", filepath);
         return NULL;
     }
 
-    SDL_RWseek(file, 0, RW_SEEK_END);
-    fsize = SDL_RWtell(file);
+    SDL_SeekIO(file, 0, SDL_IO_SEEK_END);
+    fsize = SDL_TellIO(file);
     buf = (u8 *)malloc(fsize);
     if (!buf)
     {
-        SDL_RWclose(file);
+        SDL_CloseIO(file);
         return NULL;
     }
 
-    SDL_RWseek(file, 0, RW_SEEK_SET);
-    if (SDL_RWread(file, buf, 1, fsize) != fsize)
+    SDL_SeekIO(file, 0, SDL_IO_SEEK_SET);
+    if (SDL_ReadIO(file, buf, fsize) != fsize)
     {
-        SDL_RWclose(file);
+        SDL_CloseIO(file);
         return NULL;
     }
     g_LastFileSize = fsize;
-    SDL_RWclose(file);
+    SDL_CloseIO(file);
     return buf;
 }
 
 i32 FileSystem::CheckFileExists(const char *file)
 {
-    SDL_RWops *fp;
+    SDL_IOStream *fp;
 
-    fp = SDL_RWFromFile(file, "rb");
+    fp = SDL_IOFromFile(file, "rb");
     if (fp)
     {
-        SDL_RWclose(fp);
+        SDL_CloseIO(fp);
         return true;
     }
     return false;
@@ -99,24 +99,24 @@ i32 FileSystem::CheckFileExists(const char *file)
 
 i32 FileSystem::WriteDataToFile(const char *filename, const void *out, u32 bytesToWrite)
 {
-    SDL_RWops *file;
+    SDL_IOStream *file;
     u32 bytesWritten;
 
-    file = SDL_RWFromFile(filename, "wb");
+    file = SDL_IOFromFile(filename, "wb");
     if (!file)
     {
         Supervisor::DebugPrint("error : %s write error\n", filename);
         return -1;
     }
 
-    bytesWritten = SDL_RWwrite(file, out, 1, bytesToWrite);
+    bytesWritten = SDL_WriteIO(file, out, bytesToWrite);
     if (bytesToWrite != bytesWritten)
     {
-        SDL_RWclose(file);
+        SDL_CloseIO(file);
         Supervisor::DebugPrint("error : %s write error\n", filename);
         return -2;
     }
-    SDL_RWclose(file);
+    SDL_CloseIO(file);
     Supervisor::DebugPrint("%s write ...\n", filename);
     return 0;
 }

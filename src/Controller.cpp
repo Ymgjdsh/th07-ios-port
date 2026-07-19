@@ -1,8 +1,8 @@
 #include "Controller.hpp"
 
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_events.h>
-#include <SDL2/SDL_keyboard.h>
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_events.h>
+#include <SDL3/SDL_keyboard.h>
 
 #include "Supervisor.hpp"
 #include "Touch.hpp"
@@ -14,18 +14,13 @@ static u16 g_AutoFocusTimer;
 #define KEY_PRESSED(scancode, thButton) (keys[scancode] ? thButton : 0)
 #define JOYSTICK_MIDPOINT(min, max) ((min + max) / 2)
 
-static const SDL_GameControllerButton g_DIToSDLButton[] = {
-    SDL_CONTROLLER_BUTTON_A,
-    SDL_CONTROLLER_BUTTON_B,
-    SDL_CONTROLLER_BUTTON_X,
-    SDL_CONTROLLER_BUTTON_Y,
-    SDL_CONTROLLER_BUTTON_LEFTSHOULDER,
-    SDL_CONTROLLER_BUTTON_RIGHTSHOULDER,
-    SDL_CONTROLLER_BUTTON_BACK,
-    SDL_CONTROLLER_BUTTON_START,
-    SDL_CONTROLLER_BUTTON_LEFTSTICK,
-    SDL_CONTROLLER_BUTTON_RIGHTSTICK,
-    SDL_CONTROLLER_BUTTON_GUIDE,
+static const SDL_GamepadButton g_DIToSDLButton[] = {
+    SDL_GAMEPAD_BUTTON_SOUTH,         SDL_GAMEPAD_BUTTON_EAST,
+    SDL_GAMEPAD_BUTTON_WEST,          SDL_GAMEPAD_BUTTON_NORTH,
+    SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,
+    SDL_GAMEPAD_BUTTON_BACK,          SDL_GAMEPAD_BUTTON_START,
+    SDL_GAMEPAD_BUTTON_LEFT_STICK,    SDL_GAMEPAD_BUTTON_RIGHT_STICK,
+    SDL_GAMEPAD_BUTTON_GUIDE,
 };
 
 u32 Controller::SetButton(u16 *outButtons, i32 controllerButton, u32 thButton)
@@ -35,7 +30,7 @@ u32 Controller::SetButton(u16 *outButtons, i32 controllerButton, u32 thButton)
         return 0;
     }
 
-    if (SDL_GameControllerGetButton(g_Supervisor.controller, g_DIToSDLButton[controllerButton]))
+    if (SDL_GetGamepadButton(g_Supervisor.controller, g_DIToSDLButton[controllerButton]))
     {
         *outButtons |= thButton;
         return thButton;
@@ -89,10 +84,8 @@ u16 Controller::GetControllerInput(u16 buttons)
 
     SetButton(&buttons, 7, TH_BUTTON_D);
 
-    Sint16 x =
-        SDL_GameControllerGetAxis(g_Supervisor.controller, SDL_CONTROLLER_AXIS_LEFTX) / 32.767f;
-    Sint16 y =
-        SDL_GameControllerGetAxis(g_Supervisor.controller, SDL_CONTROLLER_AXIS_LEFTY) / 32.767f;
+    Sint16 x = SDL_GetGamepadAxis(g_Supervisor.controller, SDL_GAMEPAD_AXIS_LEFTX) / 32.767f;
+    Sint16 y = SDL_GetGamepadAxis(g_Supervisor.controller, SDL_GAMEPAD_AXIS_LEFTY) / 32.767f;
 
     if (x > g_Supervisor.cfg.padAxisX)
     {
@@ -115,19 +108,19 @@ u16 Controller::GetControllerInput(u16 buttons)
     }
 
     // technically the original game never had dpad support but ehhhh
-    if (SDL_GameControllerGetButton(g_Supervisor.controller, SDL_CONTROLLER_BUTTON_DPAD_RIGHT))
+    if (SDL_GetGamepadButton(g_Supervisor.controller, SDL_GAMEPAD_BUTTON_DPAD_RIGHT))
     {
         buttons |= TH_BUTTON_RIGHT;
     }
-    if (SDL_GameControllerGetButton(g_Supervisor.controller, SDL_CONTROLLER_BUTTON_DPAD_LEFT))
+    if (SDL_GetGamepadButton(g_Supervisor.controller, SDL_GAMEPAD_BUTTON_DPAD_LEFT))
     {
         buttons |= TH_BUTTON_LEFT;
     }
-    if (SDL_GameControllerGetButton(g_Supervisor.controller, SDL_CONTROLLER_BUTTON_DPAD_DOWN))
+    if (SDL_GetGamepadButton(g_Supervisor.controller, SDL_GAMEPAD_BUTTON_DPAD_DOWN))
     {
         buttons |= TH_BUTTON_DOWN;
     }
-    if (SDL_GameControllerGetButton(g_Supervisor.controller, SDL_CONTROLLER_BUTTON_DPAD_UP))
+    if (SDL_GetGamepadButton(g_Supervisor.controller, SDL_GAMEPAD_BUTTON_DPAD_UP))
     {
         buttons |= TH_BUTTON_UP;
     }
@@ -148,7 +141,7 @@ u8 *Controller::GetControllerState()
 
     for (size_t i = 0; i < ARRAY_SIZE(g_DIToSDLButton); ++i)
     {
-        if (SDL_GameControllerGetButton(g_Supervisor.controller, g_DIToSDLButton[i]))
+        if (SDL_GetGamepadButton(g_Supervisor.controller, g_DIToSDLButton[i]))
         {
             g_ControllerData[i] = 0x80;
         }
@@ -161,7 +154,7 @@ u16 Controller::GetInput()
 {
     u16 buttons = 0;
 
-    const u8 *keys = SDL_GetKeyboardState(NULL);
+    const bool *keys = SDL_GetKeyboardState(NULL);
 
     buttons |= KEY_PRESSED(SDL_SCANCODE_UP, TH_BUTTON_UP);
     buttons |= KEY_PRESSED(SDL_SCANCODE_DOWN, TH_BUTTON_DOWN);

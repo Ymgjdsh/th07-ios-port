@@ -1,13 +1,13 @@
 #include "Pbg4File.hpp"
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
 #include "inttypes.hpp"
 
-const u32 g_SeekModes[3] = {0, 1, 2};
+const SDL_IOWhence g_SeekModes[3] = {SDL_IO_SEEK_SET, SDL_IO_SEEK_CUR, SDL_IO_SEEK_END};
 
 // would it really not have been simpler to just type the letter where its used
 // GLOBAL: TH07 0x0049ea70
@@ -63,7 +63,7 @@ bool Pbg4File::Open(const char *path, const char *mode)
     else
     {
         GetFullPath(local_114, path);
-        this->file = SDL_RWFromFile(local_114, this->access);
+        this->file = SDL_IOFromFile(local_114, this->access);
         if (!this->file)
         {
             return false;
@@ -71,7 +71,7 @@ bool Pbg4File::Open(const char *path, const char *mode)
 
         if (local_c != 0)
         {
-            SDL_RWseek(this->file, 0, RW_SEEK_END);
+            SDL_SeekIO(this->file, 0, SDL_IO_SEEK_END);
         }
         return true;
     }
@@ -81,7 +81,7 @@ void Pbg4File::Close()
 {
     if (this->file)
     {
-        SDL_RWclose(this->file);
+        SDL_CloseIO(this->file);
         this->file = NULL;
         this->access = 0;
     }
@@ -97,7 +97,7 @@ u32 Pbg4File::Read(void *data, u32 len)
         return 0;
     }
 
-    local_8 = SDL_RWread(this->file, data, 1, len);
+    local_8 = SDL_ReadIO(this->file, data, len);
     return local_8;
 }
 
@@ -111,7 +111,7 @@ bool Pbg4File::Write(void *data, u32 len)
         return false;
     }
 
-    local_8 = SDL_RWwrite(this->file, data, 1, len);
+    local_8 = SDL_WriteIO(this->file, data, len);
     return len == local_8;
 }
 
@@ -123,7 +123,7 @@ u32 Pbg4File::Tell()
     }
     else
     {
-        return SDL_RWtell(this->file);
+        return SDL_TellIO(this->file);
     }
 }
 
@@ -135,22 +135,22 @@ u32 Pbg4File::GetSize()
     }
     else
     {
-        long cur = SDL_RWtell(this->file);
-        SDL_RWseek(this->file, 0, RW_SEEK_END);
-        u32 size = SDL_RWtell(this->file);
-        SDL_RWseek(this->file, cur, RW_SEEK_SET);
+        i64 cur = SDL_TellIO(this->file);
+        SDL_SeekIO(this->file, 0, SDL_IO_SEEK_END);
+        u32 size = SDL_TellIO(this->file);
+        SDL_SeekIO(this->file, cur, SDL_IO_SEEK_SET);
         return size;
     }
 }
 
-bool Pbg4File::Seek(u32 offset, u32 seekFrom)
+bool Pbg4File::Seek(u32 offset, SDL_IOWhence seekFrom)
 {
     if (!this->file)
     {
         return false;
     }
 
-    SDL_RWseek(this->file, offset, seekFrom);
+    SDL_SeekIO(this->file, offset, seekFrom);
     return true;
 }
 
@@ -199,6 +199,11 @@ void *Pbg4File::ReadRemaining(u32 max)
 
 void Pbg4File::GetFullPath(char *out, const char *filename)
 {
+#ifdef __ANDROID__
+    snprintf(out, 260, "%s", filename);
+    return;
+#endif
+
 #ifdef _WIN32
     if (strchr(filename, ':') != nullptr)
     {
@@ -213,11 +218,10 @@ void Pbg4File::GetFullPath(char *out, const char *filename)
     }
 #endif
 
-    char *base = SDL_GetBasePath();
+    const char *base = SDL_GetBasePath();
     if (base)
     {
         snprintf(out, 260, "%s%s", base, filename);
-        SDL_free(base);
     }
     else
     {

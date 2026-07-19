@@ -1,6 +1,6 @@
 #include "Touch.hpp"
 
-#include <SDL_events.h>
+#include <SDL3/SDL_events.h>
 #include <cmath>
 
 #include "Controller.hpp"
@@ -143,7 +143,7 @@ void Touch::FingerDown(const SDL_TouchFingerEvent &f)
         if (!g_MenuGesture.active)
         {
             g_MenuGesture.active = true;
-            g_MenuGesture.primaryId = f.fingerId;
+            g_MenuGesture.primaryId = f.fingerID;
             g_MenuGesture.startX = px;
             g_MenuGesture.startY = py;
             g_MenuGesture.currentX = px;
@@ -166,14 +166,14 @@ void Touch::FingerDown(const SDL_TouchFingerEvent &f)
 
         if (!g_MoveFinger.active)
         {
-            AssignFinger(&g_MoveFinger, f.fingerId, px, py);
+            AssignFinger(&g_MoveFinger, f.fingerID, px, py);
             g_UsedThisRun = true;
             return;
         }
 
-        if (!g_FocusFinger.active && f.fingerId != g_MoveFinger.id)
+        if (!g_FocusFinger.active && f.fingerID != g_MoveFinger.id)
         {
-            AssignFinger(&g_FocusFinger, f.fingerId, px, py);
+            AssignFinger(&g_FocusFinger, f.fingerID, px, py);
             g_UsedThisRun = true;
             return;
         }
@@ -187,7 +187,7 @@ void Touch::FingerUp(const SDL_TouchFingerEvent &f)
 
     if (!IsGameplayTouchMode())
     {
-        if (g_MenuGesture.active && f.fingerId == g_MenuGesture.primaryId)
+        if (g_MenuGesture.active && f.fingerID == g_MenuGesture.primaryId)
         {
             f32 dx = g_MenuGesture.currentX - g_MenuGesture.startX;
             f32 dy = g_MenuGesture.currentY - g_MenuGesture.startY;
@@ -209,13 +209,13 @@ void Touch::FingerUp(const SDL_TouchFingerEvent &f)
     }
     else
     {
-        if (IsFinger(g_MoveFinger, f.fingerId))
+        if (IsFinger(g_MoveFinger, f.fingerID))
         {
             ReleaseFinger(&g_MoveFinger);
             g_AccumDx = 0.0f;
             g_AccumDy = 0.0f;
         }
-        if (IsFinger(g_FocusFinger, f.fingerId))
+        if (IsFinger(g_FocusFinger, f.fingerID))
         {
             ReleaseFinger(&g_FocusFinger);
         }
@@ -229,7 +229,7 @@ void Touch::FingerMotion(const SDL_TouchFingerEvent &f)
 
     if (!IsGameplayTouchMode())
     {
-        if (g_MenuGesture.active && f.fingerId == g_MenuGesture.primaryId)
+        if (g_MenuGesture.active && f.fingerID == g_MenuGesture.primaryId)
         {
             g_MenuGesture.currentX = px;
             g_MenuGesture.currentY = py;
@@ -237,7 +237,7 @@ void Touch::FingerMotion(const SDL_TouchFingerEvent &f)
     }
     else
     {
-        if (IsFinger(g_MoveFinger, f.fingerId))
+        if (IsFinger(g_MoveFinger, f.fingerID))
         {
             f32 rx, ry, rw, rh, scale;
             GetContainedRenderRect(&rx, &ry, &rw, &rh, &scale);
@@ -254,7 +254,7 @@ void Touch::FingerMotion(const SDL_TouchFingerEvent &f)
             g_MoveFinger.lastPxY = py;
         }
 
-        if (IsFinger(g_FocusFinger, f.fingerId))
+        if (IsFinger(g_FocusFinger, f.fingerID))
         {
             g_FocusFinger.lastPxX = px;
             g_FocusFinger.lastPxY = py;

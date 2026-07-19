@@ -1,8 +1,8 @@
 # th07
 
-A cross-platform port of 東方妖々夢　～ Perfect Cherry Blossom 1.00b by Team Shanghai Alice using SDL2 and OpenGL ES.
+A cross-platform port of 東方妖々夢　～ Perfect Cherry Blossom 1.00b by Team Shanghai Alice using SDL3 and OpenGL ES.
 
-This is the reallyportable branch of the Touhou 7 decompilation. This is where changes go that I thought were too big for the standard portable branch, like web support, possibly mobile support, etc. 
+This is the reallyportable branch of the Touhou 7 decompilation. This is where changes go that I thought were too big for the standard portable branch, like migrating to SDL3, web support, possibly mobile support, etc. 
 
 Currently compared to the portable branch, this supports web builds (using Emscripten) and touch screen controls.
 
@@ -19,20 +19,28 @@ Work is currently being done to transition the game over to being more platform-
 ### Dependencies
 
 * cmake
-* SDL2 (SDL2, SDL2_ttf, and SDL2_image)
+* SDL3 (SDL3, SDL3_ttf, and SDL3_image)
 * OpenGL ES 3.0+
 * A compiler that supports C++17
 * A little endian machine
 
+#### Desktop
+
 Run cmake on this repo, then build with whatever generator you chose.
 
 You will also need to add a copy of `msgothic.ttc` into your game directory if you are not running this on Windows or otherwise don't have the "ＭＳ ゴシック" font installed.
+
+#### Emscripten
+
+Clone the repo with submodules. Afterwards, create a directory named "assets" in the root of the repo, and move the files `th07.dat` and `thbgm.dat` from the original game, as well as a copy of `msgothic.ttc` for text rendering. Then in the build directory, run `emcmake` and build as usual.
 
 ## Controls
 
 Controls are identical to the original game for non-touch users.
 
 For touch users, there are two sets of touch controls. Those used on the menu and the one used during gameplay. On the menu, swipe in any direction in order to move the select cursor around, tap for select, and tap with two fingers for back. During gameplay, move the player around with your finger (the player moves relative to your finger). To focus, hold down another finger while moving your character around. To bomb, tap the black bars on the side of the screen or the bottom left corner of the screen.
+
+Note that you cannot save replays when using touch controls. It shows the "you cannot save a replay if you've used a continue," but this shows up regardless if you've used a continue or not if you've used touch controls at any point during gameplay.
 
 ## Todo
 

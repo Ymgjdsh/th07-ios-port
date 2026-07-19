@@ -1,7 +1,7 @@
 #pragma once
 
 #include <GLES3/gl3.h>
-#include <SDL_video.h>
+#include <SDL3/SDL_video.h>
 
 #include "AnmManager.hpp"
 #include "ZunGraphics.hpp"
@@ -71,6 +71,10 @@ class GlesGraphics : public ZunGraphics
     ZunColor textureFactor = {0xFFFFFFFF};
     ColorOp colorOpRgb = COLOR_OP_MODULATE;
     ColorOp colorOpAlpha = COLOR_OP_MODULATE;
+
+    GLuint fbo = 0;
+    GLuint fboColor = 0;
+    GLuint fboDepth = 0;
 
     ZunMatrix transforms[4];
     ZunViewport viewport;

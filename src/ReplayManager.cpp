@@ -558,7 +558,7 @@ void ReplayManager::SaveReplay(const char *filename, char *replayName)
     u8 *csumPtr;
     i32 csum;
     i32 replaySize;
-    SDL_RWops *file;
+    SDL_IOStream *file;
     ReplayFile replayCopy;
     u8 *replayData;
     i32 stageSize;
@@ -673,12 +673,12 @@ void ReplayManager::SaveReplay(const char *filename, char *replayName)
                     *curByte += obfOffset;
                     obfOffset += 7;
                 }
-                file = SDL_RWFromFile(filename, "wb");
+                file = SDL_IOFromFile(filename, "wb");
                 if (file)
                 {
-                    SDL_RWwrite(file, &replayCopy, sizeof(ReplayHeader), 1);
-                    SDL_RWwrite(file, lpBuffer, compressedSize, 1);
-                    SDL_RWclose(file);
+                    SDL_WriteIO(file, &replayCopy, sizeof(ReplayHeader));
+                    SDL_WriteIO(file, lpBuffer, compressedSize);
+                    SDL_CloseIO(file);
                     Supervisor::DebugPrint("info : Size %d -> %d\n", replaySize,
                                            compressedSize + sizeof(ReplayHeader));
                     free(lpBuffer);
@@ -702,7 +702,7 @@ void ReplayManager::SaveReplay2(const char *filename)
     u8 *csumPtr;
     u32 csum;
     i32 replaySize;
-    SDL_RWops *file;
+    SDL_IOStream *file;
     ReplayFile replayCopy;
     u8 *replayData;
     i32 stageSize;
@@ -798,12 +798,12 @@ void ReplayManager::SaveReplay2(const char *filename)
                 *curByte += obfOffset;
                 obfOffset += 7;
             }
-            file = SDL_RWFromFile(filename, "wb");
+            file = SDL_IOFromFile(filename, "wb");
             if (file)
             {
-                SDL_RWwrite(file, &replayCopy, sizeof(ReplayHeader), 1);
-                SDL_RWwrite(file, lpBuffer, compressedSize, 1);
-                SDL_RWclose(file);
+                SDL_WriteIO(file, &replayCopy, sizeof(ReplayHeader));
+                SDL_WriteIO(file, lpBuffer, compressedSize);
+                SDL_CloseIO(file);
                 Supervisor::DebugPrint("info : Size %d -> %d\n", replaySize,
                                        compressedSize + sizeof(ReplayHeader));
                 free(lpBuffer);

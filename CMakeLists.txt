@@ -54,17 +54,13 @@ add_executable(th07 ${SOURCES})
 target_include_directories(th07 PRIVATE src src/pbg4)
 
 if(EMSCRIPTEN)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIGURATION>")
+    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIGURATION>")
+
     target_compile_options(th07 PRIVATE
-        "--use-port=sdl2"
-        "--use-port=sdl2_image:formats=jpg"
-        "--use-port=sdl2_ttf"
         "-O2"
     )
     target_link_options(th07 PRIVATE
-        "--use-port=sdl2"
-        "--use-port=sdl2_image:formats=jpg"
-        "--use-port=sdl2_ttf"
-        "--use-preload-plugins"
         "--preload-file"
         "${CMAKE_SOURCE_DIR}/assets@/"
         "-sALLOW_MEMORY_GROWTH"
@@ -78,15 +74,36 @@ if(EMSCRIPTEN)
         "${CMAKE_SOURCE_DIR}/resources/shell.html"
     )
     set(CMAKE_EXECUTABLE_SUFFIX ".html")
-else()
-    find_package(SDL2 REQUIRED)
-    find_package(SDL2_ttf REQUIRED)
-    find_package(SDL2_image REQUIRED)
+endif()
 
-    target_link_libraries(th07 PRIVATE
-        SDL2::SDL2
-        SDL2_ttf::SDL2_ttf
-        SDL2_image::SDL2_image
-        OpenGL::GLES3
-    )
+if(EMSCRIPTEN)
+    # emscripten has no sdl3_image port, so it has to use a vendored sdl
+    set(USE_VENDORED_SDL ON)
+else()
+    find_package(SDL3 QUIET)
+    find_package(SDL3_ttf QUIET)
+    find_package(SDL3_image QUIET)
+
+    if(NOT SDL3_FOUND OR NOT SDL3_ttf_FOUND OR NOT SDL3_image_FOUND)
+        message(STATUS "system SDL3 libraries not found. using vendored sdl3")
+        set(USE_VENDORED_SDL ON)
+    else()
+        set(USE_VENDORED_SDL OFF)
+    endif()
+endif()
+
+if(USE_VENDORED_SDL)
+    add_subdirectory(vendored/SDL EXCLUDE_FROM_ALL)
+    add_subdirectory(vendored/SDL_image EXCLUDE_FROM_ALL)
+    add_subdirectory(vendored/SDL_ttf EXCLUDE_FROM_ALL)
+endif()
+
+target_link_libraries(th07 PRIVATE
+    SDL3::SDL3
+    SDL3_image::SDL3_image
+    SDL3_ttf::SDL3_ttf
+)
+
+if(NOT EMSCRIPTEN)
+    target_link_libraries(th07 PRIVATE OpenGL::GLES3)
 endif()

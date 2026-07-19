@@ -4,7 +4,7 @@
 #include "ZunMath.hpp"
 #include "graphics/ZunGraphics.hpp"
 #include "inttypes.hpp"
-#include <SDL2/SDL_gamecontroller.h>
+#include <SDL3/SDL_gamepad.h>
 #include <chrono>
 
 extern u16 g_CurFrameRawInput;
@@ -139,7 +139,7 @@ struct Supervisor
     }
 
     ZunGraphics *gfxDevice;
-    SDL_GameController *controller;
+    SDL_Gamepad *controller;
     ZunMatrix viewMatrix;
     ZunMatrix projectionMatrix;
     ZunViewport viewport;

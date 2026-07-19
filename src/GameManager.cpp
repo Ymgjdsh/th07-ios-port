@@ -483,7 +483,7 @@ ZunResult GameManager::AddedCallback(GameManager *arg)
     g_Supervisor.checkTiming = 0;
     arg->difficultyMask = 1 << arg->difficulty;
     arg->shotTypeAndCharacter = arg->character * 2 + arg->shotType;
-    g_Supervisor.currentTime = SDL_GetTicks64();
+    g_Supervisor.currentTime = SDL_GetTicks();
     g_Supervisor.effectiveFramerateMultiplier = 1.0f;
     if (g_Supervisor.curState != 3)
     {

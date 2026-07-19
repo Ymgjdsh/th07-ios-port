@@ -1,4 +1,4 @@
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #include <cstdio>
 
 // pull in gameerrorcontext::flush before anmmanager::releasesurfaces
@@ -45,52 +45,62 @@ void main_loop()
     {
         switch (e.type)
         {
-        case SDL_WINDOWEVENT:
-            switch (e.window.event)
+        case SDL_EVENT_WINDOW_FOCUS_GAINED:
+            g_GameWindow.isAppActive = 1;
+            g_GameWindow.isAppInactive = 0;
+            if (!g_Supervisor.cfg.windowed)
             {
-            case SDL_WINDOWEVENT_FOCUS_GAINED:
-                g_GameWindow.isAppActive = 1;
-                g_GameWindow.isAppInactive = 0;
-                if (!g_Supervisor.cfg.windowed)
-                {
-                    SDL_ShowCursor(SDL_DISABLE);
-                }
-                break;
-            case SDL_WINDOWEVENT_FOCUS_LOST:
-                g_GameWindow.isAppActive = 0;
-                g_GameWindow.isAppInactive = 1;
-                SDL_ShowCursor(SDL_ENABLE);
-                break;
+                SDL_HideCursor();
             }
             break;
-        case SDL_CONTROLLERDEVICEADDED:
+        case SDL_EVENT_WINDOW_FOCUS_LOST:
+            g_GameWindow.isAppActive = 0;
+            g_GameWindow.isAppInactive = 1;
+            SDL_ShowCursor();
+            break;
+        case SDL_EVENT_WILL_ENTER_BACKGROUND:
+        case SDL_EVENT_DID_ENTER_BACKGROUND:
+            if (g_GameManager.notInMenu && !g_GameManager.isInPauseMenu)
+            {
+                g_GameManager.isInPauseMenu = 1;
+                g_GameManager.isPaused = 1;
+                g_Supervisor.UpdateTime();
+            }
+            g_GameWindow.isAppActive = 0;
+            break;
+
+        case SDL_EVENT_WILL_ENTER_FOREGROUND:
+        case SDL_EVENT_DID_ENTER_FOREGROUND:
+            g_GameWindow.isAppActive = 1;
+            break;
+        case SDL_EVENT_GAMEPAD_ADDED:
             if (!g_Supervisor.controller)
             {
-                g_Supervisor.controller = SDL_GameControllerOpen(e.cdevice.which);
+                g_Supervisor.controller = SDL_OpenGamepad(e.gdevice.which);
             }
             break;
-        case SDL_CONTROLLERDEVICEREMOVED:
+        case SDL_EVENT_GAMEPAD_REMOVED:
             if (g_Supervisor.controller)
             {
-                SDL_Joystick *joy = SDL_GameControllerGetJoystick(g_Supervisor.controller);
+                SDL_Joystick *joy = SDL_GetGamepadJoystick(g_Supervisor.controller);
 
-                if (SDL_JoystickInstanceID(joy) == e.cdevice.which)
+                if (SDL_GetJoystickID(joy) == e.gdevice.which)
                 {
-                    SDL_GameControllerClose(g_Supervisor.controller);
+                    SDL_CloseGamepad(g_Supervisor.controller);
                     g_Supervisor.controller = nullptr;
                 }
             }
             break;
-        case SDL_FINGERDOWN:
+        case SDL_EVENT_FINGER_DOWN:
             Touch::FingerDown(e.tfinger);
             break;
-        case SDL_FINGERUP:
+        case SDL_EVENT_FINGER_UP:
             Touch::FingerUp(e.tfinger);
             break;
-        case SDL_FINGERMOTION:
+        case SDL_EVENT_FINGER_MOTION:
             Touch::FingerMotion(e.tfinger);
             break;
-        case SDL_QUIT:
+        case SDL_EVENT_QUIT:
             g_GameWindow.isAppClosing = true;
             break;
         }
@@ -132,7 +142,7 @@ bool stop()
         SDL_DestroyWindow(g_GameWindow.window);
         g_GameWindow.window = NULL;
     }
-    SDL_ShowCursor(SDL_ENABLE);
+    SDL_ShowCursor();
     if (renderRes == RENDER_RESULT_EXIT_ERROR)
     {
         g_GameErrorContext.m_BufferEnd = g_GameErrorContext.m_Buffer;
@@ -140,7 +150,8 @@ bool stop()
         g_GameErrorContext.Log("再起動を要するオプションが変更されたので再起動します\n");
         return false;
     }
-    FileSystem::WriteDataToFile(FileSystem::GetPrefPath("th07.cfg").c_str(), &g_Supervisor.cfg, sizeof(GameConfiguration));
+    FileSystem::WriteDataToFile(FileSystem::GetPrefPath("th07.cfg").c_str(), &g_Supervisor.cfg,
+                                sizeof(GameConfiguration));
     g_GameErrorContext.Flush();
     return true;
 }
@@ -183,7 +194,7 @@ start:
     g_AnmManager = new AnmManager();
     if (!g_Supervisor.cfg.windowed)
     {
-        SDL_ShowCursor(SDL_DISABLE);
+        SDL_HideCursor();
     }
     renderRes = g_Supervisor.RegisterChain();
     if (renderRes != ZUN_SUCCESS)

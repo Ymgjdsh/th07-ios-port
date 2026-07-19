@@ -1,7 +1,7 @@
 #pragma once
 
 #include "inttypes.hpp"
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 
 namespace Touch
 {

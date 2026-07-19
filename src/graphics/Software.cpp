@@ -1,7 +1,7 @@
 #include "Software.hpp"
 
-#include <SDL2/SDL_error.h>
-#include <SDL2/SDL_render.h>
+#include <SDL3/SDL_error.h>
+#include <SDL3/SDL_render.h>
 #include <algorithm>
 #include <cmath>
 
@@ -12,14 +12,15 @@ ZunGraphics *SoftwareGraphics::Init()
 {
     SoftwareGraphics *gfx = new SoftwareGraphics;
 
-    gfx->renderer = SDL_CreateRenderer(g_GameWindow.window, -1,
-                                       SDL_RENDERER_SOFTWARE | SDL_RENDERER_PRESENTVSYNC);
+    gfx->renderer = SDL_CreateRenderer(g_GameWindow.window, NULL);
     if (!gfx->renderer)
     {
         delete gfx;
         Supervisor::DebugPrint("sdl renderer create failed: %s\n", SDL_GetError());
         return nullptr;
     }
+
+    SDL_SetRenderLogicalPresentation(gfx->renderer, 640, 480, SDL_LOGICAL_PRESENTATION_LETTERBOX);
 
     gfx->screenTexture = SDL_CreateTexture(gfx->renderer, SDL_PIXELFORMAT_ARGB8888,
                                            SDL_TEXTUREACCESS_STREAMING, 640, 480);
@@ -728,7 +729,7 @@ void SoftwareGraphics::SwapBuffers()
 {
     SDL_UpdateTexture(screenTexture, NULL, colorBuffer.data(), 640 * 4);
     SDL_RenderClear(renderer);
-    SDL_RenderCopy(renderer, screenTexture, NULL, NULL);
+    SDL_RenderTexture(renderer, screenTexture, NULL, NULL);
     SDL_RenderPresent(renderer);
 }
 

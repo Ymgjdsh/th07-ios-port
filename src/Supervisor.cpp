@@ -1,8 +1,8 @@
 #include "Supervisor.hpp"
 
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_gamecontroller.h>
-#include <SDL2/SDL_timer.h>
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_gamepad.h>
+#include <SDL3/SDL_timer.h>
 #include <chrono>
 #include <cstdio>
 
@@ -358,9 +358,15 @@ ZunResult Supervisor::SetupInput()
         return ZUN_ERROR;
     }
 
-    if (SDL_Init(SDL_INIT_GAMECONTROLLER) == 0)
+    if (SDL_Init(SDL_INIT_GAMEPAD))
     {
-        g_Supervisor.controller = SDL_GameControllerOpen(0);
+        i32 numGamepads;
+        SDL_JoystickID *gamepads = SDL_GetGamepads(&numGamepads);
+        if (gamepads && numGamepads > 0)
+        {
+            g_Supervisor.controller = SDL_OpenGamepad(gamepads[0]);
+            SDL_free(gamepads);
+        }
         if (g_Supervisor.controller)
         {
             g_GameErrorContext.Log("有効なパッドを発見しました\n");
@@ -413,14 +419,14 @@ i32 Supervisor::CheckVSync()
     fpsCount = 0;
     timeStart = 0;
 
-    timeStart = SDL_GetTicks64();
+    timeStart = SDL_GetTicks();
 
     while (i < 1800 && fpsCount < 8)
     {
         g_AnmManager->CopySurfaceToBackBuffer(0, 0, 0, 0, 0);
         g_Supervisor.gfxDevice->SwapBuffers();
         i++;
-        timeEnd = SDL_GetTicks64();
+        timeEnd = SDL_GetTicks();
         frameCount++;
         timeDiff = timeEnd - timeStart;
 
@@ -518,7 +524,7 @@ ZunResult Supervisor::AddedCallback(Supervisor *arg)
     g_AnmManager->ReleaseSurface(0);
     arg->isInEnding = 0;
     arg->renderSkipFrames = 0;
-    arg->lastTotalPlayTimeUpdate = SDL_GetTicks64();
+    arg->lastTotalPlayTimeUpdate = SDL_GetTicks();
     g_Rng.SetSeed(arg->lastTotalPlayTimeUpdate);
     arg->SetupInput();
     if (!arg->midiOutput)
@@ -603,7 +609,7 @@ ZunResult Supervisor::DeletedCallback(Supervisor *arg)
     TextHelper::ReleaseTextBuffer();
     if (arg->controller)
     {
-        SDL_GameControllerClose(arg->controller);
+        SDL_CloseGamepad(arg->controller);
     }
     SAFE_DELETE(g_GameManager.globals);
     SAFE_DELETE(g_GameManager.defaultCfg);
@@ -657,9 +663,9 @@ void Supervisor::DrawFpsCounter(i32 param_1)
 
         if (g_Supervisor.perfFrequency == 0)
         {
-            static u64 g_LastTime = SDL_GetTicks64();
+            static u64 g_LastTime = SDL_GetTicks();
 
-            curTime = SDL_GetTicks64();
+            curTime = SDL_GetTicks();
             if (curTime < g_LastTime)
             {
                 g_LastTime = curTime;
@@ -849,11 +855,10 @@ i32 Supervisor::SnapshotScreen(const char *param_1)
     u8 *pixels = new u8[640 * 480 * 4];
     this->gfxDevice->ReadPixels(0, 0, 640, 480, pixels);
 
-    SDL_Surface *surf =
-        SDL_CreateRGBSurfaceWithFormatFrom(pixels, 640, 480, 32, 640 * 4, SDL_PIXELFORMAT_RGBA32);
+    SDL_Surface *surf = SDL_CreateSurfaceFrom(640, 480, SDL_PIXELFORMAT_RGBA32, pixels, 640 * 4);
 
     SDL_SaveBMP(surf, param_1);
-    SDL_FreeSurface(surf);
+    SDL_DestroySurface(surf);
     delete[] pixels;
     return 0;
 }
@@ -861,9 +866,9 @@ i32 Supervisor::SnapshotScreen(const char *param_1)
 ZunResult Supervisor::LoadConfig(const char *configFilename)
 {
     i32 bgmData[4];
-    SDL_RWops *bgm;
+    SDL_IOStream *bgm;
     i32 bgm2Data[4];
-    SDL_RWops *bgm2;
+    SDL_IOStream *bgm2;
     u32 *configFile;
 
     memset(&g_Supervisor.cfg, 0, sizeof(GameConfiguration));
@@ -878,11 +883,11 @@ ZunResult Supervisor::LoadConfig(const char *configFilename)
         g_Supervisor.cfg.version = 0x70002;
         g_Supervisor.cfg.padAxisX = 600;
         g_Supervisor.cfg.padAxisY = 600;
-        bgm2 = SDL_RWFromFile("./thbgm.dat", "rb");
+        bgm2 = SDL_IOFromFile("./thbgm.dat", "rb");
         if (bgm2)
         {
-            SDL_RWread(bgm2, bgm2Data, 16, 1);
-            SDL_RWclose(bgm2);
+            SDL_ReadIO(bgm2, bgm2Data, 16);
+            SDL_CloseIO(bgm2);
             if (bgm2Data[0] != 0x5641575a || bgm2Data[1] != 1 || bgm2Data[2] != 0x700)
             {
                 g_GameErrorContext.Fatal("BGM データのバージョンが違います\n");
@@ -909,11 +914,11 @@ ZunResult Supervisor::LoadConfig(const char *configFilename)
         g_Supervisor.cfg = *(GameConfiguration *)configFile;
         free(configFile);
 
-        bgm = SDL_RWFromFile("./thbgm.dat", "rb");
+        bgm = SDL_IOFromFile("./thbgm.dat", "rb");
         if (bgm)
         {
-            SDL_RWread(bgm, bgmData, 16, 1);
-            SDL_RWclose(bgm);
+            SDL_ReadIO(bgm, bgmData, 16);
+            SDL_CloseIO(bgm);
             if (bgmData[0] != 0x5641575a || bgmData[1] != 1 || bgmData[2] != 0x700)
             {
                 g_GameErrorContext.Fatal("BGM データのバージョンが違います\n");
@@ -1200,7 +1205,7 @@ void Supervisor::UpdateStartupTime()
     u32 timeSinceStartup;
     u64 time;
 
-    time = SDL_GetTicks64();
+    time = SDL_GetTicks();
     if (time < this->lastTotalPlayTimeUpdate)
     {
         this->lastTotalPlayTimeUpdate = 0;
@@ -1236,7 +1241,7 @@ void Supervisor::UpdateTime()
     u32 timeSinceLastTime;
     u64 time;
 
-    time = SDL_GetTicks64();
+    time = SDL_GetTicks();
     if (time < this->currentTime)
     {
         this->currentTime = 0;

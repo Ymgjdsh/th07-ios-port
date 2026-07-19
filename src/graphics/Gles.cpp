@@ -1,9 +1,10 @@
 #include "Gles.hpp"
 
 #include <GLES3/gl3.h>
-#include <SDL_error.h>
-#include <SDL_timer.h>
-#include <SDL_video.h>
+#include <SDL3/SDL_error.h>
+#include <SDL3/SDL_timer.h>
+#include <SDL3/SDL_video.h>
+#include <cstddef>
 
 #include "AnmManager.hpp"
 #include "GameWindow.hpp"
@@ -124,7 +125,25 @@ ZunGraphics *GlesGraphics::Init()
 
     SDL_GL_MakeCurrent(g_GameWindow.window, ctx);
 
-    if (SDL_GL_SetSwapInterval(1) < 0)
+    glGenFramebuffers(1, &gfx->fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, gfx->fbo);
+
+    glGenTextures(1, &gfx->fboColor);
+    glBindTexture(GL_TEXTURE_2D, gfx->fboColor);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 640, 480, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, gfx->fboColor, 0);
+
+    glGenRenderbuffers(1, &gfx->fboDepth);
+    glBindRenderbuffer(GL_RENDERBUFFER, gfx->fboDepth);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, 640, 480);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER,
+                              gfx->fboDepth);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, gfx->fbo);
+
+    if (!SDL_GL_SetSwapInterval(1))
     {
         // technically this isnt fatal we just go into 60 fps later on in gamewindow::render
         Supervisor::DebugPrint("SDL_GL_SetSwapInterval failed: %s\n", SDL_GetError());
@@ -220,7 +239,7 @@ ZunGraphics *GlesGraphics::Init()
 
 void GlesGraphics::Exit()
 {
-    SDL_GL_DeleteContext(this->ctx);
+    SDL_GL_DestroyContext(this->ctx);
 }
 
 void GlesGraphics::SetFogRange(f32 nearPlane, f32 farPlane)
@@ -574,5 +593,47 @@ void GlesGraphics::DrawPrimitiveUP(PrimitiveType type, i32 primitiveCount, const
 
 void GlesGraphics::SwapBuffers()
 {
+    i32 drawableWidth, drawableHeight;
+    SDL_GetWindowSizeInPixels(g_GameWindow.window, &drawableWidth, &drawableHeight);
+
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, this->fbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+
+    GLfloat clearColor[4];
+    glGetFloatv(GL_COLOR_CLEAR_VALUE, clearColor);
+
+    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    // the original game didnt pillarbox but that looks really ugly so im pillarboxing anyways
+    f32 targetAspect = 640.0f / 480.0f;
+    f32 windowAspect = (f32)drawableWidth / (f32)drawableHeight;
+
+    i32 dstWidth;
+    i32 dstHeight;
+    i32 dstX;
+    i32 dstY;
+
+    if (windowAspect > targetAspect)
+    {
+        dstHeight = drawableHeight;
+        dstWidth = (i32)(dstHeight * targetAspect);
+        dstX = (drawableWidth - dstWidth) / 2;
+        dstY = 0;
+    }
+    else
+    {
+        dstWidth = drawableWidth;
+        dstHeight = (i32)(dstWidth / targetAspect);
+        dstX = 0;
+        dstY = (drawableHeight - dstHeight) / 2;
+    }
+
+    glBlitFramebuffer(0, 0, 640, 480, dstX, dstY, dstX + dstWidth, dstY + dstHeight,
+                      GL_COLOR_BUFFER_BIT, GL_LINEAR);
+
+    glClearColor(clearColor[0], clearColor[1], clearColor[2], clearColor[3]);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, this->fbo);
     SDL_GL_SwapWindow(g_GameWindow.window);
 }

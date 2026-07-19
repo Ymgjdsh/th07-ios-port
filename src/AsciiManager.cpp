@@ -658,7 +658,7 @@ i32 PauseMenu::OnUpdate()
             {
                 g_SoundPlayer.PushCommand(AUDIO_UNPAUSE, 0, (char *)"UnPause");
             }
-            g_Supervisor.currentTime = SDL_GetTicks64();
+            g_Supervisor.currentTime = SDL_GetTicks();
         }
         break;
     case 5:
@@ -753,7 +753,7 @@ i32 PauseMenu::OnUpdate()
             {
                 this->menuSprites[i].SetInvisible();
             }
-            g_Supervisor.currentTime = SDL_GetTicks64();
+            g_Supervisor.currentTime = SDL_GetTicks();
         }
         break;
     case 10:
@@ -766,7 +766,7 @@ i32 PauseMenu::OnUpdate()
             {
                 this->menuSprites[i].SetInvisible();
             }
-            g_Supervisor.currentTime = SDL_GetTicks64();
+            g_Supervisor.currentTime = SDL_GetTicks();
         }
     }
     for (i = 0; i < 10; i++)
@@ -936,7 +936,7 @@ i32 RetryMenu::OnUpdate()
                 this->menuSprites[i].SetInvisible();
             }
             g_GameManager.globals->guiScore = g_GameManager.globals->score;
-            g_Supervisor.currentTime = SDL_GetTicks64();
+            g_Supervisor.currentTime = SDL_GetTicks();
             return 0;
         }
         break;
@@ -985,7 +985,7 @@ i32 RetryMenu::OnUpdate()
                 999999);
             IncrementCapped(&g_GameManager.plst.playDataByDifficulty[6].retryCount, 999999);
             g_SoundPlayer.PushCommand(AUDIO_UNPAUSE, 0, "UnPause");
-            g_Supervisor.currentTime = SDL_GetTicks64();
+            g_Supervisor.currentTime = SDL_GetTicks();
             return 0;
         }
         break;

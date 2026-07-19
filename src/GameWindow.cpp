@@ -1,7 +1,8 @@
 #include "GameWindow.hpp"
 
-#include <SDL2/SDL.h>
-#include <SDL2/SDL_video.h>
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_properties.h>
+#include <SDL3/SDL_video.h>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -176,18 +177,31 @@ ZunResult GameWindow::CreateGameWindow()
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
     SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "0");
 
-    if (SDL_Init(SDL_INIT_VIDEO) < 0)
+    if (!SDL_Init(SDL_INIT_VIDEO))
     {
         g_GameErrorContext.Fatal("Direct3D オブジェクトは何故か作成出来なかった\n");
         return ZUN_ERROR;
     }
 
-    u32 flags = SDL_WINDOW_SHOWN | SDL_WINDOW_OPENGL;
+    SDL_PropertiesID props = SDL_CreateProperties();
+    if (!props)
+    {
+        Supervisor::DebugPrint("SDL_CreateProperties failed: %s\n", SDL_GetError());
+        return ZUN_ERROR;
+    }
 
+    SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING,
+                          "東方妖々夢　〜 Perfect Cherry Blossom. ver 1.00b");
+    SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_OPENGL_BOOLEAN, true);
 #ifndef __EMSCRIPTEN__
     if (!g_Supervisor.cfg.windowed)
     {
-        flags |= SDL_WINDOW_FULLSCREEN;
+        SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_FULLSCREEN_BOOLEAN, true);
+    }
+    else
+    {
+        SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, 640);
+        SDL_SetNumberProperty(props, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, 480);
     }
 #endif
 
@@ -198,15 +212,18 @@ ZunResult GameWindow::CreateGameWindow()
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+    SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 0);
 
-    g_GameWindow.window =
-        SDL_CreateWindow("東方妖々夢　〜 Perfect Cherry Blossom. ver 1.00b",
-                         SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 640, 480, flags);
+    g_GameWindow.window = SDL_CreateWindowWithProperties(props);
+    SDL_DestroyProperties(props);
     if (!g_GameWindow.window)
     {
         Supervisor::DebugPrint("sdl window create failed: %s\n", SDL_GetError());
         return ZUN_ERROR;
     }
+
+    SDL_ShowWindow(g_GameWindow.window);
+    SDL_SyncWindow(g_GameWindow.window);
 
     SDL_RaiseWindow(g_GameWindow.window);
     return ZUN_SUCCESS;

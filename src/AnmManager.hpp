@@ -2,7 +2,7 @@
 
 #include "AnmVm.hpp"
 
-#include <SDL2/SDL.h>
+#include <SDL3/SDL.h>
 #include <assert.h>
 
 #include "ZunColor.hpp"
@@ -190,12 +190,12 @@ struct AnmManager
         {
             if (this->surfaces[i])
             {
-                SDL_FreeSurface(this->surfaces[i]);
+                SDL_DestroySurface(this->surfaces[i]);
                 this->surfaces[i] = nullptr;
             }
             if (this->surfacesBis[i])
             {
-                SDL_FreeSurface(this->surfacesBis[i]);
+                SDL_DestroySurface(this->surfacesBis[i]);
                 this->surfacesBis[i] = nullptr;
             }
         }

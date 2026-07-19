@@ -1,6 +1,6 @@
 #include "AnmManager.hpp"
 
-#include <SDL2/SDL_image.h>
+#include <SDL3_image/SDL_image.h>
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -115,8 +115,8 @@ ZunResult AnmManager::LoadTexture(i32 textureIdx, const char *texturePath, u32 c
         return ZUN_ERROR;
     }
 
-    SDL_RWops *rw = SDL_RWFromMem(srcData, g_LastFileSize);
-    SDL_Surface *surface = IMG_Load_RW(rw, 1);
+    SDL_IOStream *rw = SDL_IOFromMem(srcData, g_LastFileSize);
+    SDL_Surface *surface = IMG_Load_IO(rw, 1);
     free(srcData);
 
     if (!surface)
@@ -126,13 +126,14 @@ ZunResult AnmManager::LoadTexture(i32 textureIdx, const char *texturePath, u32 c
 
     if (colorKey != 0)
     {
-        SDL_SetColorKey(surface, SDL_TRUE,
-                        SDL_MapRGB(surface->format, (colorKey >> 16) & 0xFF, (colorKey >> 8) & 0xFF,
-                                   colorKey & 0xFF));
+        SDL_SetSurfaceColorKey(surface, true,
+                               SDL_MapRGB(SDL_GetPixelFormatDetails(surface->format), NULL,
+                                          (colorKey >> 16) & 0xFF, (colorKey >> 8) & 0xFF,
+                                          colorKey & 0xFF));
     }
 
-    SDL_Surface *converted = SDL_ConvertSurfaceFormat(surface, SDL_PIXELFORMAT_RGBA32, 0);
-    SDL_FreeSurface(surface);
+    SDL_Surface *converted = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA32);
+    SDL_DestroySurface(surface);
 
     this->textures[textureIdx] = g_Supervisor.gfxDevice->CreateTexture();
     g_Supervisor.gfxDevice->BindTexture(this->textures[textureIdx]);
@@ -146,7 +147,7 @@ ZunResult AnmManager::LoadTexture(i32 textureIdx, const char *texturePath, u32 c
     textureHeights[textureIdx] = converted->h;
     texturePitches[textureIdx] = converted->pitch;
 
-    SDL_FreeSurface(converted);
+    SDL_DestroySurface(converted);
     return ZUN_SUCCESS;
 }
 
@@ -160,7 +161,7 @@ ZunResult AnmManager::LoadTextureEmbedded(u32 textureIdx, ZunImageInfoEmbedded *
     u32 depth = bpp * 8;
     u32 pitch = imageInfo->width * bpp;
 
-    u32 sdlFormat = SDL_PIXELFORMAT_UNKNOWN;
+    SDL_PixelFormat sdlFormat = SDL_PIXELFORMAT_UNKNOWN;
     switch (imageInfo->format)
     {
     case 1:
@@ -182,15 +183,15 @@ ZunResult AnmManager::LoadTextureEmbedded(u32 textureIdx, ZunImageInfoEmbedded *
         return ZUN_ERROR;
     }
 
-    surface = SDL_CreateRGBSurfaceWithFormatFrom(imageInfo->data, imageInfo->width,
-                                                 imageInfo->height, depth, pitch, sdlFormat);
+    surface = SDL_CreateSurfaceFrom(imageInfo->width, imageInfo->height, sdlFormat, imageInfo->data,
+                                    pitch);
     if (!surface)
     {
         return ZUN_ERROR;
     }
 
-    SDL_Surface *converted = SDL_ConvertSurfaceFormat(surface, SDL_PIXELFORMAT_RGBA32, 0);
-    SDL_FreeSurface(surface);
+    SDL_Surface *converted = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA32);
+    SDL_DestroySurface(surface);
 
     if (!converted)
     {
@@ -209,7 +210,7 @@ ZunResult AnmManager::LoadTextureEmbedded(u32 textureIdx, ZunImageInfoEmbedded *
     textureHeights[textureIdx] = converted->h;
     texturePitches[textureIdx] = converted->pitch;
 
-    SDL_FreeSurface(converted);
+    SDL_DestroySurface(converted);
     return ZUN_SUCCESS;
 }
 
@@ -228,8 +229,8 @@ ZunResult AnmManager::LoadTextureAlphaChannel(i32 textureIdx, const char *textur
     {
         return ZUN_ERROR;
     }
-    SDL_RWops *rw = SDL_RWFromMem(data, g_LastFileSize);
-    SDL_Surface *alphaSurface = IMG_Load_RW(rw, 1);
+    SDL_IOStream *rw = SDL_IOFromMem(data, g_LastFileSize);
+    SDL_Surface *alphaSurface = IMG_Load_IO(rw, 1);
     free(data);
 
     if (!alphaSurface)
@@ -240,12 +241,12 @@ ZunResult AnmManager::LoadTextureAlphaChannel(i32 textureIdx, const char *textur
     if (alphaSurface->w != (i32)this->textureWidths[textureIdx] ||
         alphaSurface->h != (i32)this->textureHeights[textureIdx])
     {
-        SDL_FreeSurface(alphaSurface);
+        SDL_DestroySurface(alphaSurface);
         return ZUN_ERROR;
     }
 
-    SDL_Surface *converted = SDL_ConvertSurfaceFormat(alphaSurface, SDL_PIXELFORMAT_RGBA32, 0);
-    SDL_FreeSurface(alphaSurface);
+    SDL_Surface *converted = SDL_ConvertSurface(alphaSurface, SDL_PIXELFORMAT_RGBA32);
+    SDL_DestroySurface(alphaSurface);
 
     if (!converted)
     {
@@ -270,7 +271,7 @@ ZunResult AnmManager::LoadTextureAlphaChannel(i32 textureIdx, const char *textur
                                             this->textureHeights[textureIdx], PIXEL_RGBA,
                                             PIXEL_UNSIGNED_BYTE, basePixels);
 
-    SDL_FreeSurface(converted);
+    SDL_DestroySurface(converted);
     return ZUN_SUCCESS;
 }
 
@@ -2104,8 +2105,8 @@ ZunResult AnmManager::LoadSurface(i32 surfaceIdx, const char *path)
         return ZUN_ERROR;
     }
 
-    SDL_RWops *rw = SDL_RWFromMem(data, g_LastFileSize);
-    SDL_Surface *surf = IMG_Load_RW(rw, 1);
+    SDL_IOStream *rw = SDL_IOFromMem(data, g_LastFileSize);
+    SDL_Surface *surf = IMG_Load_IO(rw, 1);
     free(data);
 
     if (!surf)
@@ -2113,14 +2114,14 @@ ZunResult AnmManager::LoadSurface(i32 surfaceIdx, const char *path)
         return ZUN_ERROR;
     }
 
-    this->surfaces[surfaceIdx] = SDL_ConvertSurfaceFormat(surf, SDL_PIXELFORMAT_RGBA32, 0);
-    SDL_FreeSurface(surf);
+    this->surfaces[surfaceIdx] = SDL_ConvertSurface(surf, SDL_PIXELFORMAT_RGBA32);
+    SDL_DestroySurface(surf);
 
     this->surfaceSourceInfo[surfaceIdx].width = this->surfaces[surfaceIdx]->w;
     this->surfaceSourceInfo[surfaceIdx].height = this->surfaces[surfaceIdx]->h;
 
     this->surfacesBis[surfaceIdx] =
-        SDL_ConvertSurfaceFormat(this->surfaces[surfaceIdx], SDL_PIXELFORMAT_RGBA32, 0);
+        SDL_ConvertSurface(this->surfaces[surfaceIdx], SDL_PIXELFORMAT_RGBA32);
 
     return ZUN_SUCCESS;
 }
@@ -2129,12 +2130,12 @@ void AnmManager::ReleaseSurface(i32 surfaceIdx)
 {
     if (this->surfaces[surfaceIdx])
     {
-        SDL_FreeSurface(this->surfaces[surfaceIdx]);
+        SDL_DestroySurface(this->surfaces[surfaceIdx]);
         this->surfaces[surfaceIdx] = nullptr;
     }
     if (this->surfacesBis[surfaceIdx])
     {
-        SDL_FreeSurface(this->surfacesBis[surfaceIdx]);
+        SDL_DestroySurface(this->surfacesBis[surfaceIdx]);
         this->surfacesBis[surfaceIdx] = nullptr;
     }
 }
@@ -2256,15 +2257,13 @@ void AnmManager::TakeScreenshot(i32 textureId, i32 srcLeft, i32 srcTop, i32 srcW
     }
     else
     {
-        SDL_Surface *srcSurf =
-            SDL_CreateRGBSurfaceFrom(pixelData, srcWidth, srcHeight, 32, srcWidth * 4, 0x000000FF,
-                                     0x0000FF00, 0x00FF0000, 0xFF000000);
-        SDL_Surface *dstSurf =
-            SDL_CreateRGBSurfaceWithFormat(0, dstWidth, dstHeight, 32, SDL_PIXELFORMAT_RGBA32);
+        SDL_Surface *srcSurf = SDL_CreateSurfaceFrom(srcWidth, srcHeight, SDL_PIXELFORMAT_RGBA32,
+                                                     pixelData, srcWidth * 4);
+        SDL_Surface *dstSurf = SDL_CreateSurface(dstWidth, dstHeight, SDL_PIXELFORMAT_RGBA32);
 
         if (srcSurf && dstSurf)
         {
-            SDL_BlitScaled(srcSurf, NULL, dstSurf, NULL);
+            SDL_BlitSurfaceScaled(srcSurf, NULL, dstSurf, NULL, SDL_SCALEMODE_LINEAR);
             g_Supervisor.gfxDevice->BindTexture(this->textures[textureId]);
             g_Supervisor.gfxDevice->SetTextureSubImage(dstLeft, dstTop, dstWidth, dstHeight,
                                                        dstSurf->pixels);
@@ -2272,11 +2271,11 @@ void AnmManager::TakeScreenshot(i32 textureId, i32 srcLeft, i32 srcTop, i32 srcW
 
         if (srcSurf)
         {
-            SDL_FreeSurface(srcSurf);
+            SDL_DestroySurface(srcSurf);
         }
         if (dstSurf)
         {
-            SDL_FreeSurface(dstSurf);
+            SDL_DestroySurface(dstSurf);
         }
     }
 
@@ -2304,19 +2303,19 @@ void AnmManager::CopyTexture(i32 dstIdx, i32 srcIdx, SDL_Rect *dstRect, SDL_Rect
         return;
     }
 
-    SDL_Surface *srcSurface = SDL_CreateRGBSurfaceWithFormatFrom(
-        srcPixels, this->textureWidths[srcIdx], this->textureHeights[srcIdx], 32,
-        this->texturePitches[srcIdx], SDL_PIXELFORMAT_RGBA32);
+    SDL_Surface *srcSurface =
+        SDL_CreateSurfaceFrom(this->textureWidths[srcIdx], this->textureHeights[srcIdx],
+                              SDL_PIXELFORMAT_RGBA32, srcPixels, this->texturePitches[srcIdx]);
 
-    SDL_Surface *dstSurface = SDL_CreateRGBSurfaceWithFormatFrom(
-        dstPixels, this->textureWidths[dstIdx], this->textureHeights[dstIdx], 32,
-        this->texturePitches[dstIdx], SDL_PIXELFORMAT_RGBA32);
+    SDL_Surface *dstSurface =
+        SDL_CreateSurfaceFrom(this->textureWidths[dstIdx], this->textureHeights[dstIdx],
+                              SDL_PIXELFORMAT_RGBA32, dstPixels, this->texturePitches[dstIdx]);
 
     if (srcSurface && dstSurface)
     {
         SDL_SetSurfaceBlendMode(srcSurface, SDL_BLENDMODE_NONE);
 
-        SDL_BlitScaled(srcSurface, srcRect, dstSurface, dstRect);
+        SDL_BlitSurfaceScaled(srcSurface, srcRect, dstSurface, dstRect, SDL_SCALEMODE_LINEAR);
 
         g_Supervisor.gfxDevice->BindTexture(this->textures[dstIdx]);
         g_Supervisor.gfxDevice->SetTextureImage(this->textureWidths[dstIdx],
@@ -2326,11 +2325,11 @@ void AnmManager::CopyTexture(i32 dstIdx, i32 srcIdx, SDL_Rect *dstRect, SDL_Rect
 
     if (srcSurface)
     {
-        SDL_FreeSurface(srcSurface);
+        SDL_DestroySurface(srcSurface);
     }
     if (dstSurface)
     {
-        SDL_FreeSurface(dstSurface);
+        SDL_DestroySurface(dstSurface);
     }
 }
 
