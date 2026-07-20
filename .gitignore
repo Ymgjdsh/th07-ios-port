@@ -12,3 +12,9 @@ reccmp-user.yml
 reccmp-build.yml
 scripts/__pycache__/
 compile_commands.json
+
+android/.gradle
+android/.idea
+android/local.properties
+android/app/.cxx
+android/app/src/main/res/mipmap-mdpi/ic_launcher.png

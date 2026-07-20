@@ -362,9 +362,12 @@ ZunResult Supervisor::SetupInput()
     {
         i32 numGamepads;
         SDL_JoystickID *gamepads = SDL_GetGamepads(&numGamepads);
-        if (gamepads && numGamepads > 0)
+        if (gamepads)
         {
-            g_Supervisor.controller = SDL_OpenGamepad(gamepads[0]);
+            if (numGamepads > 0)
+            {
+                g_Supervisor.controller = SDL_OpenGamepad(gamepads[0]);
+            }
             SDL_free(gamepads);
         }
         if (g_Supervisor.controller)

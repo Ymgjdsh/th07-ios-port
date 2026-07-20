@@ -356,7 +356,7 @@ LAB_0043b195:
 
 ZunResult MusicRoom::DeletedCallback(MusicRoom *arg)
 {
-    delete arg->trackDescriptors;
+    delete[] arg->trackDescriptors;
     arg->trackDescriptors = NULL;
     g_AnmManager->ReleaseSurface(0);
     g_AnmManager->ReleaseAnm(46);

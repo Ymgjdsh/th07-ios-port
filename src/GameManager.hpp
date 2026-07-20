@@ -183,6 +183,8 @@ struct GameManager
 
     static void DrawLoadingSprite();
 
+    void Pause();
+
     void *tmpBuffer;
     GameConfiguration *defaultCfg;
     ZunGlobals *globals;

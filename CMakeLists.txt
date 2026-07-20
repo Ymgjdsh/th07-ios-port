@@ -6,8 +6,6 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-find_package(OpenGL COMPONENTS GLES3 REQUIRED)
-
 set(SOURCES
     src/AnmManager.cpp
     src/AnmVm.cpp
@@ -49,9 +47,15 @@ set(SOURCES
     src/utils.cpp
 )
 
-add_executable(th07 ${SOURCES})
+if(ANDROID)
+    add_library(main SHARED ${SOURCES})
+    set(TH_EXEC_NAME "main")
+else()
+    add_executable(th07 ${SOURCES})
+    set(TH_EXEC_NAME "th07")
+endif()
 
-target_include_directories(th07 PRIVATE src src/pbg4)
+target_include_directories(${TH_EXEC_NAME} PRIVATE src src/pbg4)
 
 if(EMSCRIPTEN)
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIGURATION>")
@@ -76,6 +80,10 @@ if(EMSCRIPTEN)
     set(CMAKE_EXECUTABLE_SUFFIX ".html")
 endif()
 
+if(NOT ANDROID AND NOT EMSCRIPTEN)
+    find_package(OpenGL COMPONENTS GLES3 REQUIRED)
+endif()
+
 if(EMSCRIPTEN)
     # emscripten has no sdl3_image port, so it has to use a vendored sdl
     set(USE_VENDORED_SDL ON)
@@ -93,17 +101,38 @@ else()
 endif()
 
 if(USE_VENDORED_SDL)
+    set(SDLIMAGE_ANI OFF)
+    set(SDLIMAGE_AVIF OFF)
+    set(SDLIMAGE_BMP OFF)
+    set(SDLIMAGE_GIF OFF)
+    set(SDLIMAGE_JPG ON) # really, we only need jpg
+    set(SDLIMAGE_BACKEND_STB ON)
+    set(SDLIMAGE_JXL OFF)
+    set(SDLIMAGE_LBM OFF)
+    set(SDLIMAGE_PCX OFF)
+    set(SDLIMAGE_PNG OFF)
+    set(SDLIMAGE_PNM OFF)
+    set(SDLIMAGE_QOI OFF)
+    set(SDLIMAGE_SVG OFF)
+    set(SDLIMAGE_TGA OFF)
+    set(SDLIMAGE_TIF OFF)
+    set(SDLIMAGE_WEBP OFF)
+    set(SDLIMAGE_XCF OFF)
+    set(SDLIMAGE_XPM OFF)
+    set(SDLIMAGE_XV OFF)
     add_subdirectory(vendored/SDL EXCLUDE_FROM_ALL)
     add_subdirectory(vendored/SDL_image EXCLUDE_FROM_ALL)
     add_subdirectory(vendored/SDL_ttf EXCLUDE_FROM_ALL)
 endif()
 
-target_link_libraries(th07 PRIVATE
+target_link_libraries(${TH_EXEC_NAME} PRIVATE
     SDL3::SDL3
     SDL3_image::SDL3_image
     SDL3_ttf::SDL3_ttf
 )
 
-if(NOT EMSCRIPTEN)
-    target_link_libraries(th07 PRIVATE OpenGL::GLES3)
+if(ANDROID)
+    target_link_libraries(${TH_EXEC_NAME} PRIVATE GLESv3)
+elseif(NOT EMSCRIPTEN)
+    target_link_libraries(${TH_EXEC_NAME} PRIVATE OpenGL::GLES3)
 endif()

@@ -1,4 +1,5 @@
 #include <SDL3/SDL.h>
+#include <SDL3/SDL_main.h>
 #include <cstdio>
 
 // pull in gameerrorcontext::flush before anmmanager::releasesurfaces
@@ -47,28 +48,21 @@ void main_loop()
         {
         case SDL_EVENT_WINDOW_FOCUS_GAINED:
             g_GameWindow.isAppActive = 1;
-            g_GameWindow.isAppInactive = 0;
             if (!g_Supervisor.cfg.windowed)
             {
                 SDL_HideCursor();
             }
             break;
         case SDL_EVENT_WINDOW_FOCUS_LOST:
-            g_GameWindow.isAppActive = 0;
-            g_GameWindow.isAppInactive = 1;
-            SDL_ShowCursor();
-            break;
         case SDL_EVENT_WILL_ENTER_BACKGROUND:
         case SDL_EVENT_DID_ENTER_BACKGROUND:
             if (g_GameManager.notInMenu && !g_GameManager.isInPauseMenu)
             {
-                g_GameManager.isInPauseMenu = 1;
-                g_GameManager.isPaused = 1;
-                g_Supervisor.UpdateTime();
+                g_GameManager.Pause();
             }
             g_GameWindow.isAppActive = 0;
+            SDL_ShowCursor();
             break;
-
         case SDL_EVENT_WILL_ENTER_FOREGROUND:
         case SDL_EVENT_DID_ENTER_FOREGROUND:
             g_GameWindow.isAppActive = 1;
@@ -153,6 +147,7 @@ bool stop()
     FileSystem::WriteDataToFile(FileSystem::GetPrefPath("th07.cfg").c_str(), &g_Supervisor.cfg,
                                 sizeof(GameConfiguration));
     g_GameErrorContext.Flush();
+    SDL_Quit();
     return true;
 }
 

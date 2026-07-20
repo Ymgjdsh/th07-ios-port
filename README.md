@@ -2,9 +2,9 @@
 
 A cross-platform port of 東方妖々夢　～ Perfect Cherry Blossom 1.00b by Team Shanghai Alice using SDL3 and OpenGL ES.
 
-This is the reallyportable branch of the Touhou 7 decompilation. This is where changes go that I thought were too big for the standard portable branch, like migrating to SDL3, web support, possibly mobile support, etc. 
+This is the reallyportable branch of the Touhou 7 decompilation. This is where changes go that I thought were too big for the standard portable branch, like migrating to SDL3, web support, mobile support, etc. 
 
-Currently compared to the portable branch, this supports web builds (using Emscripten) and touch screen controls.
+Currently compared to the portable branch, this supports web builds (using Emscripten) and touch screen controls, uses SDL3 instead of SDL2, and supports running on Android. Please note that Android support is experimental and may have bugs.
 
 This is a drop-in replacement for the original Touhou 7 binary that plays identically to the original, but is more portable to other platforms outside of Windows. There are a few bugs/incompatibilities though, namely:
 
@@ -30,9 +30,25 @@ Run cmake on this repo, then build with whatever generator you chose.
 
 You will also need to add a copy of `msgothic.ttc` into your game directory if you are not running this on Windows or otherwise don't have the "ＭＳ ゴシック" font installed.
 
+#### Android
+
+Clone the repo with submodules. Afterwards, create a directory named "assets" in the root of the repo, and move the files `th07.dat` and `thbgm.dat` from the original game, as well as a copy of `msgothic.ttc` for text rendering.
+
+Before building the game, you'll want it to have the icon of the original game. The build will fail if you don't have an icon (since there isn't any bundled).
+
+In order to do this, you'll need to extract the ico from the original `th07.exe`, and place it into the mipmap icon folders of the android project. You can use `icoextract` to do this.
+
+Firstly, you have to install `icoextract`. You can do this using `pip`, as in `pip install icoextract`.
+
+Afterwards, get an original copy of `th07.exe`. Then run `icoextract -i 105 th07.exe ic_launcher.ico`. Then, convert this ico to png using imagemagick or whatever. Move this png over to `android/app/src/main/res/mipmap-mdpi`.
+
+Open the `android` folder in Android Studio, and build.
+
 #### Emscripten
 
-Clone the repo with submodules. Afterwards, create a directory named "assets" in the root of the repo, and move the files `th07.dat` and `thbgm.dat` from the original game, as well as a copy of `msgothic.ttc` for text rendering. Then in the build directory, run `emcmake` and build as usual.
+Clone the repo with submodules. Afterwards, create a directory named "assets" in the root of the repo, and move the files `th07.dat` and `thbgm.dat` from the original game, as well as a copy of `msgothic.ttc` for text rendering.
+
+Then in the build directory, run `emcmake` and build as usual.
 
 ## Controls
 

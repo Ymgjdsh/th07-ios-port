@@ -206,7 +206,6 @@ ZunResult GameWindow::CreateGameWindow()
 #endif
 
     g_GameWindow.isAppActive = 1;
-    g_GameWindow.isAppInactive = 0;
     g_LastPerfCounter = SDL_GetPerformanceCounter();
 
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);

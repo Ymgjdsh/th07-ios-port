@@ -146,6 +146,22 @@ void GameManager::ExtendFromPoints()
     }
 }
 
+void GameManager::Pause()
+{
+    this->isInPauseMenu = 1;
+    g_GameManager.arcadeRegionTopLeftPos.x = 32.0f;
+    g_GameManager.arcadeRegionTopLeftPos.y = 16.0f;
+    g_GameManager.arcadeRegionSize.x = 384.0f;
+    g_GameManager.arcadeRegionSize.y = 448.0f;
+    this->isPaused = 1;
+    if (g_GameManager.currentStage != 6 || g_Gui.frameCounter >= 300)
+    {
+        g_SoundPlayer.PushCommand(AUDIO_PAUSE, 0, "Pause");
+    }
+    g_SoundPlayer.PlaySoundByIdx(SOUND_37, 0);
+    g_Supervisor.UpdateTime();
+}
+
 u32 GameManager::OnUpdate(GameManager *arg)
 {
     u32 scoreIncrement;
@@ -155,18 +171,7 @@ u32 GameManager::OnUpdate(GameManager *arg)
     if (arg->isInRetryMenu == 0 && arg->isInPauseMenu == 0 && arg->demo == 0 &&
         (arg->slowModeSlowActive == 0 && WAS_PRESSED_RAW(TH_BUTTON_MENU)))
     {
-        arg->isInPauseMenu = 1;
-        g_GameManager.arcadeRegionTopLeftPos.x = 32.0f;
-        g_GameManager.arcadeRegionTopLeftPos.y = 16.0f;
-        g_GameManager.arcadeRegionSize.x = 384.0f;
-        g_GameManager.arcadeRegionSize.y = 448.0f;
-        arg->isPaused = 1;
-        if (g_GameManager.currentStage != 6 || g_Gui.frameCounter >= 300)
-        {
-            g_SoundPlayer.PushCommand(AUDIO_PAUSE, 0, "Pause");
-        }
-        g_SoundPlayer.PlaySoundByIdx(SOUND_37, 0);
-        g_Supervisor.UpdateTime();
+        arg->Pause();
     }
     g_Supervisor.viewport.x = arg->arcadeRegionTopLeftPos.x;
     g_Supervisor.viewport.y = arg->arcadeRegionTopLeftPos.y;
