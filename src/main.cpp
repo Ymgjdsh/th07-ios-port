@@ -1,6 +1,8 @@
 #include <SDL3/SDL.h>
-#include <SDL3/SDL_main.h>
 #include <cstdio>
+
+#define SDL_MAIN_USE_CALLBACKS
+#include <SDL3/SDL_main.h>
 
 // pull in gameerrorcontext::flush before anmmanager::releasesurfaces
 #include "AnmManager.hpp"
@@ -17,14 +19,6 @@
 #include "ZunResult.hpp"
 #include "dxutil.hpp"
 
-#ifdef __EMSCRIPTEN__
-#include <emscripten.h>
-#endif
-
-void main_loop();
-bool cleanup();
-bool stop();
-
 static i32 renderRes = RENDER_RESULT_KEEP_RUNNING;
 
 void AnmManager::TakeScreenshotIfRequested()
@@ -38,128 +32,11 @@ void AnmManager::TakeScreenshotIfRequested()
     }
 }
 
-void main_loop()
+SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
 {
-    SDL_Event e;
-
-    while (SDL_PollEvent(&e))
-    {
-        switch (e.type)
-        {
-        case SDL_EVENT_WINDOW_FOCUS_GAINED:
-            g_GameWindow.isAppActive = 1;
-            if (!g_Supervisor.cfg.windowed)
-            {
-                SDL_HideCursor();
-            }
-            break;
-        case SDL_EVENT_WINDOW_FOCUS_LOST:
-        case SDL_EVENT_WILL_ENTER_BACKGROUND:
-        case SDL_EVENT_DID_ENTER_BACKGROUND:
-            if (g_GameManager.notInMenu && !g_GameManager.isInPauseMenu)
-            {
-                g_GameManager.Pause();
-            }
-            g_GameWindow.isAppActive = 0;
-            SDL_ShowCursor();
-            break;
-        case SDL_EVENT_WILL_ENTER_FOREGROUND:
-        case SDL_EVENT_DID_ENTER_FOREGROUND:
-            g_GameWindow.isAppActive = 1;
-            break;
-        case SDL_EVENT_GAMEPAD_ADDED:
-            if (!g_Supervisor.controller)
-            {
-                g_Supervisor.controller = SDL_OpenGamepad(e.gdevice.which);
-            }
-            break;
-        case SDL_EVENT_GAMEPAD_REMOVED:
-            if (g_Supervisor.controller)
-            {
-                SDL_Joystick *joy = SDL_GetGamepadJoystick(g_Supervisor.controller);
-
-                if (SDL_GetJoystickID(joy) == e.gdevice.which)
-                {
-                    SDL_CloseGamepad(g_Supervisor.controller);
-                    g_Supervisor.controller = nullptr;
-                }
-            }
-            break;
-        case SDL_EVENT_FINGER_DOWN:
-            Touch::FingerDown(e.tfinger);
-            break;
-        case SDL_EVENT_FINGER_UP:
-            Touch::FingerUp(e.tfinger);
-            break;
-        case SDL_EVENT_FINGER_MOTION:
-            Touch::FingerMotion(e.tfinger);
-            break;
-        case SDL_EVENT_QUIT:
-            g_GameWindow.isAppClosing = true;
-            break;
-        }
-    }
-
-    renderRes = g_GameWindow.Render();
-    if (renderRes != RENDER_RESULT_KEEP_RUNNING)
-    {
-        g_GameWindow.isAppClosing = true;
-#ifdef __EMSCRIPTEN__
-        cleanup();
-        emscripten_cancel_main_loop();
-#endif
-    }
-    g_Supervisor.flags = g_Supervisor.flags & 0xffffffef;
-}
-
-bool cleanup()
-{
-    if (g_GameManager.plst.base.magic != 0)
-    {
-        ResultScreen::RegisterChain(2);
-    }
-    g_Chain.Release();
-    while (g_SoundPlayer.ProcessQueues())
-        ;
-    return stop();
-}
-
-bool stop()
-{
-    g_SoundPlayer.Release();
-    delete g_AnmManager;
-    g_AnmManager = NULL;
-
-    SAFE_DELETE(g_Supervisor.gfxDevice);
-    if (g_GameWindow.window)
-    {
-        SDL_DestroyWindow(g_GameWindow.window);
-        g_GameWindow.window = NULL;
-    }
-    SDL_ShowCursor();
-    if (renderRes == RENDER_RESULT_EXIT_ERROR)
-    {
-        g_GameErrorContext.m_BufferEnd = g_GameErrorContext.m_Buffer;
-        *g_GameErrorContext.m_BufferEnd = '\0';
-        g_GameErrorContext.Log("再起動を要するオプションが変更されたので再起動します\n");
-        return false;
-    }
-    FileSystem::WriteDataToFile(FileSystem::GetPrefPath("th07.cfg").c_str(), &g_Supervisor.cfg,
-                                sizeof(GameConfiguration));
-    g_GameErrorContext.Flush();
-    SDL_Quit();
-    return true;
-}
-
-int main(int argc, char *argv[])
-{
-    (void)argc;
-    (void)argv;
-
     if (g_Supervisor.LoadConfig(FileSystem::GetPrefPath("th07.cfg").c_str()) != ZUN_SUCCESS)
     {
-        stop();
-        return 0;
+        return SDL_APP_FAILURE;
     }
 
     GameWindow::ChecksumExecutable();
@@ -168,20 +45,17 @@ int main(int argc, char *argv[])
 start:
     if (GameWindow::CreateGameWindow())
     {
-        stop();
-        return 0;
+        return SDL_APP_FAILURE;
     }
 
     if (GameWindow::InitInterface())
     {
-        stop();
-        return 0;
+        return SDL_APP_FAILURE;
     }
 
     if (GameWindow::InitRendering())
     {
-        stop();
-        return 0;
+        return SDL_APP_FAILURE;
     }
 
     g_SoundPlayer.InitializeSound();
@@ -194,33 +68,117 @@ start:
     renderRes = g_Supervisor.RegisterChain();
     if (renderRes != ZUN_SUCCESS)
     {
-        if (renderRes == ZUN_ERROR)
-        {
-            cleanup();
-            return 0;
-        }
-        renderRes = RENDER_RESULT_EXIT_ERROR;
-        if (!cleanup())
-        {
-            goto start;
-        }
+        return SDL_APP_FAILURE;
     }
     renderRes = RENDER_RESULT_KEEP_RUNNING;
     g_GameWindow.curFrame = -30;
 
-#ifdef __EMSCRIPTEN__
-    emscripten_set_main_loop(main_loop, 0, true);
-#else
-    while (!g_GameWindow.isAppClosing)
-    {
-        main_loop();
-    }
-#endif
+    return SDL_APP_CONTINUE;
+}
 
-    if (!cleanup())
+SDL_AppResult SDL_AppIterate(void *appstate)
+{
+    renderRes = g_GameWindow.Render();
+    if (renderRes != RENDER_RESULT_KEEP_RUNNING)
     {
-        goto start;
+        return SDL_APP_SUCCESS;
+    }
+    g_Supervisor.flags &= ~16;
+
+    return SDL_APP_CONTINUE;
+}
+
+SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
+{
+    switch (event->type)
+    {
+    case SDL_EVENT_WINDOW_FOCUS_GAINED:
+        g_GameWindow.isAppActive = 1;
+        if (!g_Supervisor.cfg.windowed)
+        {
+            SDL_HideCursor();
+        }
+        break;
+    case SDL_EVENT_WINDOW_FOCUS_LOST:
+    case SDL_EVENT_WILL_ENTER_BACKGROUND:
+    case SDL_EVENT_DID_ENTER_BACKGROUND:
+        if (g_GameManager.notInMenu && !g_GameManager.isInPauseMenu)
+        {
+            g_GameManager.Pause();
+        }
+        g_GameWindow.isAppActive = 0;
+        SDL_ShowCursor();
+        break;
+    case SDL_EVENT_WILL_ENTER_FOREGROUND:
+    case SDL_EVENT_DID_ENTER_FOREGROUND:
+        g_GameWindow.isAppActive = 1;
+        break;
+    case SDL_EVENT_GAMEPAD_ADDED:
+        if (!g_Supervisor.controller)
+        {
+            g_Supervisor.controller = SDL_OpenGamepad(event->gdevice.which);
+        }
+        break;
+    case SDL_EVENT_GAMEPAD_REMOVED:
+        if (g_Supervisor.controller)
+        {
+            SDL_Joystick *joy = SDL_GetGamepadJoystick(g_Supervisor.controller);
+
+            if (SDL_GetJoystickID(joy) == event->gdevice.which)
+            {
+                SDL_CloseGamepad(g_Supervisor.controller);
+                g_Supervisor.controller = nullptr;
+            }
+        }
+        break;
+    case SDL_EVENT_FINGER_DOWN:
+        Touch::FingerDown(event->tfinger);
+        break;
+    case SDL_EVENT_FINGER_UP:
+        Touch::FingerUp(event->tfinger);
+        break;
+    case SDL_EVENT_FINGER_MOTION:
+        Touch::FingerMotion(event->tfinger);
+        break;
+    case SDL_EVENT_QUIT:
+        return SDL_APP_SUCCESS;
     }
 
-    return 0;
+    return SDL_APP_CONTINUE;
+}
+
+void SDL_AppQuit(void *appstate, SDL_AppResult result)
+{
+    if (g_GameManager.plst.base.magic != 0)
+    {
+        ResultScreen::RegisterChain(2);
+    }
+    g_Chain.Release();
+    while (g_SoundPlayer.ProcessQueues())
+        ;
+    g_SoundPlayer.Release();
+
+    SAFE_DELETE(g_AnmManager);
+    SAFE_DELETE(g_Supervisor.gfxDevice);
+    if (g_GameWindow.window)
+    {
+        SDL_DestroyWindow(g_GameWindow.window);
+        g_GameWindow.window = NULL;
+    }
+    SDL_ShowCursor();
+    if (renderRes == RENDER_RESULT_EXIT_ERROR)
+    {
+        g_GameErrorContext.m_BufferEnd = g_GameErrorContext.m_Buffer;
+        *g_GameErrorContext.m_BufferEnd = '\0';
+        g_GameErrorContext.Log("再起動を要するオプションが変更されたので再起動します\n");
+        // we normally should restart the application but thats not really possible in this
+        // model
+        // however, this is really only ever used when the application is restarting after enabling
+        // vsync. afaik, it should be pretty safe to just not have the application restart after
+        // enabling vsync since theres nothing before the checkvsync call that needs vsyncenabled to
+        // be there beforehand
+    }
+    FileSystem::WriteDataToFile(FileSystem::GetPrefPath("th07.cfg").c_str(), &g_Supervisor.cfg,
+                                sizeof(GameConfiguration));
+    g_GameErrorContext.Flush();
 }

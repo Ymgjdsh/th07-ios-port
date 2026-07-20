@@ -269,7 +269,6 @@ ZunResult GameWindow::InitRendering()
 
     ResetRenderState();
     ScreenEffect::SetViewport(0xff000000);
-    g_GameWindow.isAppClosing = 0;
     g_Supervisor.lastFrameTime = 0;
     g_Supervisor.cfg.colorMode16bit = 0;
 

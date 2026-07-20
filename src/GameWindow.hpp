@@ -24,7 +24,6 @@ struct GameWindow
     static void ResetRenderState();
 
     SDL_Window *window;
-    i32 isAppClosing;
     i32 isAppActive;
     i8 curFrame;
     // pad 3

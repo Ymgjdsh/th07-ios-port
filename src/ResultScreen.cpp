@@ -419,7 +419,15 @@ ZunResult ResultScreen::ParsePlst(ScoreDat *scoreDat, Plst *outPlst)
 
 void ResultScreen::ReleaseScoreDat(ScoreDat *scoreDat)
 {
-    free(scoreDat->decodedData);
+// for reasons inexplicable to myself, this makes emscripten die with a memory access oob error.
+// meaning that we _have_ to leak this
+// Sorry in advance
+#ifndef __EMSCRIPTEN__
+    if (scoreDat->decodedData)
+    {
+        free(scoreDat->decodedData);
+    }
+#endif
     FreeAllScores(scoreDat->scores);
     delete scoreDat->scores;
     delete scoreDat;
@@ -606,7 +614,8 @@ void ResultScreen::WriteScore()
         bytes++;
         remainingSize--;
     }
-    FileSystem::WriteDataToFile(FileSystem::GetPrefPath("score.dat").c_str(), fileBuffer, sizeOfFile);
+    FileSystem::WriteDataToFile(FileSystem::GetPrefPath("score.dat").c_str(), fileBuffer,
+                                sizeOfFile);
     free(fileBuffer);
 }
 
@@ -1365,7 +1374,8 @@ ZunResult ResultScreen::HandleReplaySaveKeyboard()
             std::filesystem::create_directory("replay");
             for (vmIdx = 0; vmIdx < 15; vmIdx++)
             {
-                sprintf(replayPath, "%s/th7_%.2d.rpy", FileSystem::GetPrefPath("replay").c_str(), vmIdx + 1);
+                sprintf(replayPath, "%s/th7_%.2d.rpy", FileSystem::GetPrefPath("replay").c_str(),
+                        vmIdx + 1);
                 replayFile = (ReplayFile *)FileSystem::OpenFile(replayPath, 1);
                 if (!replayFile)
                 {
@@ -1514,7 +1524,8 @@ ZunResult ResultScreen::HandleReplaySaveKeyboard()
             }
             else
             {
-                sprintf(replayPath2, "%s/th7_%.2d.rpy", FileSystem::GetPrefPath("replay").c_str(), this->chosenReplayIdx + 1);
+                sprintf(replayPath2, "%s/th7_%.2d.rpy", FileSystem::GetPrefPath("replay").c_str(),
+                        this->chosenReplayIdx + 1);
                 ReplayManager::SaveReplay(replayPath2, this->replayName);
                 this->frameTimer = 0;
                 this->resultScreenState = 2;

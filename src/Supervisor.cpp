@@ -508,11 +508,7 @@ ZunResult Supervisor::AddedCallback(Supervisor *arg)
     g_Supervisor.isInEnding = 1;
     if (!g_Supervisor.vsyncEnabled)
     {
-        if (CheckVSync())
-        {
-            g_AnmManager->ReleaseSurface(0);
-            return (ZunResult)-2;
-        }
+        CheckVSync();
     }
     else
     {
