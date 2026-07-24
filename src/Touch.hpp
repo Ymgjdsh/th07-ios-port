@@ -19,4 +19,5 @@ void ConsumePlayerDelta(f32 dx, f32 dy);
 
 bool WasUsedThisRun();
 void ResetRunUsage();
+void CancelTouches();
 } // namespace Touch

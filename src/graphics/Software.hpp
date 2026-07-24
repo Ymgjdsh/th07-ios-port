@@ -1,7 +1,8 @@
 #pragma once
 
 // software renderer. this is horrifyingly slow, unless you're running on release (where it is still
-// slower but at least not horrible)
+// slower, but at the very least very slightly playable).
+// its also _less_ accurate than the opengles renderer. dont use this
 
 #include <SDL3/SDL.h>
 #include <unordered_map>

@@ -68,7 +68,11 @@ In the build directory, run `emcmake` and build as usual. You'll find the built 
 
 Controls are identical to the original game for non-touch users.
 
-For touch users, there are two sets of touch controls. Those used on the menu and the one used during gameplay. On the menu, swipe in any direction in order to move the select cursor around, tap for select, and tap with two fingers for back. During gameplay, move the player around with your finger (the player moves relative to your finger). To focus, hold down another finger while moving your character around. To bomb, tap the black bars on the side of the screen or the bottom left corner of the screen.
+For touch users, there are two sets of touch controls. Those used on the menu and the one used during gameplay.
+
+On the menu, swipe in any direction in order to move the select cursor around, tap for select, and tap with two fingers for back.
+
+During gameplay, move the player around with your finger (the player moves relative to your finger). To focus, hold down another finger while moving your character around. To bomb, tap the black bars on the side of the screen or the bottom left corner of the screen. To pause the game, have four fingers on the screen inside the playarea (touches in the bomb zone do not count). To skip dialogue, have a finger held on screen for more than 0.5 seconds.
 
 Note that you cannot save replays when using touch controls. It shows the "you cannot save a replay if you've used a continue," but this shows up regardless if you've used a continue or not if you've used touch controls at any point during gameplay.
 

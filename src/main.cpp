@@ -106,6 +106,7 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
         {
             g_GameManager.Pause();
         }
+        Touch::CancelTouches();
         g_GameWindow.isAppActive = 0;
         SDL_ShowCursor();
         break;

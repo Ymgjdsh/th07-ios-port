@@ -6,6 +6,7 @@
 #include "Controller.hpp"
 #include "GameManager.hpp"
 #include "GameWindow.hpp"
+#include "Gui.hpp"
 
 struct FingerSlot
 {
@@ -34,12 +35,23 @@ MenuGestureTracker g_MenuGesture;
 f32 g_AccumDx = 0.0f;
 f32 g_AccumDy = 0.0f;
 
-bool g_BombPending = false;
 bool g_UsedThisRun = false;
+
+// hopefully you only have 10 fingers
+SDL_FingerID g_ActiveGameplayFingerIds[10];
+i32 g_NumActiveGameplayFingers = 0;
+
+Uint64 g_DialogueHoldStart = 0;
+SDL_FingerID g_DialogueHoldFingerID;
+bool g_DialogueHoldActive = false;
+
+bool g_BombPending = false;
+bool g_PausePending = false;
 
 bool IsGameplayTouchMode()
 {
-    return g_GameManager.notInMenu && !g_GameManager.isInPauseMenu && !g_GameManager.isInRetryMenu && !g_GameManager.replay;
+    return g_GameManager.notInMenu && !g_GameManager.isInPauseMenu &&
+           !g_GameManager.isInRetryMenu && !g_GameManager.replay;
 }
 
 void GetWindowSize(i32 *w, i32 *h)
@@ -123,6 +135,52 @@ void ReleaseFinger(FingerSlot *slot)
     slot->active = false;
 }
 
+bool HasGameplayFinger(SDL_FingerID id)
+{
+    for (i32 i = 0; i < g_NumActiveGameplayFingers; i++)
+    {
+        if (g_ActiveGameplayFingerIds[i] == id)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void AddGameplayFinger(SDL_FingerID id)
+{
+    if (HasGameplayFinger(id))
+    {
+        return;
+    }
+
+    if (g_NumActiveGameplayFingers < 10)
+    {
+        g_ActiveGameplayFingerIds[g_NumActiveGameplayFingers++] = id;
+    }
+}
+
+void RemoveGameplayFinger(SDL_FingerID id)
+{
+    for (i32 i = 0; i < g_NumActiveGameplayFingers; i++)
+    {
+        if (g_ActiveGameplayFingerIds[i] == id)
+        {
+            g_ActiveGameplayFingerIds[i] =
+                g_ActiveGameplayFingerIds[g_NumActiveGameplayFingers - 1];
+
+            g_NumActiveGameplayFingers--;
+            return;
+        }
+    }
+}
+
+void ClearGameplayFingers()
+{
+    g_NumActiveGameplayFingers = 0;
+}
+
 void Touch::ResetRunUsage()
 {
     g_UsedThisRun = false;
@@ -131,6 +189,21 @@ void Touch::ResetRunUsage()
 bool Touch::WasUsedThisRun()
 {
     return g_UsedThisRun;
+}
+
+void Touch::CancelTouches()
+{
+    ReleaseFinger(&g_MoveFinger);
+    ReleaseFinger(&g_FocusFinger);
+
+    g_AccumDx = 0.0f;
+    g_AccumDy = 0.0f;
+
+    ClearGameplayFingers();
+    g_PausePending = false;
+    g_BombPending = false;
+
+    g_DialogueHoldActive = false;
 }
 
 void Touch::FingerDown(const SDL_TouchFingerEvent &f)
@@ -157,11 +230,29 @@ void Touch::FingerDown(const SDL_TouchFingerEvent &f)
     }
     else
     {
+        if (g_PausePending)
+        {
+            return;
+        }
+
+        if (g_Gui.HasCurrentMsgIdx() && !g_DialogueHoldActive)
+        {
+            g_DialogueHoldActive = true;
+            g_DialogueHoldFingerID = f.fingerID;
+            g_DialogueHoldStart = SDL_GetTicks();
+        }
+
         if (IsBombZone(px, py))
         {
             g_BombPending = true;
             g_UsedThisRun = true;
             return;
+        }
+
+        AddGameplayFinger(f.fingerID);
+        if (g_NumActiveGameplayFingers >= 4)
+        {
+            g_PausePending = true;
         }
 
         if (!g_MoveFinger.active)
@@ -209,6 +300,12 @@ void Touch::FingerUp(const SDL_TouchFingerEvent &f)
     }
     else
     {
+        if (g_DialogueHoldActive && f.fingerID == g_DialogueHoldFingerID)
+        {
+            g_DialogueHoldActive = false;
+        }
+
+        RemoveGameplayFinger(f.fingerID);
         if (IsFinger(g_MoveFinger, f.fingerID))
         {
             ReleaseFinger(&g_MoveFinger);
@@ -294,6 +391,20 @@ u16 Touch::GetButtonBits()
         }
     }
 
+    if (!g_Gui.HasCurrentMsgIdx())
+    {
+        g_DialogueHoldActive = false;
+    }
+    else if (g_DialogueHoldActive)
+    {
+        u64 held = SDL_GetTicks() - g_DialogueHoldStart;
+
+        if (held >= 500)
+        {
+            buttons |= TH_BUTTON_SKIP;
+        }
+    }
+
     if (g_MoveFinger.active)
     {
         buttons |= TH_BUTTON_SHOOT;
@@ -308,6 +419,12 @@ u16 Touch::GetButtonBits()
     {
         buttons |= TH_BUTTON_BOMB;
         g_BombPending = false;
+    }
+
+    if (g_PausePending)
+    {
+        buttons |= TH_BUTTON_MENU;
+        Touch::CancelTouches();
     }
 
     return buttons;

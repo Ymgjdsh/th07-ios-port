@@ -71,6 +71,40 @@ RenderResult GameWindow::Render()
         return RENDER_RESULT_KEEP_RUNNING;
     }
 
+    if (!g_Supervisor.VsyncEnabled())
+    {
+        g_AnmManager->ResetVertexBuffer();
+        g_Supervisor.fogEnabled = 255;
+        g_Supervisor.DisableFog();
+        g_Chain.RunDrawChain();
+        g_AnmManager->Flush();
+        g_Supervisor.gfxDevice->BindTexture({0});
+
+        g_Supervisor.viewport.x = 0;
+        g_Supervisor.viewport.y = 0;
+        g_Supervisor.viewport.width = 640;
+        g_Supervisor.viewport.height = 480;
+        g_Supervisor.gfxDevice->SetViewport(g_Supervisor.viewport);
+
+        chainRes = g_Chain.RunCalcChain();
+        g_SoundPlayer.ProcessQueues();
+
+        if (!chainRes)
+        {
+            return RENDER_RESULT_EXIT_SUCCESS;
+        }
+        if (chainRes == -1)
+        {
+            return RENDER_RESULT_EXIT_ERROR;
+        }
+
+        Present();
+        this->curFrame = 0;
+        g_FrameCount++;
+
+        return RENDER_RESULT_KEEP_RUNNING;
+    }
+
     if (this->curFrame == 0)
     {
     begin_loop:
@@ -106,50 +140,34 @@ RenderResult GameWindow::Render()
         this->curFrame++;
     }
 
-    if (g_Supervisor.VsyncEnabled())
+    perfCounter = SDL_GetPerformanceCounter();
+    perfDiff = (f64)(perfCounter - g_LastPerfCounter) / (f64)g_GameWindow.frequency;
+
+    if (perfDiff < 0.0)
     {
-        if (this->curFrame != 0)
-        {
-            perfCounter = SDL_GetPerformanceCounter();
-            perfDiff = (f64)(perfCounter - g_LastPerfCounter) / (f64)g_GameWindow.frequency;
-
-            if (perfDiff < 0.0)
-            {
-                g_LastPerfCounter = perfCounter;
-            }
-
-            if (perfDiff >= (1.0 / 60.0) || g_GameWindow.usesRelativePath)
-            {
-                u64 frameTicks = g_GameWindow.frequency / 60.0;
-
-                while (perfDiff >= (1.0 / 60.0))
-                {
-                    g_LastPerfCounter += frameTicks;
-                    perfDiff -= (1.0 / 60.0);
-                }
-
-                if ((i32)g_Supervisor.cfg.frameskipConfig < (i32)this->curFrame)
-                {
-                    goto LAB_00434a18;
-                }
-
-                goto begin_loop;
-            }
-        }
+        g_LastPerfCounter = perfCounter;
     }
 
-    if (!g_Supervisor.VsyncEnabled())
+    if (perfDiff >= (1.0 / 60.0) || g_GameWindow.usesRelativePath)
     {
-        if ((i32)g_Supervisor.cfg.frameskipConfig >= (i32)this->curFrame)
+        u64 frameTicks = g_GameWindow.frequency / 60.0;
+
+        while (perfDiff >= (1.0 / 60.0))
         {
-            Present();
-            goto begin_loop;
+            g_LastPerfCounter += frameTicks;
+            perfDiff -= (1.0 / 60.0);
         }
 
-    LAB_00434a18:
-        Present();
-        this->curFrame = 0;
-        g_FrameCount++;
+        if ((i32)g_Supervisor.cfg.frameskipConfig < (i32)this->curFrame)
+        {
+            Present();
+            this->curFrame = 0;
+            g_FrameCount++;
+        }
+        else
+        {
+            goto begin_loop;
+        }
     }
 
     return RENDER_RESULT_KEEP_RUNNING;

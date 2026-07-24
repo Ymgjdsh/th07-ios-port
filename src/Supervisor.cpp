@@ -2,8 +2,8 @@
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_gamepad.h>
-#include <SDL3/SDL_timer.h>
 #include <SDL3/SDL_log.h>
+#include <SDL3/SDL_timer.h>
 #include <chrono>
 #include <cstdio>
 
@@ -16,6 +16,7 @@
 #include "FileSystem.hpp"
 #include "GameErrorContext.hpp"
 #include "GameManager.hpp"
+#include "GameWindow.hpp"
 #include "MainMenu.hpp"
 #include "MidiOutput.hpp"
 #include "MusicRoom.hpp"
@@ -407,86 +408,64 @@ i32 Supervisor::CheckVSync()
 #ifdef __EMSCRIPTEN__
     return 0;
 #endif
-    f32 fpsSum;
-    i32 j;
-    f32 fps;
-    i32 timeDiff;
-    u64 timeEnd;
-    i32 fpsCount;
-    f32 fpsArray[29];
-    u64 timeStart;
-    i32 frameCount;
-    i32 i;
 
-    i = 0;
-    frameCount = 0;
-    fpsCount = 0;
-    timeStart = 0;
+    // the previous way of doing this does not work at all with the gles renderer, since swapbuffers
+    // would just return immediately. invariably this meant that every system (well, besides
+    // emscripten) would have software vsync on regardless of if the display was 60 hz. so instead
+    // we just query the refresh rate and go off of that.
+    //
+    // there's a delay of 3 seconds since thats about how long the previous way took to complete i
+    // think, and also to keep the logo displayed for a bit. you can skip it though
 
-    timeStart = SDL_GetTicks();
-
-    while (i < 1800 && fpsCount < 8)
+    u64 start = SDL_GetTicks();
+    while (SDL_GetTicks() - start < 3000)
     {
+        SDL_Event event;
+        bool skip = false;
+        while (SDL_PollEvent(&event))
+        {
+            if (event.type == SDL_EVENT_QUIT)
+            {
+                SDL_PushEvent(&event);
+                skip = true;
+            }
+
+            if (event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN ||
+                event.type == SDL_EVENT_FINGER_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_DOWN)
+            {
+                skip = true;
+            }
+        }
+        if (skip)
+        {
+            break;
+        }
+
         g_AnmManager->CopySurfaceToBackBuffer(0, 0, 0, 0, 0);
         g_Supervisor.gfxDevice->SwapBuffers();
-        i++;
-        timeEnd = SDL_GetTicks();
-        frameCount++;
-        timeDiff = timeEnd - timeStart;
-
-        if (timeDiff >= 700)
-        {
-            timeStart = timeEnd;
-            frameCount = 0;
-        }
-        else if (timeDiff >= 500)
-        {
-            fps = frameCount * 1000.0f / (f32)timeDiff;
-            if (fps >= 57.0f)
-            {
-                fpsArray[fpsCount] = fps;
-                fpsCount++;
-            }
-            timeStart = timeEnd;
-            frameCount = 0;
-        }
+        SDL_Delay(16);
     }
-
-    if (!g_Supervisor.cfg.enableVsync)
+    if (g_GameWindow.window)
     {
-        fpsSum = 0.0f;
-        if (fpsCount >= 2)
+        SDL_DisplayID displayID = SDL_GetDisplayForWindow(g_GameWindow.window);
+        const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(displayID);
+
+        i32 swapInterval = 0;
+        SDL_GL_GetSwapInterval(&swapInterval);
+
+        if (mode && mode->refresh_rate > 0.0f && swapInterval != 0)
         {
-            for (j = 0; j < fpsCount; j++)
+            if (mode->refresh_rate >= 57.0f && mode->refresh_rate <= 63.0f)
             {
-                fpsSum += fpsArray[j];
+                g_Supervisor.vsyncEnabled = 0;
+                return 0;
             }
-            fpsSum /= (f32)j;
-        }
-        else
-        {
-            fpsSum = 1000.0f;
-        }
-
-        if (g_Supervisor.gfxDevice->GetType() == RENDERER_SOFTWARE)
-        {
-            return 0;
-        }
-
-        if (fpsSum > 160.0f)
-        {
-            g_GameErrorContext.Log("垂直同期が取れてないか、リフレッシュレートが高すぎます\n");
-            g_GameErrorContext.Log("強制６０フレームモードで動作します\n");
-            g_Supervisor.vsyncEnabled = 1;
-        }
-        else if (fpsSum >= 65.0f)
-        {
-            g_GameErrorContext.Log("垂直同期が取れてないか、リフレッシュレートが高すぎます。\n");
-            g_GameErrorContext.Log("強制６０フレームモードで動作します\n");
-            g_Supervisor.vsyncEnabled = 1;
-            return -2;
         }
     }
+
+    g_GameErrorContext.Log("垂直同期が取れてないか、リフレッシュレートが高すぎます\n");
+    g_GameErrorContext.Log("強制６０フレームモードで動作します\n");
+    g_Supervisor.vsyncEnabled = 1;
     return 0;
 }
 

@@ -18,6 +18,19 @@
 #include "AnmManager.hpp"
 #include "ZunGraphics.hpp"
 
+struct CachedState
+{
+    bool dirtyMatrix = true;
+    bool dirtyFog = true;
+    bool dirtyViewport = true;
+    bool dirtyColorOp = true;
+    bool dirtyTexArg = true;
+    bool dirtyTexFactor = true;
+    bool dirtyAlphaTest = true;
+
+    i32 currentStride = -1;
+};
+
 class GlesGraphics : public ZunGraphics
 {
   public:
@@ -84,6 +97,9 @@ class GlesGraphics : public ZunGraphics
     ColorOp colorOpRgb = COLOR_OP_MODULATE;
     ColorOp colorOpAlpha = COLOR_OP_MODULATE;
 
+    static constexpr size_t VBO_CAPACITY = 8 * 1024 * 1024;
+    size_t vboOffset = 0;
+
     GLuint defaultFbo = 0;
     GLuint fbo = 0;
     GLuint fboColor = 0;
@@ -104,6 +120,8 @@ class GlesGraphics : public ZunGraphics
     GLint u_ColorOpRgb, u_ColorOpAlpha, u_TexArg, u_TextureFactor;
     GLint u_AlphaTest, u_AlphaRef;
     GLint u_FogEnabled, u_FogColor, u_FogNear, u_FogFar;
+
+    CachedState stateCache;
 
     u64 prevTicks = 0;
 

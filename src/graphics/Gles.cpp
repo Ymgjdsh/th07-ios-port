@@ -36,7 +36,7 @@ const char *vertexShaderSource =
     "out float v_FogFragCoord;\n"
     "\n"
     "void main() {\n"
-    "    v_Color = a_Color;\n"
+    "    v_Color = a_Color.bgra;\n"
     "    if (u_ScreenSpace) {\n"
     "        float x = (a_Position.x - u_Viewport.x) / u_Viewport.z * 2.0 - 1.0;\n"
     "        float y = 1.0 - (a_Position.y - u_Viewport.y) / u_Viewport.w * 2.0;\n"
@@ -81,7 +81,7 @@ const char *fragmentShaderSource =
     "        texColor = texture(u_Texture, v_TexCoord);\n"
     "    }\n"
     "    \n"
-    "    vec4 argColor = v_Color.bgra;\n"
+    "    vec4 argColor = v_Color;\n"
     "    if (u_TexArg == 1) { // TEXTURE\n"
     "        argColor = vec4(1.0);\n"
     "    } else if (u_TexArg == 2) { // TFACTOR\n"
@@ -197,42 +197,28 @@ ZunGraphics *GlesGraphics::Init()
     glGenVertexArrays(3, gfx->vaos);
     glGenBuffers(1, &gfx->vbo);
 
-    i32 vertexStride = sizeof(VertexTex1DiffuseXyzrhw);
+    glBindBuffer(GL_ARRAY_BUFFER, gfx->vbo);
+    glBufferData(GL_ARRAY_BUFFER, VBO_CAPACITY, nullptr, GL_DYNAMIC_DRAW);
+
     glBindVertexArray(gfx->vaos[0]);
     glBindBuffer(GL_ARRAY_BUFFER, gfx->vbo);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, vertexStride,
-                          (void *)offsetof(VertexTex1DiffuseXyzrhw, pos));
-    glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, vertexStride,
-                          (void *)offsetof(VertexTex1DiffuseXyzrhw, color));
-    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, vertexStride,
-                          (void *)offsetof(VertexTex1DiffuseXyzrhw, textureUV));
     glEnableVertexAttribArray(0);
     glEnableVertexAttribArray(1);
     glEnableVertexAttribArray(2);
 
-    vertexStride = sizeof(VertexTex1DiffuseXyz);
     glBindVertexArray(gfx->vaos[1]);
     glBindBuffer(GL_ARRAY_BUFFER, gfx->vbo);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, vertexStride,
-                          (void *)offsetof(VertexTex1DiffuseXyz, position));
-    glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, vertexStride,
-                          (void *)offsetof(VertexTex1DiffuseXyz, diffuse));
-    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, vertexStride,
-                          (void *)offsetof(VertexTex1DiffuseXyz, textureUV));
     glEnableVertexAttribArray(0);
     glEnableVertexAttribArray(1);
     glEnableVertexAttribArray(2);
 
-    vertexStride = sizeof(VertexDiffuseXyzrhw);
     glBindVertexArray(gfx->vaos[2]);
     glBindBuffer(GL_ARRAY_BUFFER, gfx->vbo);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, vertexStride,
-                          (void *)offsetof(VertexDiffuseXyzrhw, pos));
-    glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, vertexStride,
-                          (void *)offsetof(VertexDiffuseXyzrhw, diffuse));
     glEnableVertexAttribArray(0);
     glEnableVertexAttribArray(1);
     glDisableVertexAttribArray(2);
+
+    glBindVertexArray(0);
 
     for (i32 i = 0; i < 4; i++)
     {
@@ -253,40 +239,65 @@ void GlesGraphics::Exit()
 
 void GlesGraphics::SetFogRange(f32 nearPlane, f32 farPlane)
 {
-    fogNear = nearPlane;
-    fogFar = farPlane;
+    if (fogNear != nearPlane || fogFar != farPlane)
+    {
+        fogNear = nearPlane;
+        fogFar = farPlane;
+        stateCache.dirtyFog = true;
+    }
 }
 
 void GlesGraphics::SetFogColor(ZunColor color)
 {
-    fogColor = color;
+    if (fogColor.color != color.color)
+    {
+        fogColor = color;
+        stateCache.dirtyFog = true;
+    }
 }
 
 void GlesGraphics::SetColorOp(TextureOpComponent component, ColorOp op)
 {
     if (component == COMPONENT_RGB)
     {
-        colorOpRgb = op;
+        if (colorOpRgb != op)
+        {
+            colorOpRgb = op;
+            stateCache.dirtyColorOp = true;
+        }
     }
     else
     {
-        colorOpAlpha = op;
+        if (colorOpAlpha != op)
+        {
+            colorOpAlpha = op;
+            stateCache.dirtyColorOp = true;
+        }
     }
 }
 
 void GlesGraphics::SetTextureFactor(ZunColor factor)
 {
-    textureFactor = factor;
+    if (textureFactor.color != factor.color)
+    {
+        textureFactor = factor;
+        stateCache.dirtyTexFactor = true;
+    }
 }
 
 void GlesGraphics::SetTextureArg(TextureArg arg)
 {
-    texArg = arg;
+    if (texArg != arg)
+    {
+        texArg = arg;
+        stateCache.dirtyTexArg = true;
+    }
 }
 
 void GlesGraphics::SetTransformMatrix(TransformMatrix type, const ZunMatrix &matrix)
 {
     transforms[type] = matrix;
+    stateCache.dirtyMatrix = true;
 }
 
 void GlesGraphics::SetTextureFilter()
@@ -302,6 +313,7 @@ void GlesGraphics::SetViewport(const ZunViewport &viewport)
 {
     this->viewport = viewport;
     glViewport(viewport.x, 480 - (viewport.y + viewport.height), viewport.width, viewport.height);
+    stateCache.dirtyViewport = true;
 }
 
 void GlesGraphics::Enable(Capabilities cap)
@@ -315,10 +327,18 @@ void GlesGraphics::Enable(Capabilities cap)
         glEnable(GL_DEPTH_TEST);
         break;
     case CAPS_ALPHA_TEST:
-        alphaTestEnabled = true;
+        if (!alphaTestEnabled)
+        {
+            alphaTestEnabled = true;
+            stateCache.dirtyAlphaTest = true;
+        }
         break;
     case CAPS_FOG:
-        fogEnabled = true;
+        if (!fogEnabled)
+        {
+            fogEnabled = true;
+            stateCache.dirtyFog = true;
+        }
         break;
     }
 }
@@ -334,10 +354,18 @@ void GlesGraphics::Disable(Capabilities cap)
         glDisable(GL_DEPTH_TEST);
         break;
     case CAPS_ALPHA_TEST:
-        alphaTestEnabled = false;
+        if (alphaTestEnabled)
+        {
+            alphaTestEnabled = false;
+            stateCache.dirtyAlphaTest = true;
+        }
         break;
     case CAPS_FOG:
-        fogEnabled = false;
+        if (fogEnabled)
+        {
+            fogEnabled = false;
+            stateCache.dirtyFog = true;
+        }
         break;
     }
 }
@@ -416,7 +444,11 @@ void GlesGraphics::SetClearColor(ZunColor color)
 
 void GlesGraphics::SetAlphaTestRef(u8 ref)
 {
-    alphaRef = ref;
+    if (alphaRef != ref)
+    {
+        alphaRef = ref;
+        stateCache.dirtyAlphaTest = true;
+    }
 }
 
 void GlesGraphics::Clear(u32 clearBits)
@@ -550,6 +582,24 @@ void GlesGraphics::DrawPrimitiveUP(PrimitiveType type, i32 primitiveCount, const
         glMode = GL_TRIANGLE_FAN;
     }
 
+    GLsizeiptr bytesNeeded = vertexCount * vertexStride;
+
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    if (vboOffset + bytesNeeded > VBO_CAPACITY)
+    {
+        vboOffset = 0;
+        if (bytesNeeded > VBO_CAPACITY)
+        {
+            glBufferData(GL_ARRAY_BUFFER, bytesNeeded, nullptr, GL_DYNAMIC_DRAW);
+        }
+        else
+        {
+            glBufferData(GL_ARRAY_BUFFER, VBO_CAPACITY, nullptr, GL_DYNAMIC_DRAW);
+        }
+    }
+
+    glBufferSubData(GL_ARRAY_BUFFER, vboOffset, bytesNeeded, vertexData);
+
     bool isScreenSpace = false;
     bool hasTex = false;
     switch (vertexStride)
@@ -558,48 +608,99 @@ void GlesGraphics::DrawPrimitiveUP(PrimitiveType type, i32 primitiveCount, const
         isScreenSpace = true;
         hasTex = true;
         glBindVertexArray(vaos[0]);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, vertexStride,
+                              (void *)(vboOffset + offsetof(VertexTex1DiffuseXyzrhw, pos)));
+        glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, vertexStride,
+                              (void *)(vboOffset + offsetof(VertexTex1DiffuseXyzrhw, color)));
+        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, vertexStride,
+                              (void *)(vboOffset + offsetof(VertexTex1DiffuseXyzrhw, textureUV)));
+
         break;
     case sizeof(VertexTex1DiffuseXyz):
         isScreenSpace = false;
         hasTex = true;
         glBindVertexArray(vaos[1]);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, vertexStride,
+                              (void *)(vboOffset + offsetof(VertexTex1DiffuseXyz, position)));
+        glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, vertexStride,
+                              (void *)(vboOffset + offsetof(VertexTex1DiffuseXyz, diffuse)));
+        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, vertexStride,
+                              (void *)(vboOffset + offsetof(VertexTex1DiffuseXyz, textureUV)));
+
         break;
     case sizeof(VertexDiffuseXyzrhw):
         isScreenSpace = true;
         hasTex = false;
         glBindVertexArray(vaos[2]);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, vertexStride,
+                              (void *)(vboOffset + offsetof(VertexDiffuseXyzrhw, pos)));
+        glVertexAttribPointer(1, 4, GL_UNSIGNED_BYTE, GL_TRUE, vertexStride,
+                              (void *)(vboOffset + offsetof(VertexDiffuseXyzrhw, diffuse)));
+
         break;
     }
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, vertexCount * vertexStride, nullptr, GL_DYNAMIC_DRAW);
-    glBufferSubData(GL_ARRAY_BUFFER, 0, vertexCount * vertexStride, vertexData);
 
-    glUniform1i(u_ScreenSpace, isScreenSpace);
-    glUniform1i(u_UseTexture, hasTex);
+    vboOffset += bytesNeeded;
 
-    glUniform4f(u_Viewport, (f32)viewport.x, (f32)viewport.y, (f32)viewport.width,
-                (f32)viewport.height);
+    if (stateCache.currentStride != vertexStride)
+    {
+        glUniform1i(u_ScreenSpace, isScreenSpace);
+        glUniform1i(u_UseTexture, hasTex);
+        stateCache.currentStride = vertexStride;
+    }
 
-    glUniformMatrix4fv(u_Model, 1, GL_FALSE, (GLfloat *)&transforms[MATRIX_MODEL]);
-    glUniformMatrix4fv(u_View, 1, GL_FALSE, (GLfloat *)&transforms[MATRIX_VIEW]);
-    glUniformMatrix4fv(u_Proj, 1, GL_FALSE, (GLfloat *)&transforms[MATRIX_PROJECTION]);
-    glUniformMatrix4fv(u_TextureMatrix, 1, GL_FALSE, (GLfloat *)&transforms[MATRIX_TEXTURE]);
+    if (stateCache.dirtyViewport)
+    {
+        glUniform4f(u_Viewport, (f32)viewport.x, (f32)viewport.y, (f32)viewport.width,
+                    (f32)viewport.height);
+        stateCache.dirtyViewport = false;
+    }
 
-    glUniform1i(u_ColorOpRgb, colorOpRgb);
-    glUniform1i(u_ColorOpAlpha, colorOpAlpha);
-    glUniform1i(u_TexArg, texArg);
+    if (stateCache.dirtyMatrix)
+    {
+        glUniformMatrix4fv(u_Model, 1, GL_FALSE, (GLfloat *)&transforms[MATRIX_MODEL]);
+        glUniformMatrix4fv(u_View, 1, GL_FALSE, (GLfloat *)&transforms[MATRIX_VIEW]);
+        glUniformMatrix4fv(u_Proj, 1, GL_FALSE, (GLfloat *)&transforms[MATRIX_PROJECTION]);
+        glUniformMatrix4fv(u_TextureMatrix, 1, GL_FALSE, (GLfloat *)&transforms[MATRIX_TEXTURE]);
+        stateCache.dirtyMatrix = false;
+    }
 
-    glUniform4f(u_TextureFactor, textureFactor.bytes.r / 255.0f, textureFactor.bytes.g / 255.0f,
-                textureFactor.bytes.b / 255.0f, textureFactor.bytes.a / 255.0f);
+    if (stateCache.dirtyColorOp)
+    {
+        glUniform1i(u_ColorOpRgb, colorOpRgb);
+        glUniform1i(u_ColorOpAlpha, colorOpAlpha);
+        stateCache.dirtyColorOp = false;
+    }
 
-    glUniform1i(u_AlphaTest, alphaTestEnabled);
-    glUniform1f(u_AlphaRef, alphaRef / 255.0f);
+    if (stateCache.dirtyTexArg)
+    {
+        glUniform1i(u_TexArg, texArg);
+        stateCache.dirtyTexArg = false;
+    }
 
-    glUniform1i(u_FogEnabled, fogEnabled);
-    glUniform4f(u_FogColor, fogColor.bytes.r / 255.0f, fogColor.bytes.g / 255.0f,
-                fogColor.bytes.b / 255.0f, fogColor.bytes.a / 255.0f);
-    glUniform1f(u_FogNear, fogNear);
-    glUniform1f(u_FogFar, fogFar);
+    if (stateCache.dirtyTexFactor)
+    {
+        glUniform4f(u_TextureFactor, textureFactor.bytes.r / 255.0f, textureFactor.bytes.g / 255.0f,
+                    textureFactor.bytes.b / 255.0f, textureFactor.bytes.a / 255.0f);
+        stateCache.dirtyTexFactor = false;
+    }
+
+    if (stateCache.dirtyAlphaTest)
+    {
+        glUniform1i(u_AlphaTest, alphaTestEnabled);
+        glUniform1f(u_AlphaRef, alphaRef / 255.0f);
+        stateCache.dirtyAlphaTest = false;
+    }
+
+    if (stateCache.dirtyFog)
+    {
+        glUniform1i(u_FogEnabled, fogEnabled);
+        glUniform4f(u_FogColor, fogColor.bytes.r / 255.0f, fogColor.bytes.g / 255.0f,
+                    fogColor.bytes.b / 255.0f, fogColor.bytes.a / 255.0f);
+        glUniform1f(u_FogNear, fogNear);
+        glUniform1f(u_FogFar, fogFar);
+        stateCache.dirtyFog = false;
+    }
 
     glDrawArrays(glMode, 0, vertexCount);
 }
@@ -609,10 +710,11 @@ void GlesGraphics::SwapBuffers()
     i32 drawableWidth, drawableHeight;
     SDL_GetWindowSizeInPixels(g_GameWindow.window, &drawableWidth, &drawableHeight);
 
-    #if defined(__APPLE__) && TARGET_OS_IPHONE
-        SDL_PropertiesID props = SDL_GetWindowProperties(g_GameWindow.window);
-        this->defaultFbo = (GLuint)SDL_GetNumberProperty(props, SDL_PROP_WINDOW_UIKIT_OPENGL_FRAMEBUFFER_NUMBER, this->defaultFbo);
-    #endif
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    SDL_PropertiesID props = SDL_GetWindowProperties(g_GameWindow.window);
+    this->defaultFbo = (GLuint)SDL_GetNumberProperty(
+        props, SDL_PROP_WINDOW_UIKIT_OPENGL_FRAMEBUFFER_NUMBER, this->defaultFbo);
+#endif
 
     glBindFramebuffer(GL_READ_FRAMEBUFFER, this->fbo);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, this->defaultFbo);
