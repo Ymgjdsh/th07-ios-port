@@ -30,7 +30,7 @@ Pbg4File::~Pbg4File()
 
 bool Pbg4File::Open(const char *path, const char *mode)
 {
-    char local_114[264];
+    char local_114[1024];
     i32 local_c;
     const char *local_8;
 
@@ -200,20 +200,20 @@ void *Pbg4File::ReadRemaining(u32 max)
 void Pbg4File::GetFullPath(char *out, const char *filename)
 {
 #ifdef __ANDROID__
-    snprintf(out, 260, "%s", filename);
+    snprintf(out, 1024, "%s", filename);
     return;
 #endif
 
 #ifdef _WIN32
     if (strchr(filename, ':') != nullptr)
     {
-        strcpy(out, filename);
+        snprintf(out, 1024, "%s", filename);
         return;
     }
 #else
     if (filename[0] == '/')
     {
-        snprintf(out, 260, "%s", filename);
+        snprintf(out, 1024, "%s", filename);
         return;
     }
 #endif
@@ -221,10 +221,10 @@ void Pbg4File::GetFullPath(char *out, const char *filename)
     const char *base = SDL_GetBasePath();
     if (base)
     {
-        snprintf(out, 260, "%s%s", base, filename);
+        snprintf(out, 1024, "%s%s", base, filename);
     }
     else
     {
-        snprintf(out, 260, "%s", filename);
+        snprintf(out, 1024, "%s", filename);
     }
 }

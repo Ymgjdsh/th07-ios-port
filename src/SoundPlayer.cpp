@@ -420,7 +420,7 @@ ZunResult SoundPlayer::Release()
 
 i32 SoundPlayer::GetFmtIndexByName(const char *param_1)
 {
-    char local_8c[128];
+    std::string filename;
     i32 local_c;
     const char *local_8;
 
@@ -432,15 +432,15 @@ i32 SoundPlayer::GetFmtIndexByName(const char *param_1)
     }
     if (!local_8)
     {
-        strcpy(local_8c, param_1);
+        filename = param_1;
     }
     else
     {
-        strcpy(local_8c, local_8 + 1);
+        filename = local_8 + 1;
     }
     while (this->bgmFmtData[local_c].name[0] != '\0')
     {
-        if (strcmp(this->bgmFmtData[local_c].name, local_8c) == 0)
+        if (strcmp(this->bgmFmtData[local_c].name, filename.c_str()) == 0)
         {
             break;
         }
@@ -508,7 +508,8 @@ ZunResult SoundPlayer::LoadFmt(const char *param_1)
 
 ZunResult SoundPlayer::StartBGM(const char *path)
 {
-    strcpy(this->bgmArchivePath, FileSystem::GetBasePath(path).c_str());
+    SDL_strlcpy(this->bgmArchivePath, FileSystem::GetBasePath(path).c_str(),
+                sizeof(this->bgmArchivePath));
     if (!this->engine)
     {
         return ZUN_ERROR;

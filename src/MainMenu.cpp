@@ -243,7 +243,8 @@ u32 MainMenu::OnUpdatePreInput()
         {
             g_GameManager.demoIdx++;
             g_GameManager.demoIdx %= 3;
-            strcpy(g_GameManager.replayFilename, g_DemoReplayPaths[g_GameManager.demoIdx]);
+            SDL_strlcpy(g_GameManager.replayFilename, g_DemoReplayPaths[g_GameManager.demoIdx],
+                        sizeof(g_GameManager.replayFilename));
             this->currentReplay =
                 (ReplayFile *)FileSystem::OpenFile(g_GameManager.replayFilename, 0);
             this->currentReplay =
@@ -1828,7 +1829,6 @@ bool ReplayFileMatches(const std::string &name)
 
 u32 MainMenu::OnUpdateSelectReplay()
 {
-    char local_54[64];
     ReplayFile *file;
     i32 local_10;
     i32 i;
@@ -1851,8 +1851,10 @@ u32 MainMenu::OnUpdateSelectReplay()
             local_10 = 0;
             for (i = 0; i < 15; i++)
             {
-                sprintf(local_54, "%s/th7_%.2d.rpy", FileSystem::GetPrefPath("replay").c_str(), i + 1);
-                file = (ReplayFile *)FileSystem::OpenFile(local_54, 1);
+                char filename[32];
+                snprintf(filename, sizeof(filename), "th7_%.2d.rpy", i + 1);
+                std::string replayPath = fs::path(FileSystem::GetPrefPath("replay")) / filename;
+                file = (ReplayFile *)FileSystem::OpenFile(replayPath.c_str(), 1);
                 if (!file)
                 {
                     continue;
@@ -1862,7 +1864,8 @@ u32 MainMenu::OnUpdateSelectReplay()
                 if (file)
                 {
                     this->replays[local_10] = *file;
-                    strcpy(this->replayFilenames[local_10], local_54);
+                    SDL_strlcpy(this->replayFilenames[local_10], replayPath.c_str(),
+                                sizeof(this->replayFilenames[local_10]));
                     sprintf(this->replayLabels[local_10], "No.%.2d", i + 1);
                     local_10++;
                     ReplayManager::FreeReplay(file);
@@ -1888,7 +1891,8 @@ u32 MainMenu::OnUpdateSelectReplay()
                 {
                     break;
                 }
-                file = (ReplayFile *)FileSystem::OpenFile((FileSystem::GetPrefPath("replay") + "/" + filename).c_str(), 1);
+                file = (ReplayFile *)FileSystem::OpenFile(
+                    (FileSystem::GetPrefPath("replay") + "/" + filename).c_str(), 1);
                 if (!file)
                 {
                     continue;
@@ -1897,7 +1901,9 @@ u32 MainMenu::OnUpdateSelectReplay()
                 if (file)
                 {
                     this->replays[local_10] = *file;
-                    sprintf(this->replayFilenames[local_10], "%s/%s", FileSystem::GetPrefPath("replay").c_str(), filename.c_str());
+                    SDL_strlcpy(this->replayFilenames[local_10],
+                                (FileSystem::GetPrefPath("replay") + "/" + filename).c_str(),
+                                sizeof(this->replayFilenames[local_10]));
                     sprintf(this->replayLabels[local_10], "User ");
                     ReplayManager::FreeReplay(file);
                     local_10++;
@@ -2036,7 +2042,8 @@ u32 MainMenu::OnUpdateSelectReplay()
         if (WAS_PRESSED_RAW(TH_BUTTON_SELECTMENU))
         {
             g_GameManager.SetReplay(1);
-            strcpy(g_GameManager.replayFilename, this->replayFilenames[this->chosenReplay]);
+            SDL_strlcpy(g_GameManager.replayFilename, this->replayFilenames[this->chosenReplay],
+                        sizeof(g_GameManager.replayFilename));
             g_GameManager.difficulty = this->currentReplay->data.difficulty;
             g_GameManager.character = this->currentReplay->data.shotType / 2;
             g_GameManager.shotType = this->currentReplay->data.shotType % 2;

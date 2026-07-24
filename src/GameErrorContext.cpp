@@ -13,7 +13,7 @@ const char *GameErrorContext::Log(const char *fmt, ...)
     va_list args;
 
     va_start(args, fmt);
-    vsprintf(tmp, fmt, args);
+    vsnprintf(tmp, sizeof(tmp), fmt, args);
     tmpSize = strlen(tmp);
     if (this->m_BufferEnd + tmpSize < this->m_Buffer + 0x1fff)
     {
@@ -33,7 +33,7 @@ const char *GameErrorContext::Fatal(const char *fmt, ...)
     va_list args;
 
     va_start(args, fmt);
-    vsprintf(tmp, fmt, args);
+    vsnprintf(tmp, sizeof(tmp), fmt, args);
     tmpSize = strlen(tmp);
     if (this->m_BufferEnd + tmpSize < this->m_Buffer + 0x1fff)
     {

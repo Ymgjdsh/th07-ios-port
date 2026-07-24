@@ -34,9 +34,9 @@ If you are using macOS, you will need to create a directory named "assets", then
 
 #### Non-desktop
 
-Usually these will require using the vendored SDL modules and prepacked assets.
+Usually these will require using the vendored SDL modules and prepacked assets. This is because they require, for example, being ran as part of a bundle instead of desktop platforms that run as standalone binaries.
 
-Clone the repo with submodules. Afterwards, create a directory named "assets" in the root of the repo, and move the files `th07.dat` and `thbgm.dat` from the original game, as well as a copy of `msgothic.ttc` for text rendering.
+Clone the repo recursively with submodules. Afterwards, create a directory named "assets" in the root of the repo, and move the files `th07.dat` and `thbgm.dat` from the original game, as well as a copy of `msgothic.ttc` for text rendering.
 
 On mobile platforms specifically, you might want it to have the icon of the original game. In order to do this, you'll need to extract the ico from the original `th07.exe`, and place it into the mipmap icon folders of the android project. You can use `icoextract` to do this.
 
@@ -56,7 +56,7 @@ Open the `android` folder in Android Studio, and build.
 
 ##### iOS
 
-Generate the project with `cmake -G Xcode ..`. Then, find the generated xcodeproj and open it up in Xcode. Set your Development Team and build.
+Generate the project with `cmake -G Xcode -DCMAKE_SYSTEM_NAME=iOS ..`. Then, find the generated xcodeproj and open it up in Xcode. Set your Development Team and build.
 
 You'll also need to upscale your png from earlier to 1024x1024 so that it can be included as a valid app icon in the asset catalog, if you do plan to have an icon.
 

@@ -18,6 +18,8 @@
 #include "dxutil.hpp"
 #include "pbg4/Lzss.hpp"
 
+namespace fs = std::filesystem;
+
 static const f32 g_DifficultyWeightsList[] = {-30.0f, -10.0f, 20.0f, 30.0f, 30.0f};
 
 const char *g_AlphabetList = "ABCDEFGHIJKLMNOPQRSTUVWXYZ.,:;_@abcdefghijklmnopqrstuvwxyz+-/"
@@ -1264,9 +1266,7 @@ void ResultScreen::GetDate(char *outDate)
 ZunResult ResultScreen::HandleReplaySaveKeyboard()
 {
     i32 cursor2;
-    char replayPath2[64];
     i32 cursor;
-    char replayPath[64];
     ReplayFile *replayFile;
     i32 vmIdx;
     i32 interrupt;
@@ -1371,11 +1371,13 @@ ZunResult ResultScreen::HandleReplaySaveKeyboard()
         if (this->frameTimer == 0)
         {
             std::filesystem::create_directory(FileSystem::GetPrefPath("replay"));
+
             for (vmIdx = 0; vmIdx < 15; vmIdx++)
             {
-                sprintf(replayPath, "%s/th7_%.2d.rpy", FileSystem::GetPrefPath("replay").c_str(),
-                        vmIdx + 1);
-                replayFile = (ReplayFile *)FileSystem::OpenFile(replayPath, 1);
+                char filename[32];
+                snprintf(filename, sizeof(filename), "th7_%.2d.rpy", vmIdx + 1);
+                std::string replayPath = fs::path(FileSystem::GetPrefPath("replay")) / filename;
+                replayFile = (ReplayFile *)FileSystem::OpenFile(replayPath.c_str(), 1);
                 if (!replayFile)
                 {
                     continue;
@@ -1523,9 +1525,10 @@ ZunResult ResultScreen::HandleReplaySaveKeyboard()
             }
             else
             {
-                sprintf(replayPath2, "%s/th7_%.2d.rpy", FileSystem::GetPrefPath("replay").c_str(),
-                        this->chosenReplayIdx + 1);
-                ReplayManager::SaveReplay(replayPath2, this->replayName);
+                char filename[32];
+                snprintf(filename, sizeof(filename), "th7_%.2d.rpy", this->chosenReplayIdx + 1);
+                std::string replayPath = fs::path(FileSystem::GetPrefPath("replay")) / filename;
+                ReplayManager::SaveReplay(replayPath.c_str(), this->replayName);
                 this->frameTimer = 0;
                 this->resultScreenState = 2;
                 vm = this->vms;

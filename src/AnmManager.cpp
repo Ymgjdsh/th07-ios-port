@@ -2025,7 +2025,7 @@ void AnmManager::DrawVmTextFmt(AnmManager *manager, AnmVm *vm, u32 textColor, u3
     fontWidth = vm->fontWidth;
 
     va_start(args, str);
-    vsprintf(text, str, args);
+    vsnprintf(text, sizeof(text), str, args);
     va_end(args);
 
     manager->DrawTextToSprite(vm->sprite->sourceFileIndex, vm->sprite->startPixelInclusive.x,
@@ -2045,7 +2045,7 @@ void AnmManager::DrawStringFormat(AnmVm *vm, u32 textColor, u32 outlineType, con
 
     fontWidth = vm->fontWidth <= 0 ? 15 : (u32)vm->fontWidth;
     va_start(args, text);
-    vsprintf(buf, text, args);
+    vsnprintf(buf, sizeof(buf), text, args);
     va_end(args);
 
     this->DrawTextToSprite(vm->sprite->sourceFileIndex, vm->sprite->startPixelInclusive.x,
@@ -2073,7 +2073,7 @@ void AnmManager::DrawStringFormat2(AnmVm *vm, u32 textColor, u32 outlineType, co
 
     fontWidth = vm->fontWidth <= 0 ? 15 : (i32)vm->fontWidth;
     va_start(args, text);
-    vsprintf(buf, text, args);
+    vsnprintf(buf, sizeof(buf), text, args);
     va_end(args);
 
     this->DrawTextToSprite(vm->sprite->sourceFileIndex, vm->sprite->startPixelInclusive.x,
