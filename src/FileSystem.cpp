@@ -88,7 +88,7 @@ i32 FileSystem::CheckFileExists(const char *file)
 {
     SDL_IOStream *fp;
 
-    fp = SDL_IOFromFile(file, "rb");
+    fp = SDL_IOFromFile(FileSystem::GetPrefPath(file).c_str(), "rb");
     if (fp)
     {
         SDL_CloseIO(fp);
@@ -102,7 +102,7 @@ i32 FileSystem::WriteDataToFile(const char *filename, const void *out, u32 bytes
     SDL_IOStream *file;
     u32 bytesWritten;
 
-    file = SDL_IOFromFile(filename, "wb");
+    file = SDL_IOFromFile(FileSystem::GetPrefPath(filename).c_str(), "wb");
     if (!file)
     {
         Supervisor::DebugPrint("error : %s write error\n", filename);
@@ -121,16 +121,28 @@ i32 FileSystem::WriteDataToFile(const char *filename, const void *out, u32 bytes
     return 0;
 }
 
-std::string FileSystem::GetPrefPath(const char* filename) {
-    #if defined(__EMSCRIPTEN__)
-        return std::string("/savesth07/") + filename;
-    #elif defined(__ANDROID__) || defined(__IPHONEOS__)
-        static char* prefPath = SDL_GetPrefPath("TeamShanghaiAlice", "th07");
-        if (prefPath) {
-            return std::string(prefPath) + filename;
-        }
-        return std::string(filename);
-    #else
-        return std::string(filename);
-    #endif
+std::string FileSystem::GetBasePath(const char *filename)
+{
+    const char *basePath = SDL_GetBasePath();
+    if (basePath)
+    {
+        return std::string(basePath) + filename;
+    }
+    return std::string(filename);
+}
+
+std::string FileSystem::GetPrefPath(const char *filename)
+{
+#if defined(__EMSCRIPTEN__)
+    return std::string("/savesth07/") + filename;
+#elif defined(__ANDROID__) || defined(__APPLE__)
+    static char *prefPath = SDL_GetPrefPath("TeamShanghaiAlice", "th07");
+    if (prefPath)
+    {
+        return std::string(prefPath) + filename;
+    }
+    return std::string(filename);
+#else
+    return std::string(filename);
+#endif
 }

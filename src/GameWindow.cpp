@@ -40,7 +40,7 @@ void GameWindow::Present()
     g_AnmManager->TakeScreenshotIfRequested();
     if (WAS_PRESSED_RAW(TH_BUTTON_HOME))
     {
-        std::filesystem::create_directory("snapshot");
+        std::filesystem::create_directory(FileSystem::GetPrefPath("snapshot"));
         for (i = 0; i < 1000; i++)
         {
             sprintf(snapshotPath, "snapshot/th%.3d.bmp", i);
@@ -193,7 +193,10 @@ ZunResult GameWindow::CreateGameWindow()
     SDL_SetStringProperty(props, SDL_PROP_WINDOW_CREATE_TITLE_STRING,
                           "東方妖々夢　〜 Perfect Cherry Blossom. ver 1.00b");
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_OPENGL_BOOLEAN, true);
-#ifndef __EMSCRIPTEN__
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_FULLSCREEN_BOOLEAN, true);
+    SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_HIGH_PIXEL_DENSITY_BOOLEAN, true);
+#elif !defined(__EMSCRIPTEN__)
     if (!g_Supervisor.cfg.windowed)
     {
         SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_FULLSCREEN_BOOLEAN, true);
@@ -208,9 +211,16 @@ ZunResult GameWindow::CreateGameWindow()
     g_GameWindow.isAppActive = 1;
     g_LastPerfCounter = SDL_GetPerformanceCounter();
 
+#ifdef USING_GL
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+#else
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+#endif
+
     SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, 0);
 
     g_GameWindow.window = SDL_CreateWindowWithProperties(props);

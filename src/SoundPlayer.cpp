@@ -302,8 +302,7 @@ static bool ThBgmDataSource_init_file(ThBgmDataSource *pBgm, const char *path, T
         return false;
     }
 
-    SDL_SeekIO(pBgm->file, g_SoundPlayer.bgmSeekOffset + pFmt->startOffset,
-               SDL_IO_SEEK_SET);
+    SDL_SeekIO(pBgm->file, g_SoundPlayer.bgmSeekOffset + pFmt->startOffset, SDL_IO_SEEK_SET);
 
     ma_data_source_config config = ma_data_source_config_init();
     config.vtable = &g_ThBgmDataSourceVtable;
@@ -359,6 +358,13 @@ ZunResult SoundPlayer::InitializeSound()
     engineConfig.channels = 2;
 
     if (ma_engine_init(&engineConfig, this->engine) != MA_SUCCESS)
+    {
+        g_GameErrorContext.Log("DirectSound オブジェクトの初期化が失敗したよ\n");
+        SAFE_DELETE(this->engine);
+        return ZUN_ERROR;
+    }
+
+    if (ma_engine_start(this->engine) != MA_SUCCESS)
     {
         g_GameErrorContext.Log("DirectSound オブジェクトの初期化が失敗したよ\n");
         SAFE_DELETE(this->engine);
@@ -502,7 +508,7 @@ ZunResult SoundPlayer::LoadFmt(const char *param_1)
 
 ZunResult SoundPlayer::StartBGM(const char *path)
 {
-    strcpy(this->bgmArchivePath, path);
+    strcpy(this->bgmArchivePath, FileSystem::GetBasePath(path).c_str());
     if (!this->engine)
     {
         return ZUN_ERROR;

@@ -34,7 +34,7 @@ void AnmManager::TakeScreenshotIfRequested()
 
 SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv)
 {
-    if (g_Supervisor.LoadConfig(FileSystem::GetPrefPath("th07.cfg").c_str()) != ZUN_SUCCESS)
+    if (g_Supervisor.LoadConfig("th07.cfg") != ZUN_SUCCESS)
     {
         return SDL_APP_FAILURE;
     }
@@ -134,6 +134,7 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
     case SDL_EVENT_FINGER_DOWN:
         Touch::FingerDown(event->tfinger);
         break;
+    case SDL_EVENT_FINGER_CANCELED:
     case SDL_EVENT_FINGER_UP:
         Touch::FingerUp(event->tfinger);
         break;
@@ -178,7 +179,6 @@ void SDL_AppQuit(void *appstate, SDL_AppResult result)
         // enabling vsync since theres nothing before the checkvsync call that needs vsyncenabled to
         // be there beforehand
     }
-    FileSystem::WriteDataToFile(FileSystem::GetPrefPath("th07.cfg").c_str(), &g_Supervisor.cfg,
-                                sizeof(GameConfiguration));
+    FileSystem::WriteDataToFile("th07.cfg", &g_Supervisor.cfg, sizeof(GameConfiguration));
     g_GameErrorContext.Flush();
 }

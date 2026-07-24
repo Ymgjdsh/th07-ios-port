@@ -44,6 +44,7 @@ set(SOURCES
     src/pbg4/Lzss.cpp
     src/pbg4/Pbg4Archive.cpp
     src/pbg4/Pbg4File.cpp
+    src/sj2utf8/sj2utf8.cpp
     src/utils.cpp
 )
 
@@ -80,8 +81,65 @@ if(EMSCRIPTEN)
     set(CMAKE_EXECUTABLE_SUFFIX ".html")
 endif()
 
-if(NOT ANDROID AND NOT EMSCRIPTEN)
+if(NOT ANDROID AND NOT EMSCRIPTEN AND NOT APPLE)
     find_package(OpenGL COMPONENTS GLES3 REQUIRED)
+endif()
+
+if(APPLE)
+    enable_language(OBJC)
+    enable_language(OBJCXX)
+
+    set_source_files_properties(src/SoundPlayer.cpp PROPERTIES LANGUAGE OBJCXX)
+    set(APP_RESOURCES
+        "${CMAKE_SOURCE_DIR}/assets/th07.dat"
+        "${CMAKE_SOURCE_DIR}/assets/thbgm.dat"
+        "${CMAKE_SOURCE_DIR}/assets/msgothic.ttc"
+    )
+
+    target_sources(${TH_EXEC_NAME} PRIVATE ${APP_RESOURCES})
+    set_source_files_properties(${APP_RESOURCES} PROPERTIES
+        MACOSX_PACKAGE_LOCATION "Resources"
+    )
+
+    set_target_properties(${TH_EXEC_NAME} PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_BUNDLE_NAME "東方妖々夢"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "com.zun.th07"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "1.0.0"
+    )
+
+    if(IOS)
+        set(BUILD_SHARED_LIBS OFF)
+        set_target_properties(${TH_EXEC_NAME} PROPERTIES
+            MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/iOS/Info.plist
+        )
+        target_link_libraries(${TH_EXEC_NAME} PRIVATE
+            "-framework OpenGLES"
+            "-framework AudioToolbox"
+            "-framework AVFoundation"
+            "-framework CoreAudio"
+            "-framework CoreGraphics"
+            "-framework QuartzCore"
+            "-framework UIKit"
+            "-framework Foundation"
+        )
+    else()
+        target_compile_definitions(${TH_EXEC_NAME} PRIVATE USING_GL)
+        set_target_properties(${TH_EXEC_NAME} PROPERTIES
+            XCODE_ATTRIBUTE_INFOPLIST_KEY_CFBundleDisplayName "東方妖々夢　～ Perfect Cherry Blossom"
+        )
+        find_package(OpenGL REQUIRED)
+        target_link_libraries(${TH_EXEC_NAME} PRIVATE
+            OpenGL::GL
+            "-framework AudioToolbox"
+            "-framework CoreAudio"
+            "-framework CoreVideo"
+            "-framework Cocoa"
+            "-framework IOKit"
+            "-framework ForceFeedback"
+            "-framework Carbon"
+        )
+    endif()
 endif()
 
 if(EMSCRIPTEN)
@@ -101,12 +159,14 @@ else()
 endif()
 
 if(USE_VENDORED_SDL)
+    set(SDLIMAGE_BACKEND_STB ON)
+    set(SDLIMAGE_BACKEND_IMAGEIO OFF)
+
     set(SDLIMAGE_ANI OFF)
     set(SDLIMAGE_AVIF OFF)
     set(SDLIMAGE_BMP OFF)
     set(SDLIMAGE_GIF OFF)
     set(SDLIMAGE_JPG ON) # really, we only need jpg
-    set(SDLIMAGE_BACKEND_STB ON)
     set(SDLIMAGE_JXL OFF)
     set(SDLIMAGE_LBM OFF)
     set(SDLIMAGE_PCX OFF)
@@ -120,6 +180,10 @@ if(USE_VENDORED_SDL)
     set(SDLIMAGE_XCF OFF)
     set(SDLIMAGE_XPM OFF)
     set(SDLIMAGE_XV OFF)
+
+    set(SDLTTF_VENDORED ON)
+    set(SDLTTF_HARFBUZZ OFF)
+
     add_subdirectory(vendored/SDL EXCLUDE_FROM_ALL)
     add_subdirectory(vendored/SDL_image EXCLUDE_FROM_ALL)
     add_subdirectory(vendored/SDL_ttf EXCLUDE_FROM_ALL)
@@ -133,6 +197,6 @@ target_link_libraries(${TH_EXEC_NAME} PRIVATE
 
 if(ANDROID)
     target_link_libraries(${TH_EXEC_NAME} PRIVATE GLESv3)
-elseif(NOT EMSCRIPTEN)
+elseif(NOT EMSCRIPTEN AND NOT APPLE)
     target_link_libraries(${TH_EXEC_NAME} PRIVATE OpenGL::GLES3)
 endif()

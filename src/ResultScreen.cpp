@@ -614,8 +614,7 @@ void ResultScreen::WriteScore()
         bytes++;
         remainingSize--;
     }
-    FileSystem::WriteDataToFile(FileSystem::GetPrefPath("score.dat").c_str(), fileBuffer,
-                                sizeOfFile);
+    FileSystem::WriteDataToFile("score.dat", fileBuffer, sizeOfFile);
     free(fileBuffer);
 }
 
@@ -1371,7 +1370,7 @@ ZunResult ResultScreen::HandleReplaySaveKeyboard()
     case 13:
         if (this->frameTimer == 0)
         {
-            std::filesystem::create_directory("replay");
+            std::filesystem::create_directory(FileSystem::GetPrefPath("replay"));
             for (vmIdx = 0; vmIdx < 15; vmIdx++)
             {
                 sprintf(replayPath, "%s/th7_%.2d.rpy", FileSystem::GetPrefPath("replay").c_str(),

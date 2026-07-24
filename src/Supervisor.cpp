@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_gamepad.h>
 #include <SDL3/SDL_timer.h>
+#include <SDL3/SDL_log.h>
 #include <chrono>
 #include <cstdio>
 
@@ -46,7 +47,7 @@ void Supervisor::DebugPrint(const char *fmt, ...)
 {
     va_list args;
     va_start(args, fmt);
-    vprintf(fmt, args);
+    SDL_LogMessageV(SDL_LOG_CATEGORY_APPLICATION, SDL_LOG_PRIORITY_INFO, fmt, args);
     va_end(args);
 }
 
@@ -382,7 +383,7 @@ ZunResult Supervisor::SetupInput()
 ZunResult Supervisor::LoadGameData()
 {
     char verFile[128];
-    if (g_Pbg4Archive.Load("th07.dat"))
+    if (g_Pbg4Archive.Load(FileSystem::GetBasePath("th07.dat").c_str()))
     {
         sprintf(verFile, "th07_%.4x%c.ver", 256, 98);
         g_Supervisor.version = (char *)FileSystem::OpenFile(verFile, 0);
@@ -565,7 +566,8 @@ ZunResult Supervisor::AddedCallback(Supervisor *arg)
         }
         else
         {
-            memcpy(g_SoundPlayer.bgmArchivePath, "thbgm.dat", 10);
+            strncpy(g_SoundPlayer.bgmArchivePath, FileSystem::GetBasePath("thbgm.dat").c_str(),
+                    256);
         }
     }
     else if (!g_Supervisor.cfg.preloadBgm)
@@ -574,7 +576,7 @@ ZunResult Supervisor::AddedCallback(Supervisor *arg)
     }
     else
     {
-        memcpy(g_SoundPlayer.bgmArchivePath, "th07.dat", 9);
+        strncpy(g_SoundPlayer.bgmArchivePath, FileSystem::GetBasePath("th07.dat").c_str(), 256);
     }
     scoreDat = ResultScreen::OpenScore(FileSystem::GetPrefPath("score.dat").c_str());
     memset(&g_GameManager.plst, 0, sizeof(g_GameManager.plst));
@@ -856,7 +858,7 @@ i32 Supervisor::SnapshotScreen(const char *param_1)
 
     SDL_Surface *surf = SDL_CreateSurfaceFrom(640, 480, SDL_PIXELFORMAT_RGBA32, pixels, 640 * 4);
 
-    SDL_SaveBMP(surf, param_1);
+    SDL_SaveBMP(surf, FileSystem::GetPrefPath(param_1).c_str());
     SDL_DestroySurface(surf);
     delete[] pixels;
     return 0;
@@ -871,7 +873,7 @@ ZunResult Supervisor::LoadConfig(const char *configFilename)
     u32 *configFile;
 
     memset(&g_Supervisor.cfg, 0, sizeof(GameConfiguration));
-    configFile = (u32 *)FileSystem::OpenFile((char *)configFilename, 1);
+    configFile = (u32 *)FileSystem::OpenFile(FileSystem::GetPrefPath(configFilename).c_str(), 1);
     if (!configFile)
     {
         g_GameErrorContext.Log("コンフィグデータが見つからないので初期化しました\n");
@@ -882,7 +884,7 @@ ZunResult Supervisor::LoadConfig(const char *configFilename)
         g_Supervisor.cfg.version = 0x70002;
         g_Supervisor.cfg.padAxisX = 600;
         g_Supervisor.cfg.padAxisY = 600;
-        bgm2 = SDL_IOFromFile("./thbgm.dat", "rb");
+        bgm2 = SDL_IOFromFile(FileSystem::GetBasePath("thbgm.dat").c_str(), "rb");
         if (bgm2)
         {
             SDL_ReadIO(bgm2, bgm2Data, 16);
@@ -913,7 +915,7 @@ ZunResult Supervisor::LoadConfig(const char *configFilename)
         g_Supervisor.cfg = *(GameConfiguration *)configFile;
         free(configFile);
 
-        bgm = SDL_IOFromFile("./thbgm.dat", "rb");
+        bgm = SDL_IOFromFile(FileSystem::GetBasePath("thbgm.dat").c_str(), "rb");
         if (bgm)
         {
             SDL_ReadIO(bgm, bgmData, 16);

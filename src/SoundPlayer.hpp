@@ -1,7 +1,5 @@
 #pragma once
 
-#include <cstdio>
-
 #include "GameErrorContext.hpp"
 #include "ZunResult.hpp"
 #include "inttypes.hpp"
@@ -145,7 +143,7 @@ struct SoundPlayer
     ThBgmFormat *bgmFmtData;
     SoundPlayerCommand commandQueue[32];
     char bgmFileNames[16][256];
-    char bgmArchivePath[256];
+    char bgmArchivePath[512];
     ThBgmDataSource *bgmDataSource;
     ma_sound *backgroundMusic;
     i32 bgmSeekOffset;

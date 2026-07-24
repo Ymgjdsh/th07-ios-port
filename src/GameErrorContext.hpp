@@ -31,7 +31,7 @@ struct GameErrorContext
             {
                 SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "log", this->m_Buffer, NULL);
             }
-            FileSystem::WriteDataToFile("./log.txt", this->m_Buffer, strlen(this->m_Buffer));
+            FileSystem::WriteDataToFile("log.txt", this->m_Buffer, strlen(this->m_Buffer));
         }
     }
 };

@@ -7,81 +7,9 @@
 #include "Supervisor.hpp"
 #include "graphics/ZunGraphics.hpp"
 #include "inttypes.hpp"
+#include "sj2utf8/sj2utf8.h"
 
 static TTF_Font *g_Font = nullptr;
-
-#ifdef __ANDROID__
-
-#include <SDL3/SDL_system.h>
-#include <jni.h>
-#include <string>
-
-// the android libc only supports like 7 encodings total, of which sjis is not one of them.
-// very annoying since it results in the text being rendered as garbage.
-//
-// the resulting solution is to use jni to get java.lang.String, initialize a sjis string in java,
-// then get the utf8 string from that string
-std::string ConvertSjisToUtf8_Android(const char *sjisStr)
-{
-    JNIEnv *env = (JNIEnv *)SDL_GetAndroidJNIEnv();
-    if (!env)
-    {
-        return std::string(sjisStr);
-    }
-
-    jclass stringClass = env->FindClass("java/lang/String");
-    if (!stringClass)
-    {
-        return std::string(sjisStr);
-    }
-
-    jmethodID initMethod = env->GetMethodID(stringClass, "<init>", "([BLjava/lang/String;)V");
-    if (!initMethod)
-    {
-        env->DeleteLocalRef(stringClass);
-        return std::string(sjisStr);
-    }
-
-    size_t len = strlen(sjisStr);
-    jbyteArray bytes = env->NewByteArray(len);
-    if (!bytes)
-    {
-        env->DeleteLocalRef(stringClass);
-        return std::string(sjisStr);
-    }
-    env->SetByteArrayRegion(bytes, 0, len, (const jbyte *)sjisStr);
-
-    jstring encoding = env->NewStringUTF("Shift_JIS");
-    if (!encoding)
-    {
-        env->DeleteLocalRef(bytes);
-        env->DeleteLocalRef(stringClass);
-        return std::string(sjisStr);
-    }
-
-    jstring strObj = (jstring)env->NewObject(stringClass, initMethod, bytes, encoding);
-
-    env->DeleteLocalRef(bytes);
-    env->DeleteLocalRef(encoding);
-    env->DeleteLocalRef(stringClass);
-
-    if (!strObj)
-    {
-        return std::string(sjisStr);
-    }
-
-    const char *utf8Chars = env->GetStringUTFChars(strObj, nullptr);
-    std::string result(utf8Chars ? utf8Chars : "");
-    if (utf8Chars)
-    {
-        env->ReleaseStringUTFChars(strObj, utf8Chars);
-    }
-    env->DeleteLocalRef(strObj);
-
-    return result;
-}
-
-#endif
 
 // stolen from
 // https://stackoverflow.com/questions/3404199/how-to-find-out-the-encoding-of-a-file-c-sharp/3404317#3404317
@@ -277,13 +205,18 @@ bool TextHelper::CopyTextToTexture(i32 yPos, i32 spriteWidth, i32 spriteHeight, 
 
 ZunResult TextHelper::CreateTextBuffer()
 {
+    if (g_Font)
+    {
+        return ZUN_SUCCESS;
+    }
+
     if (!TTF_Init())
     {
         g_GameErrorContext.Log("TTF_Init fail : %s\n", SDL_GetError());
         return ZUN_ERROR;
     }
 
-    g_Font = TTF_OpenFont("msgothic.ttc", 10);
+    g_Font = TTF_OpenFont(FileSystem::GetBasePath("msgothic.ttc").c_str(), 10);
     if (!g_Font)
     {
         g_GameErrorContext.Log("TTF_OpenFont fail : %s\n", SDL_GetError());
@@ -310,15 +243,9 @@ void TextHelper::RenderTextToTextureBold(i32 xPos, i32 yPos, i32 spriteWidth, i3
         return;
     }
 
-    if (!g_Font)
+    if (CreateTextBuffer() != ZUN_SUCCESS)
     {
-        g_Font = TTF_OpenFont("msgothic.ttc", 10);
-        if (!g_Font)
-        {
-            g_GameErrorContext.Fatal("TTF_OpenFont fail : %s\n", SDL_GetError());
-            return;
-        }
-        TTF_SetFontStyle(g_Font, TTF_STYLE_BOLD);
+        return;
     }
 
     TTF_SetFontSize(g_Font, fontSize);
@@ -327,18 +254,12 @@ void TextHelper::RenderTextToTextureBold(i32 xPos, i32 yPos, i32 spriteWidth, i3
     bool needsFree = false;
     if (!IsUtf8(string))
     {
-#ifdef __ANDROID__
-        std::string tmp = ConvertSjisToUtf8_Android(string);
-        convStr = SDL_strdup(tmp.c_str());
-        needsFree = true;
-#else
-        char *tmp = SDL_iconv_string("UTF-8", "SHIFT_JIS", string, SDL_strlen(string) + 1);
-        if (tmp)
+        std::string tmp = sj2utf8(string);
+        if (!tmp.empty())
         {
-            convStr = tmp;
+            convStr = SDL_strdup(tmp.c_str());
             needsFree = true;
         }
-#endif
     }
 
     SDL_Color white = {255, 255, 255, 255};

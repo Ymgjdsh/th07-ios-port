@@ -1,6 +1,18 @@
 #pragma once
 
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#if TARGET_OS_IPHONE
+#define GLES_SILENCE_DEPRECATION
+#include <OpenGLES/ES3/gl.h>
+#include <OpenGLES/ES3/glext.h>
+#else
+#include <OpenGL/gl3.h>
+#endif
+#else
 #include <GLES3/gl3.h>
+#endif
+
 #include <SDL3/SDL_video.h>
 
 #include "AnmManager.hpp"
@@ -72,6 +84,7 @@ class GlesGraphics : public ZunGraphics
     ColorOp colorOpRgb = COLOR_OP_MODULATE;
     ColorOp colorOpAlpha = COLOR_OP_MODULATE;
 
+    GLuint defaultFbo = 0;
     GLuint fbo = 0;
     GLuint fboColor = 0;
     GLuint fboDepth = 0;

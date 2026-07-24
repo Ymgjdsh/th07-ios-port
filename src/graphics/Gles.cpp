@@ -1,6 +1,5 @@
 #include "Gles.hpp"
 
-#include <GLES3/gl3.h>
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_timer.h>
 #include <SDL3/SDL_video.h>
@@ -10,8 +9,17 @@
 #include "GameWindow.hpp"
 #include "Supervisor.hpp"
 
+#ifdef USING_GL
+#define GLSL_VERSION "#version 330 core\n"
+#define GLSL_PRECISION
+#else
+#define GLSL_VERSION "#version 300 es\n"
+#define GLSL_PRECISION "precision mediump float;\n"
+#endif
+
+// clang-format off
 const char *vertexShaderSource =
-    "#version 300 es\n"
+    GLSL_VERSION
     "uniform mat4 u_Model;\n"
     "uniform mat4 u_View;\n"
     "uniform mat4 u_Proj;\n"
@@ -45,8 +53,8 @@ const char *vertexShaderSource =
     "}\n";
 
 const char *fragmentShaderSource =
-    "#version 300 es\n"
-    "precision mediump float;\n"
+    GLSL_VERSION
+    GLSL_PRECISION
     "\n"
     "in vec4 v_Color;\n"
     "in vec2 v_TexCoord;\n"
@@ -109,6 +117,7 @@ const char *fragmentShaderSource =
     "    \n"
     "    FragColor = finalColor;\n"
     "}\n";
+// clang-format on
 
 ZunGraphics *GlesGraphics::Init()
 {
@@ -130,7 +139,7 @@ ZunGraphics *GlesGraphics::Init()
 
     glGenTextures(1, &gfx->fboColor);
     glBindTexture(GL_TEXTURE_2D, gfx->fboColor);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 640, 480, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 640, 480, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, gfx->fboColor, 0);
@@ -392,7 +401,11 @@ void GlesGraphics::SetDepthFunc(DepthFunc func)
 
 void GlesGraphics::SetClearDepth(f32 depth)
 {
+#ifdef USING_GL
+    glClearDepth(depth);
+#else
     glClearDepthf(depth);
+#endif
 }
 
 void GlesGraphics::SetClearColor(ZunColor color)
@@ -456,12 +469,12 @@ void GlesGraphics::SetTextureImage(u32 width, u32 height, PixelFormat fmt, Pixel
     switch (fmt)
     {
     case PIXEL_RGB:
-        internalformat = GL_RGB;
+        internalformat = GL_RGB8;
         format = GL_RGB;
         break;
     case PIXEL_RGBA:
     default:
-        internalformat = GL_RGBA;
+        internalformat = GL_RGBA8;
         format = GL_RGBA;
         break;
     }
@@ -596,11 +609,19 @@ void GlesGraphics::SwapBuffers()
     i32 drawableWidth, drawableHeight;
     SDL_GetWindowSizeInPixels(g_GameWindow.window, &drawableWidth, &drawableHeight);
 
+    #if defined(__APPLE__) && TARGET_OS_IPHONE
+        SDL_PropertiesID props = SDL_GetWindowProperties(g_GameWindow.window);
+        this->defaultFbo = (GLuint)SDL_GetNumberProperty(props, SDL_PROP_WINDOW_UIKIT_OPENGL_FRAMEBUFFER_NUMBER, this->defaultFbo);
+    #endif
+
     glBindFramebuffer(GL_READ_FRAMEBUFFER, this->fbo);
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, this->defaultFbo);
 
     GLfloat clearColor[4];
     glGetFloatv(GL_COLOR_CLEAR_VALUE, clearColor);
+
+    glDisable(GL_SCISSOR_TEST);
+    glViewport(0, 0, drawableWidth, drawableHeight);
 
     glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT);
@@ -634,6 +655,14 @@ void GlesGraphics::SwapBuffers()
 
     glClearColor(clearColor[0], clearColor[1], clearColor[2], clearColor[3]);
 
-    glBindFramebuffer(GL_FRAMEBUFFER, this->fbo);
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    glBindRenderbuffer(
+        GL_RENDERBUFFER,
+        SDL_GetNumberProperty(props, SDL_PROP_WINDOW_UIKIT_OPENGL_RENDERBUFFER_NUMBER, 0));
+#endif
+    glBindFramebuffer(GL_FRAMEBUFFER, this->defaultFbo);
     SDL_GL_SwapWindow(g_GameWindow.window);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, this->fbo);
+    glViewport(viewport.x, 480 - (viewport.y + viewport.height), viewport.width, viewport.height);
 }
