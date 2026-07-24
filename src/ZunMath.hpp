@@ -50,8 +50,7 @@ struct ZunVec3
         this->z = z;
     }
 
-    inline void Project(ZunVec3 *pV, ZunViewport *pViewport, struct ZunMatrix *pProjection,
-                            struct ZunMatrix *pView, struct ZunMatrix *pWorld);
+    inline void Project(ZunVec3 *pV, ZunViewport *pViewport, struct ZunMatrix *pWVP);
 
     void Normalize(ZunVec3 *pV)
     {
@@ -346,16 +345,9 @@ struct ZunMatrix
     }
 };
 
-inline void ZunVec3::Project(ZunVec3 *pV, ZunViewport *pViewport, ZunMatrix *pProjection,
-                                 ZunMatrix *pView, ZunMatrix *pWorld)
+inline void ZunVec3::Project(ZunVec3 *pV, ZunViewport *pViewport, ZunMatrix *pWVP)
 {
-    ZunMatrix temp;
-    ZunMatrix wvp;
-
-    temp = *pWorld * *pView;
-    wvp = temp * *pProjection;
-
-    TransformCoord(pV, &wvp);
+    TransformCoord(pV, pWVP);
 
     x = pViewport->x + (1.0f + x) * pViewport->width * 0.5f;
     y = pViewport->y + (1.0f - y) * pViewport->height * 0.5f;

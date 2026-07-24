@@ -283,6 +283,7 @@ ZunResult GameWindow::InitRendering()
     pEye.z = -halfCameraDistance;
     g_Supervisor.viewMatrix.LookAtLH(&pEye, &pAt, &pUp);
     g_Supervisor.projectionMatrix.PerspectiveFovLH(fov, aspectRatio, 100.0f, 10000.0f);
+    g_Supervisor.viewProjectionMatrix = g_Supervisor.viewMatrix * g_Supervisor.projectionMatrix;
 
     g_Supervisor.gfxDevice->SetTransformMatrix(MATRIX_VIEW, g_Supervisor.viewMatrix);
     g_Supervisor.gfxDevice->SetTransformMatrix(MATRIX_PROJECTION, g_Supervisor.projectionMatrix);

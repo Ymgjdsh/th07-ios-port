@@ -142,6 +142,7 @@ struct Supervisor
     SDL_Gamepad *controller;
     ZunMatrix viewMatrix;
     ZunMatrix projectionMatrix;
+    ZunMatrix viewProjectionMatrix;
     ZunViewport viewport;
     DummyMidiTimer *midiTimer;
     GameConfiguration cfg;

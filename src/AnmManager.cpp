@@ -987,16 +987,15 @@ ZunResult AnmManager::CalcBillboardTransform(AnmVm *vm)
     matrix.m[3][1] = vm->pos.y;
     matrix.m[3][2] = vm->pos.z;
 
-    projectCenter.Project(&origin, &g_Supervisor.viewport, &g_Supervisor.projectionMatrix,
-                          &g_Supervisor.viewMatrix, &matrix);
+    ZunMatrix wvp = matrix * g_Supervisor.viewProjectionMatrix;
+    projectCenter.Project(&origin, &g_Supervisor.viewport, &wvp);
 
     if (projectCenter.z < 0.0f || projectCenter.z > 1.0f)
     {
         return ZUN_ERROR;
     }
 
-    projectRight.Project(&g_Stage.cam.right, &g_Supervisor.viewport, &g_Supervisor.projectionMatrix,
-                         &g_Supervisor.viewMatrix, &matrix);
+    projectRight.Project(&g_Stage.cam.right, &g_Supervisor.viewport, &wvp);
 
     projectRightOffset = projectRight - projectCenter;
 
@@ -1110,14 +1109,16 @@ void AnmManager::CalcProjectedTransform(AnmVm *vm)
     }
     world.m[3][2] = vm->pos.z;
 
+    ZunMatrix wvp = world * g_Supervisor.viewProjectionMatrix;
+
     g_QuadVertices[0].pos.Project(&this->vertexBufferContents[0].position, &g_Supervisor.viewport,
-                                  &g_Supervisor.projectionMatrix, &g_Supervisor.viewMatrix, &world);
+                                  &wvp);
     g_QuadVertices[1].pos.Project(&this->vertexBufferContents[1].position, &g_Supervisor.viewport,
-                                  &g_Supervisor.projectionMatrix, &g_Supervisor.viewMatrix, &world);
+                                  &wvp);
     g_QuadVertices[2].pos.Project(&this->vertexBufferContents[2].position, &g_Supervisor.viewport,
-                                  &g_Supervisor.projectionMatrix, &g_Supervisor.viewMatrix, &world);
+                                  &wvp);
     g_QuadVertices[3].pos.Project(&this->vertexBufferContents[3].position, &g_Supervisor.viewport,
-                                  &g_Supervisor.projectionMatrix, &g_Supervisor.viewMatrix, &world);
+                                  &wvp);
 
     this->matrix = world;
 }

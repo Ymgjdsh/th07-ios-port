@@ -18,11 +18,30 @@ static_assert(sizeof(AnyArg) == 4);
 
 namespace utils
 {
-f32 AddNormalizeAngle(f32 a, f32 b);
-void Rotate(ZunVec3 *out, ZunVec3 *point, f32 angle);
-
-inline f32 NormalizeAngle(f32 a)
+inline f32 AddNormalizeAngle(f32 param_1, f32 param_2)
 {
-    return AddNormalizeAngle(a, 0.0f);
+    i32 local_8;
+
+    local_8 = 0;
+    param_1 += param_2;
+    while (param_1 > ZUN_PI)
+    {
+        param_1 -= ZUN_2PI;
+        if (local_8++ > 16)
+        {
+            break;
+        }
+    }
+    while (param_1 < -ZUN_PI)
+    {
+        param_1 += ZUN_2PI;
+        if (local_8++ > 16)
+        {
+            break;
+        }
+    }
+    return param_1;
 }
+
+void Rotate(ZunVec3 *out, ZunVec3 *point, f32 angle);
 } // namespace utils

@@ -961,9 +961,8 @@ i32 Stage::RenderObjects(i32 zLevel)
                                 worldMatrix.m[3][1] = curQuadVm->pos.y;
                                 worldMatrix.m[3][2] = curQuadVm->pos.z;
 
-                                quadPos.Project(&projectSrc, &g_Supervisor.viewport,
-                                                &g_Supervisor.projectionMatrix,
-                                                &g_Supervisor.viewMatrix, &worldMatrix);
+                                ZunMatrix wvp = worldMatrix * g_Supervisor.viewProjectionMatrix;
+                                quadPos.Project(&projectSrc, &g_Supervisor.viewport, &wvp);
 
                                 viewDir.x = g_Supervisor.viewMatrix.m[0][0];
                                 viewDir.y = g_Supervisor.viewMatrix.m[0][1];
@@ -983,9 +982,8 @@ i32 Stage::RenderObjects(i32 zLevel)
                                 worldMatrix.m[3][1] += viewDir.y * var_98 * curQuadVm->scale.x;
                                 worldMatrix.m[3][2] += viewDir.z * var_98 * curQuadVm->scale.x;
 
-                                viewDir.Project(&projectSrc, &g_Supervisor.viewport,
-                                                &g_Supervisor.projectionMatrix,
-                                                &g_Supervisor.viewMatrix, &worldMatrix);
+                                wvp = worldMatrix * g_Supervisor.viewProjectionMatrix;
+                                viewDir.Project(&projectSrc, &g_Supervisor.viewport, &wvp);
 
                                 diffPos = viewDir - quadPos;
 
@@ -1098,6 +1096,7 @@ void Stage::SetupCameraStageBackground()
 
     g_Supervisor.viewMatrix.LookAtLH(&eyeVec, &atVec, &upVec);
     g_Supervisor.projectionMatrix.PerspectiveFovLH(fov, aspectRatio, 1.0f, 10000.0f);
+    g_Supervisor.viewProjectionMatrix = g_Supervisor.viewMatrix * g_Supervisor.projectionMatrix;
     g_Supervisor.gfxDevice->SetTransformMatrix(MATRIX_VIEW, g_Supervisor.viewMatrix);
     g_Supervisor.gfxDevice->SetTransformMatrix(MATRIX_PROJECTION, g_Supervisor.projectionMatrix);
 }
@@ -1109,6 +1108,7 @@ void Stage::UpdateCamera()
     g_Supervisor.projectionMatrix.PerspectiveFovLH(
         this->cam.fov, (f32)g_Supervisor.viewport.width / (f32)g_Supervisor.viewport.height, 30.0f,
         1800.0f);
+    g_Supervisor.viewProjectionMatrix = g_Supervisor.viewMatrix * g_Supervisor.projectionMatrix;
     g_Supervisor.gfxDevice->SetTransformMatrix(MATRIX_VIEW, g_Supervisor.viewMatrix);
     g_Supervisor.gfxDevice->SetTransformMatrix(MATRIX_PROJECTION, g_Supervisor.projectionMatrix);
     this->cam.right.Cross(&this->cam.lookAt, &this->cam.up);
