@@ -377,8 +377,7 @@ i32 AnmManager::LoadAnm(i32 textureIdx, AnmRawEntry *rawEntry, i32 spriteIdxOffs
         if (data->mipmapNameOffset != 0)
         {
             name = (char *)((u8 *)data + data->mipmapNameOffset);
-            if (LoadTextureAlphaChannel(data->textureIdx, name) !=
-                ZUN_SUCCESS)
+            if (LoadTextureAlphaChannel(data->textureIdx, name) != ZUN_SUCCESS)
             {
                 g_GameErrorContext.Fatal(
                     "テクスチャ %s が読み込めません。データが失われてるか壊れています\n", name);
@@ -389,7 +388,8 @@ i32 AnmManager::LoadAnm(i32 textureIdx, AnmRawEntry *rawEntry, i32 spriteIdxOffs
     else
     {
         if (LoadTextureEmbedded(data->textureIdx,
-                                (ZunImageInfoEmbedded *)((u8 *)data + data->textureOffset)) != ZUN_SUCCESS)
+                                (ZunImageInfoEmbedded *)((u8 *)data + data->textureOffset)) !=
+            ZUN_SUCCESS)
         {
             g_GameErrorContext.Fatal(
                 "テクスチャが読み込めません。データが失われてるか壊れています\n");
@@ -2123,7 +2123,15 @@ ZunResult AnmManager::LoadSurface(i32 surfaceIdx, const char *path)
 
     this->surfacesBis[surfaceIdx] =
         SDL_ConvertSurface(this->surfaces[surfaceIdx], SDL_PIXELFORMAT_RGBA32);
-
+    if (this->surfaceTextures[surfaceIdx].id != 0)
+    {
+        g_Supervisor.gfxDevice->DeleteTexture(this->surfaceTextures[surfaceIdx]);
+    }
+    this->surfaceTextures[surfaceIdx] = g_Supervisor.gfxDevice->CreateTexture();
+    g_Supervisor.gfxDevice->BindTexture(this->surfaceTextures[surfaceIdx]);
+    g_Supervisor.gfxDevice->SetTextureImage(
+        this->surfacesBis[surfaceIdx]->w, this->surfacesBis[surfaceIdx]->h, PIXEL_RGBA,
+        PIXEL_UNSIGNED_BYTE, this->surfacesBis[surfaceIdx]->pixels);
     return ZUN_SUCCESS;
 }
 
@@ -2139,6 +2147,11 @@ void AnmManager::ReleaseSurface(i32 surfaceIdx)
         SDL_DestroySurface(this->surfacesBis[surfaceIdx]);
         this->surfacesBis[surfaceIdx] = nullptr;
     }
+    if (this->surfaceTextures[surfaceIdx].id != 0)
+    {
+        g_Supervisor.gfxDevice->DeleteTexture(this->surfaceTextures[surfaceIdx]);
+        this->surfaceTextures[surfaceIdx] = 0;
+    }
 }
 
 void AnmManager::CopySurfaceToBackBuffer(i32 surfaceIdx, i32 left, i32 top, i32 x, i32 y)
@@ -2150,10 +2163,7 @@ void AnmManager::CopySurfaceToBackBuffer(i32 surfaceIdx, i32 left, i32 top, i32 
 
     SDL_Surface *surf = this->surfacesBis[surfaceIdx];
 
-    GfxTextureHandle tex = g_Supervisor.gfxDevice->CreateTexture();
-    g_Supervisor.gfxDevice->BindTexture(tex);
-    g_Supervisor.gfxDevice->SetTextureImage(surf->w, surf->h, PIXEL_RGBA, PIXEL_UNSIGNED_BYTE,
-                                            surf->pixels);
+    g_Supervisor.gfxDevice->BindTexture(this->surfaceTextures[surfaceIdx]);
 
     VertexTex1DiffuseXyzrhw vertices[4];
     f32 width = (f32)this->surfaceSourceInfo[surfaceIdx].width;
@@ -2186,7 +2196,6 @@ void AnmManager::CopySurfaceToBackBuffer(i32 surfaceIdx, i32 left, i32 top, i32 
     g_Supervisor.gfxDevice->DrawPrimitiveUP(PRIM_TRIANGLE_STRIP, 2, vertices,
                                             sizeof(VertexTex1DiffuseXyzrhw));
     g_Supervisor.gfxDevice->Enable(CAPS_ALPHA_TEST);
-    g_Supervisor.gfxDevice->DeleteTexture(tex);
 }
 
 void AnmManager::DrawEndingRect(i32 surfaceIdx, i32 rectX, i32 rectY, i32 rectLeft, i32 rectTop,
@@ -2200,10 +2209,7 @@ void AnmManager::DrawEndingRect(i32 surfaceIdx, i32 rectX, i32 rectY, i32 rectLe
     SDL_Surface *surf =
         this->surfaces[surfaceIdx] ? this->surfaces[surfaceIdx] : this->surfacesBis[surfaceIdx];
 
-    GfxTextureHandle tex = g_Supervisor.gfxDevice->CreateTexture();
-    g_Supervisor.gfxDevice->BindTexture(tex);
-    g_Supervisor.gfxDevice->SetTextureImage(surf->w, surf->h, PIXEL_RGBA, PIXEL_UNSIGNED_BYTE,
-                                            surf->pixels);
+    g_Supervisor.gfxDevice->BindTexture(this->surfaceTextures[surfaceIdx]);
 
     VertexTex1DiffuseXyzrhw vertices[4];
     f32 drawWidth = width;
@@ -2234,8 +2240,6 @@ void AnmManager::DrawEndingRect(i32 surfaceIdx, i32 rectX, i32 rectY, i32 rectLe
     g_Supervisor.gfxDevice->SetColorOp(COMPONENT_ALPHA, COLOR_OP_MODULATE);
     g_Supervisor.gfxDevice->DrawPrimitiveUP(PRIM_TRIANGLE_STRIP, 2, vertices,
                                             sizeof(VertexTex1DiffuseXyzrhw));
-
-    g_Supervisor.gfxDevice->DeleteTexture(tex);
 }
 
 void AnmManager::TakeScreenshot(i32 textureId, i32 srcLeft, i32 srcTop, i32 srcWidth, i32 srcHeight,

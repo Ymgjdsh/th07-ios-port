@@ -361,6 +361,7 @@ struct AnmManager
     struct AnmEntry anmFiles[50];
     SDL_Surface *surfaces[32];
     SDL_Surface *surfacesBis[32];
+    GfxTextureHandle surfaceTextures[32];
     u32 textureWidths[264];
     u32 textureHeights[264];
     u32 texturePitches[264];
