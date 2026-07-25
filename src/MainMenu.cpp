@@ -2397,6 +2397,7 @@ ZunResult MainMenu::ActualAddedCallback()
             g_AnmManager->ClearFrameState();
             g_AnmManager->SetCameraMode(255);
             g_AnmManager->SetColor(0x80808080);
+            g_Supervisor.gfxDevice->BeginFrame();
             g_AnmManager->CopySurfaceToBackBuffer(0, 0, 0, 0, 0);
             if (frameCount < 60)
             {
@@ -2419,6 +2420,7 @@ ZunResult MainMenu::ActualAddedCallback()
                 ScreenEffect::DrawSquare(&local_34, local_24.color);
             }
             g_CurFrameRawInput = Controller::GetInput();
+            g_Supervisor.gfxDevice->EndFrame();
             g_Supervisor.gfxDevice->SwapBuffers();
             if (120 <= frameCount && frameCount < 840 &&
                 WAS_PRESSED_RAW(TH_BUTTON_SELECTMENU | TH_BUTTON_BOMB))

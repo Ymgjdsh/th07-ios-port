@@ -441,7 +441,9 @@ i32 Supervisor::CheckVSync()
             break;
         }
 
+        g_Supervisor.gfxDevice->BeginFrame();
         g_AnmManager->CopySurfaceToBackBuffer(0, 0, 0, 0, 0);
+        g_Supervisor.gfxDevice->EndFrame();
         g_Supervisor.gfxDevice->SwapBuffers();
         SDL_Delay(16);
     }
@@ -475,10 +477,10 @@ ZunResult Supervisor::AddedCallback(Supervisor *arg)
     i32 i;
 
     arg->perfFrequency = SDL_GetPerformanceFrequency();
+    g_Supervisor.gfxDevice->BeginFrame();
     g_Supervisor.gfxDevice->SetClearColor({0xff000000});
     g_Supervisor.gfxDevice->Clear(CLEAR_COLOR_BUFFER);
-    g_Supervisor.gfxDevice->SwapBuffers();
-    g_Supervisor.gfxDevice->Clear(CLEAR_COLOR_BUFFER);
+    g_Supervisor.gfxDevice->EndFrame();
     g_Supervisor.gfxDevice->SwapBuffers();
     if (LoadGameData() != ZUN_SUCCESS)
     {
@@ -495,7 +497,9 @@ ZunResult Supervisor::AddedCallback(Supervisor *arg)
         i = 0;
         while (i < 4)
         {
+            g_Supervisor.gfxDevice->BeginFrame();
             g_AnmManager->CopySurfaceToBackBuffer(0, 0, 0, 0, 0);
+            g_Supervisor.gfxDevice->EndFrame();
             g_Supervisor.gfxDevice->SwapBuffers();
             i++;
         }

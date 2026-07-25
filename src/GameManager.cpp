@@ -361,9 +361,10 @@ void GameManager::DrawLoadingSprite()
     spritePos.y = 448.0f;
     spritePos.z = 0.0f;
     spriteVm.pos = spritePos;
+    g_Supervisor.gfxDevice->BeginFrame();
     ScreenEffect::DrawSquare(&rect, 0xa0000000);
     g_AnmManager->DrawNoRotation(&spriteVm);
-    g_AnmManager->Flush();
+    g_Supervisor.gfxDevice->EndFrame();
     g_Supervisor.gfxDevice->SwapBuffers();
 }
 

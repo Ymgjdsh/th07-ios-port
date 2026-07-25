@@ -48,6 +48,8 @@ class GlesGraphics : public ZunGraphics
         return RENDERER_OPENGLES;
     }
 
+    void BeginFrame() override;
+    void EndFrame() override;
     void SetFogRange(f32 nearPlane, f32 farPlane) override;
     void SetFogColor(ZunColor color) override;
     void SetColorOp(TextureOpComponent component, ColorOp op) override;
@@ -89,6 +91,7 @@ class GlesGraphics : public ZunGraphics
   private:
     SDL_GLContext ctx;
     u32 shaderProgram;
+    u32 vao;
     u32 vaos[3];
     u32 vbo;
     u8 alphaRef = 0;

@@ -45,6 +45,8 @@ class SoftwareGraphics : public ZunGraphics
         return RENDERER_SOFTWARE;
     }
 
+    void BeginFrame() override;
+    void EndFrame() override;
     void SetFogRange(f32 nearPlane, f32 farPlane) override;
     void SetFogColor(ZunColor color) override;
     void SetColorOp(TextureOpComponent component, ColorOp op) override;

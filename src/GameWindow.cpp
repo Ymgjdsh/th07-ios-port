@@ -73,12 +73,14 @@ RenderResult GameWindow::Render()
 
     if (!g_Supervisor.VsyncEnabled())
     {
+        g_Supervisor.gfxDevice->BeginFrame();
         g_AnmManager->ResetVertexBuffer();
         g_Supervisor.fogEnabled = 255;
         g_Supervisor.DisableFog();
         g_Chain.RunDrawChain();
         g_AnmManager->Flush();
         g_Supervisor.gfxDevice->BindTexture({0});
+        g_Supervisor.gfxDevice->EndFrame();
 
         g_Supervisor.viewport.x = 0;
         g_Supervisor.viewport.y = 0;
@@ -110,12 +112,14 @@ RenderResult GameWindow::Render()
     begin_loop:
         if ((i32)g_Supervisor.cfg.frameskipConfig <= (i32)this->curFrame)
         {
+            g_Supervisor.gfxDevice->BeginFrame();
             g_AnmManager->ResetVertexBuffer();
             g_Supervisor.fogEnabled = 255;
             g_Supervisor.DisableFog();
             g_Chain.RunDrawChain();
             g_AnmManager->Flush();
             g_Supervisor.gfxDevice->BindTexture({0});
+            g_Supervisor.gfxDevice->EndFrame();
         }
 
         g_AnmManager->Flush();

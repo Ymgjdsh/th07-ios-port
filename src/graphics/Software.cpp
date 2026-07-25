@@ -66,6 +66,14 @@ void SoftwareGraphics::Exit()
     textures.clear();
 }
 
+void SoftwareGraphics::BeginFrame()
+{
+}
+
+void SoftwareGraphics::EndFrame()
+{
+}
+
 void SoftwareGraphics::SetFogRange(f32 nearPlane, f32 farPlane)
 {
     fogNear = nearPlane;

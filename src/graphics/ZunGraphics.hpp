@@ -128,6 +128,8 @@ class ZunGraphics
 
     virtual RendererType GetType() = 0;
 
+    virtual void BeginFrame() = 0;
+    virtual void EndFrame() = 0;
     virtual void SetFogRange(f32 nearPlane, f32 farPlane) = 0;
     virtual void SetFogColor(ZunColor color) = 0;
     virtual void SetColorOp(TextureOpComponent component, ColorOp op) = 0;
