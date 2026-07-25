@@ -1466,6 +1466,7 @@ void BombData::BombSakuyaBCalcFocus(Player *player)
         player->bombClearBoxes[0].pos.y = 224.0f;
         player->bombClearBoxes[0].pos.z = 448.0f;
         player->bombClearBoxes[0].size.x = 512.0f;
+        player->dirtyBombBoxes = true;
         return;
     }
 

@@ -874,48 +874,81 @@ i32 Player::CalcDamageToEnemy(ZunVec3 *center, ZunVec3 *size, i32 *param_3)
     return damage;
 }
 
+void Player::RebuildBombBoxCache()
+{
+    this->numActiveBombClearBoxes = 0;
+    this->dirtyBombBoxes = false;
+
+    for (i32 i = 0; i < 96; i++)
+    {
+        BombClearBox *bomb = &this->bombClearBoxes[i];
+        if (bomb->pos.z != 0.0f)
+        {
+            CachedBombClearBox *c =
+                &this->activeBombClearBoxesCache[this->numActiveBombClearBoxes++];
+            c->isBox = true;
+            c->minX = bomb->pos.x - bomb->pos.z * 0.5f;
+            c->maxX = bomb->pos.x + bomb->pos.z * 0.5f;
+            c->minY = bomb->pos.y - bomb->size.x * 0.5f;
+            c->maxY = bomb->pos.y + bomb->size.x * 0.5f;
+            c->itemType = bomb->itemType;
+        }
+        else if (bomb->size.y != 0.0f)
+        {
+            CachedBombClearBox *c =
+                &this->activeBombClearBoxesCache[this->numActiveBombClearBoxes++];
+            c->isBox = false;
+            c->cx = bomb->pos.x;
+            c->cy = bomb->pos.y;
+            c->radiusSq = bomb->size.y * bomb->size.y;
+            c->itemType = bomb->itemType;
+        }
+    }
+}
+
 i32 Player::CheckBombGraze(ZunVec3 *center, ZunVec3 *size)
 {
-    BombClearBox *bombProjectile;
-    i32 i;
-    ZunVec3 bulletBottomRight;
-    ZunVec3 bulletTopLeft;
-    ZunVec3 bombBottomRight;
-    ZunVec3 bombTopLeft;
-    f32 bombY;
-    f32 bombX;
-
-    bombProjectile = this->bombClearBoxes;
-    bulletTopLeft.x = center->x - size->x / 2.0f;
-    bulletTopLeft.y = center->y - size->y / 2.0f;
-    bulletBottomRight.x = center->x + size->x / 2.0f;
-    bulletBottomRight.y = center->y + size->y / 2.0f;
-    for (i = 0; i < 96; i++, bombProjectile++)
+    if (this->dirtyBombBoxes)
     {
-        if (bombProjectile->pos.z != 0.0f)
+        RebuildBombBoxCache();
+    }
+
+    if (this->numActiveBombClearBoxes == 0)
+    {
+        return 0;
+    }
+
+    f32 halfW = size->x * 0.5f;
+    f32 halfH = size->y * 0.5f;
+    f32 bulletMinX = center->x - halfW;
+    f32 bulletMinY = center->y - halfH;
+    f32 bulletMaxX = center->x + halfW;
+    f32 bulletMaxY = center->y + halfH;
+
+    for (i32 i = 0; i < this->numActiveBombClearBoxes; i++)
+    {
+        const CachedBombClearBox &c = this->activeBombClearBoxesCache[i];
+        if (c.isBox)
         {
-            bombTopLeft.x = bombProjectile->pos.x - bombProjectile->pos.z / 2.0f;
-            bombTopLeft.y = bombProjectile->pos.y - bombProjectile->size.x / 2.0f;
-            bombBottomRight.x = bombProjectile->pos.z / 2.0f + bombProjectile->pos.x;
-            bombBottomRight.y = bombProjectile->size.x / 2.0f + bombProjectile->pos.y;
-            if (!(bombTopLeft.x > bulletBottomRight.x || bombBottomRight.x < bulletTopLeft.x ||
-                  bombTopLeft.y > bulletBottomRight.y || bombBottomRight.y < bulletTopLeft.y))
+            if (!(c.minX > bulletMaxX || c.maxX < bulletMinX || c.minY > bulletMaxY ||
+                  c.maxY < bulletMinY))
             {
-                this->itemType = bombProjectile->itemType;
+                this->itemType = c.itemType;
                 return 2;
             }
         }
-        else if (bombProjectile->size.y != 0.0) // double used here for some reason
+        else
         {
-            bombX = center->x - bombProjectile->pos.x;
-            bombY = center->y - bombProjectile->pos.y;
-            if (bombX * bombX + bombY * bombY < bombProjectile->size.y * bombProjectile->size.y)
+            f32 dx = center->x - c.cx;
+            f32 dy = center->y - c.cy;
+            if (dx * dx + dy * dy < c.radiusSq)
             {
-                this->itemType = bombProjectile->itemType;
+                this->itemType = c.itemType;
                 return 2;
             }
         }
     }
+
     return 0;
 }
 
@@ -1725,6 +1758,7 @@ void Player::UpdateBombProjectiles()
             bomb->size.y += bomb->size.z;
         }
     }
+    this->dirtyBombBoxes = true;
 }
 
 void Player::UpdateBorderAndBombState()
@@ -2077,6 +2111,7 @@ BombClearBox *Player::SpawnBombProjectile(ZunVec3 *centerPosition, f32 posZ, f32
     bomb->size.x = size;
     bomb->lifetime = 0;
     bomb->itemType = itemType;
+    this->dirtyBombBoxes = true;
     return bomb;
 }
 
@@ -2100,6 +2135,7 @@ BombClearBox *Player::SpawnBombEffect(ZunVec3 *pos, f32 sizeY, f32 sizeZ, i32 li
     bomb->size.z = sizeZ;
     bomb->lifetime = lifetime;
     bomb->itemType = itemType;
+    this->dirtyBombBoxes = true;
     return bomb;
 }
 
@@ -2453,6 +2489,8 @@ ZunResult Player::AddedCallback(Player *arg)
     arg->bombInfo.bombFocusCalc = g_BombData[g_GameManager.shotTypeAndCharacter].calcFocus;
     arg->bombInfo.drawFocus = g_BombData[g_GameManager.shotTypeAndCharacter].drawFocus;
     arg->bombInfo.isInUse = 0;
+    arg->dirtyBombBoxes = true;
+    arg->numActiveBombClearBoxes = 0;
     arg->optionAngle = -1.5707964f;
     arg->verticalMovementSpeedMultiplierDuringBomb = 1.0f;
     arg->horizontalMovementSpeedMultiplierDuringBomb = 1.0f;

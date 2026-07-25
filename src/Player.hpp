@@ -71,6 +71,16 @@ struct BombClearBox
     };
 };
 
+struct CachedBombClearBox
+{
+    bool isBox;
+    f32 minX, maxX;
+    f32 minY, maxY;
+    f32 cx, cy;
+    f32 radiusSq;
+    i32 itemType;
+};
+
 struct PlayerBombSubInfo
 {
     i32 state;
@@ -206,6 +216,8 @@ struct Player
     static void SpawnBullets(Player *player, u32 timer);
     void StartFireBulletTimer();
 
+    void RebuildBombBoxCache();
+
     void SetToTopLeftPos(AnmVm *vm)
     {
         vm->pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
@@ -262,6 +274,9 @@ struct Player
     Effect *focusEffect;
     BombProjectile bombDamageBoxes[112];
     BombClearBox bombClearBoxes[96];
+    CachedBombClearBox activeBombClearBoxesCache[96];
+    i32 numActiveBombClearBoxes;
+    bool dirtyBombBoxes;
     i32 isBombing;
     ShtEntry *shtEntries[4];
     f32 horizontalMovementSpeedMultiplierDuringBomb;

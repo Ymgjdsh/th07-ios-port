@@ -461,6 +461,7 @@ void GlesGraphics::SetClearDepth(f32 depth)
 
 void GlesGraphics::SetClearColor(ZunColor color)
 {
+    clearColor = color;
     glClearColor(color.bytes.r / 255.0f, color.bytes.g / 255.0f, color.bytes.b / 255.0f,
                  color.bytes.a / 255.0f);
 }
@@ -737,9 +738,6 @@ void GlesGraphics::SwapBuffers()
     glBindFramebuffer(GL_READ_FRAMEBUFFER, this->fbo);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, this->defaultFbo);
 
-    GLfloat clearColor[4];
-    glGetFloatv(GL_COLOR_CLEAR_VALUE, clearColor);
-
     glDisable(GL_SCISSOR_TEST);
     glViewport(0, 0, drawableWidth, drawableHeight);
 
@@ -773,7 +771,8 @@ void GlesGraphics::SwapBuffers()
     glBlitFramebuffer(0, 0, 640, 480, dstX, dstY, dstX + dstWidth, dstY + dstHeight,
                       GL_COLOR_BUFFER_BIT, GL_LINEAR);
 
-    glClearColor(clearColor[0], clearColor[1], clearColor[2], clearColor[3]);
+    glClearColor(clearColor.bytes.r / 255.0f, clearColor.bytes.g / 255.0f,
+                 clearColor.bytes.b / 255.0f, clearColor.bytes.a / 255.0f);
 
 #if defined(__APPLE__) && TARGET_OS_IPHONE
     glBindRenderbuffer(

@@ -114,6 +114,7 @@ class GlesGraphics : public ZunGraphics
     f32 fogNear = 0.0f;
     f32 fogFar = 1.0f;
     ZunColor fogColor = {0};
+    ZunColor clearColor = {0};
     bool alphaTestEnabled = false;
     bool depthMaskEnabled = true;
 
