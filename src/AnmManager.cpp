@@ -580,6 +580,7 @@ void AnmManager::SetRenderStateForVm(AnmVm *vm)
 
     if ((u32)this->currentBlendMode != vm->blendMode)
     {
+        Flush();
         this->currentBlendMode = vm->blendMode;
         if (!this->currentBlendMode)
         {
@@ -626,12 +627,13 @@ void AnmManager::SetRenderStateForVm(AnmVm *vm)
     }
     if (!g_Supervisor.cfg.disableZBuffer && (u32)this->currentZWriteDisable != vm->zWriteDisable)
     {
+        Flush();
         this->currentZWriteDisable = vm->zWriteDisable;
         g_Supervisor.gfxDevice->SetDepthMask(this->currentZWriteDisable == 0);
     }
     if ((u32)this->currentCameraMode != vm->cameraMode)
     {
-        g_AnmManager->Flush();
+        Flush();
         this->currentCameraMode = vm->cameraMode;
         if (!this->currentCameraMode)
         {
@@ -651,6 +653,7 @@ void AnmManager::SyncRenderState(AnmVm *vm)
 {
     if ((u32)this->currentBlendMode != vm->blendMode)
     {
+        Flush();
         this->currentBlendMode = vm->blendMode;
         if (!this->currentBlendMode)
         {
@@ -663,6 +666,7 @@ void AnmManager::SyncRenderState(AnmVm *vm)
     }
     if (!g_Supervisor.cfg.disableZBuffer && (u32)this->currentZWriteDisable != vm->zWriteDisable)
     {
+        Flush();
         this->currentZWriteDisable = vm->zWriteDisable;
         g_Supervisor.gfxDevice->SetDepthMask(this->currentZWriteDisable == 0);
     }

@@ -242,7 +242,6 @@ void GlesGraphics::BeginFrame()
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
 
     glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, VBO_CAPACITY, nullptr, GL_STREAM_DRAW);
     vboOffset = 0;
 
     stateCache.dirtyMatrix = true;
@@ -395,8 +394,6 @@ void GlesGraphics::Disable(Capabilities cap)
 
 void GlesGraphics::SetBlendMode(BlendMode srcMode, BlendMode dstMode)
 {
-    Flush();
-
     GLenum glSrcMode = GL_SRC_ALPHA;
     switch (srcMode)
     {
@@ -429,16 +426,12 @@ void GlesGraphics::SetBlendMode(BlendMode srcMode, BlendMode dstMode)
 
 void GlesGraphics::SetDepthMask(bool enable)
 {
-    Flush();
-
     depthMaskEnabled = enable;
     glDepthMask(enable);
 }
 
 void GlesGraphics::SetDepthFunc(DepthFunc func)
 {
-    Flush();
-
     switch (func)
     {
     case DEPTH_FUNC_LEQUAL:
@@ -736,6 +729,12 @@ void GlesGraphics::SwapBuffers()
 #endif
 
     glBindFramebuffer(GL_READ_FRAMEBUFFER, this->fbo);
+
+#ifndef USING_GL
+    const GLenum attachments[] = {GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT};
+    glInvalidateFramebuffer(GL_READ_FRAMEBUFFER, 2, attachments);
+#endif
+
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, this->defaultFbo);
 
     glDisable(GL_SCISSOR_TEST);

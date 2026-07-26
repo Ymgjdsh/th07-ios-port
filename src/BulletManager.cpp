@@ -12,6 +12,7 @@
 #include "Supervisor.hpp"
 #include "ZunMath.hpp"
 #include "utils.hpp"
+#include <algorithm>
 
 const BulletTypeInfo g_BulletTypeInfos[11] = {
     {0x200, 0x212, 0x213, 0x214, 0x20f}, {0x201, 0x215, 0x216, 0x217, 0x210},
@@ -1236,15 +1237,42 @@ u32 BulletManager::OnDraw(BulletManager *arg)
         }
     }
     g_ItemManager.OnDraw();
-    for (i = 0; i < 6; i++)
+
+    Bullet *activeBullets[1024];
+    i32 activeCount = 0;
+    for (i = 0; i < 1024; i++)
     {
-        bullet = arg->bulletsPtrs[i];
-        while (bullet)
+        if (arg->bullets[i].state != BULLET_INACTIVE && arg->bullets[i].state != BULLET_END_ARRAY)
         {
-            bullet->Draw();
-            bullet = bullet->next;
+            activeBullets[activeCount++] = &arg->bullets[i];
         }
     }
+    std::stable_sort(activeBullets, activeBullets + activeCount, [](Bullet *a, Bullet *b) {
+        AnmVm *vmA = (a->state == BULLET_DESPAWN) ? &a->sprites.spriteSpawnEffectDonut
+                                                  : &a->sprites.spriteBullet;
+        AnmVm *vmB = (b->state == BULLET_DESPAWN) ? &b->sprites.spriteSpawnEffectDonut
+                                                  : &b->sprites.spriteBullet;
+
+        if (vmA->blendMode != vmB->blendMode)
+        {
+            return vmA->blendMode < vmB->blendMode;
+        }
+
+        if (a->sprites.collisionType != b->sprites.collisionType)
+        {
+            return a->sprites.collisionType < b->sprites.collisionType;
+        }
+
+        i32 texA = vmA->sprite ? vmA->sprite->sourceFileIndex : -1;
+        i32 texB = vmB->sprite ? vmB->sprite->sourceFileIndex : -1;
+        return texA < texB;
+    });
+
+    for (i = 0; i < activeCount; i++)
+    {
+        activeBullets[i]->Draw();
+    }
+
     return CHAIN_CALLBACK_RESULT_CONTINUE;
 }
 

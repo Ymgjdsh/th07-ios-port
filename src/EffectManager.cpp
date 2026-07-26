@@ -9,6 +9,7 @@
 #include "ZunMath.hpp"
 #include "ZunResult.hpp"
 #include "utils.hpp"
+#include <algorithm>
 
 EffectTypeInfo g_EffectMapping[34] = {
     {0x2ab, NULL, NULL},
@@ -569,8 +570,7 @@ Effect *EffectManager::SpawnMovingParticles(i32 effectId, ZunVec3 *pos, ZunVec3 
     return i >= 400 ? &this->effects[408] : effect;
 }
 
-Effect *EffectManager::SpawnEffect(i32 effectId, ZunVec3 *pos, i32 param_3, i32 param_4,
-                                   u32 color)
+Effect *EffectManager::SpawnEffect(i32 effectId, ZunVec3 *pos, i32 param_3, i32 param_4, u32 color)
 {
     (void)param_4;
 
@@ -673,33 +673,41 @@ u32 EffectManager::OnUpdate(EffectManager *arg)
 
 u32 EffectManager::OnDraw(EffectManager *arg)
 {
-    Effect *effect;
+    auto sortAndDraw = [](Effect *layerHead, bool isBillboard) {
+        Effect *active[409];
+        i32 count = 0;
+        Effect *effect = layerHead->next;
+        while (effect)
+        {
+            active[count++] = effect;
+            effect = effect->next;
+        }
 
-    effect = arg->layer0.next;
-    while (effect)
-    {
-        effect->vm.pos = effect->pos1;
-        effect->vm.pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
-        effect->vm.pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
-        g_AnmManager->Draw(&effect->vm);
-        effect = effect->next;
-    }
-    effect = arg->layer2.next;
-    while (effect)
-    {
-        effect->vm.pos = effect->pos1;
-        g_AnmManager->DrawBillboard(&effect->vm);
-        effect = effect->next;
-    }
-    effect = arg->layer3.next;
-    while (effect)
-    {
-        effect->vm.pos = effect->pos1;
-        effect->vm.pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
-        effect->vm.pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
-        g_AnmManager->Draw(&effect->vm);
-        effect = effect->next;
-    }
+        std::sort(active, active + count, [](Effect *a, Effect *b) {
+            i32 texA = a->vm.sprite ? a->vm.sprite->sourceFileIndex : -1;
+            i32 texB = b->vm.sprite ? b->vm.sprite->sourceFileIndex : -1;
+            return texA < texB;
+        });
+
+        for (i32 i = 0; i < count; i++)
+        {
+            active[i]->vm.pos = active[i]->pos1;
+            if (isBillboard)
+            {
+                g_AnmManager->DrawBillboard(&active[i]->vm);
+            }
+            else
+            {
+                active[i]->vm.pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
+                active[i]->vm.pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
+                g_AnmManager->Draw(&active[i]->vm);
+            }
+        }
+    };
+
+    sortAndDraw(&arg->layer0, false);
+    sortAndDraw(&arg->layer2, true);
+    sortAndDraw(&arg->layer3, false);
     return CHAIN_CALLBACK_RESULT_CONTINUE;
 }
 

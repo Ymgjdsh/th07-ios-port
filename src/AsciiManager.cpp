@@ -1,5 +1,6 @@
 #include "AsciiManager.hpp"
 
+#include <algorithm>
 #include <cstdio>
 
 #include "AnmIdx.hpp"
@@ -272,6 +273,9 @@ void AsciiManager::DrawStrings()
     AsciiManagerString *string;
     i32 i;
 
+    std::stable_sort(
+        this->strings, this->strings + this->numStrings,
+        [](const AsciiManagerString &a, const AsciiManagerString &b) { return a.isGui < b.isGui; });
     guiString = 1;
     string = this->strings;
     this->vm0.visible = 1;

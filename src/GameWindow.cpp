@@ -68,6 +68,9 @@ RenderResult GameWindow::Render()
 
     if (!this->isAppActive)
     {
+#ifndef __EMSCRIPTEN__
+        SDL_WaitEvent(NULL);
+#endif
         return RENDER_RESULT_KEEP_RUNNING;
     }
 
