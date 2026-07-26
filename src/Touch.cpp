@@ -47,6 +47,7 @@ bool g_DialogueHoldActive = false;
 
 bool g_BombPending = false;
 bool g_PausePending = false;
+bool g_BombedWithTouch = false;
 
 bool IsGameplayTouchMode()
 {
@@ -184,11 +185,17 @@ void ClearGameplayFingers()
 void Touch::ResetRunUsage()
 {
     g_UsedThisRun = false;
+    g_BombedWithTouch = false;
 }
 
 bool Touch::WasUsedThisRun()
 {
     return g_UsedThisRun;
+}
+
+bool Touch::UsedTouchToBomb()
+{
+    return g_BombedWithTouch;
 }
 
 void Touch::CancelTouches()
@@ -202,6 +209,7 @@ void Touch::CancelTouches()
     ClearGameplayFingers();
     g_PausePending = false;
     g_BombPending = false;
+    g_BombedWithTouch = false;
 
     g_DialogueHoldActive = false;
 }
@@ -363,6 +371,8 @@ u16 Touch::GetButtonBits()
 {
     u16 buttons = 0;
 
+    g_BombedWithTouch = false;
+
     if (!IsGameplayTouchMode())
     {
         if (g_MenuGesture.pendingButton != 0)
@@ -419,6 +429,7 @@ u16 Touch::GetButtonBits()
     {
         buttons |= TH_BUTTON_BOMB;
         g_BombPending = false;
+        g_BombedWithTouch = true;
     }
 
     if (g_PausePending)

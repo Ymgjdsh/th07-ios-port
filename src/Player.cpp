@@ -1176,6 +1176,13 @@ void Player::Die()
     this->playerState = PLAYER_STATE_DEAD;
     this->invulnerabilityTimer = 0;
     g_SoundPlayer.PlaySoundByIdx(SOUND_PICHUN, 0);
+
+    // touch controls are a bit more tricky to deathbomb since your finger doesn't rest on a key
+    // that you can physically actuate the moment you need to deathbomb, so because im just such
+    // a nice person there's a 5 frame leniency for touch users (ONLY FOR IF YOU BOMBED WITH
+    // TOUCH!!!!!)
+    this->respawnTimer = g_Player.shooterData->initialRespawnTimer +
+                         (Touch::WasUsedThisRun() ? Touch::DEATHBOMB_TOLERANCE : 0);
 }
 
 i32 Player::HandlePlayerInputs()
@@ -1802,6 +1809,16 @@ void Player::UpdateBorderAndBombState()
                 this->respawnTimer != 0 && 0 < (i32)g_GameManager.globals->bombsRemaining &&
                 this->borderInvulnerabilityTime == 0 && IS_PRESSED_GAME(TH_BUTTON_BOMB))
             {
+                if (this->playerState == PLAYER_STATE_DEAD)
+                {
+                    i32 minRequiredTimer = (Touch::WasUsedThisRun() && !Touch::UsedTouchToBomb())
+                                               ? Touch::DEATHBOMB_TOLERANCE
+                                               : 0;
+                    if (this->respawnTimer <= minRequiredTimer)
+                    {
+                        return;
+                    }
+                }
                 g_ReplayManager->replayEventFlags |= 1;
                 g_GameManager.AddBombsUsed(1);
                 g_GameManager.AddBombsRemaining(-1);
