@@ -76,15 +76,6 @@ RenderResult GameWindow::Render()
 
     if (!g_Supervisor.VsyncEnabled())
     {
-        g_Supervisor.gfxDevice->BeginFrame();
-        g_AnmManager->ResetVertexBuffer();
-        g_Supervisor.fogEnabled = 255;
-        g_Supervisor.DisableFog();
-        g_Chain.RunDrawChain();
-        g_AnmManager->Flush();
-        g_Supervisor.gfxDevice->BindTexture({0});
-        g_Supervisor.gfxDevice->EndFrame();
-
         g_Supervisor.viewport.x = 0;
         g_Supervisor.viewport.y = 0;
         g_Supervisor.viewport.width = 640;
@@ -102,6 +93,15 @@ RenderResult GameWindow::Render()
         {
             return RENDER_RESULT_EXIT_ERROR;
         }
+
+        g_Supervisor.gfxDevice->BeginFrame();
+        g_AnmManager->ResetVertexBuffer();
+        g_Supervisor.fogEnabled = 255;
+        g_Supervisor.DisableFog();
+        g_Chain.RunDrawChain();
+        g_AnmManager->Flush();
+        g_Supervisor.gfxDevice->BindTexture({0});
+        g_Supervisor.gfxDevice->EndFrame();
 
         Present();
         this->curFrame = 0;

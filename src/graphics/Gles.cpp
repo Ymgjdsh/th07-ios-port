@@ -152,7 +152,7 @@ ZunGraphics *GlesGraphics::Init()
 
     glBindFramebuffer(GL_FRAMEBUFFER, gfx->fbo);
 
-    if (!SDL_GL_SetSwapInterval(1))
+    if (!SDL_GL_SetSwapInterval(-1) && !SDL_GL_SetSwapInterval(1))
     {
         // technically this isnt fatal we just go into 60 fps later on in gamewindow::render
         Supervisor::DebugPrint("SDL_GL_SetSwapInterval failed: %s\n", SDL_GetError());

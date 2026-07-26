@@ -14,6 +14,8 @@ struct FingerSlot
     SDL_FingerID id;
     f32 lastPxX;
     f32 lastPxY;
+    u64 start;
+    u64 end;
 };
 
 struct MenuGestureTracker
@@ -30,6 +32,7 @@ struct MenuGestureTracker
 
 FingerSlot g_MoveFinger;
 FingerSlot g_FocusFinger;
+FingerSlot g_DialogueHoldFinger;
 MenuGestureTracker g_MenuGesture;
 
 f32 g_AccumDx = 0.0f;
@@ -40,10 +43,6 @@ bool g_UsedThisRun = false;
 // hopefully you only have 10 fingers
 SDL_FingerID g_ActiveGameplayFingerIds[10];
 i32 g_NumActiveGameplayFingers = 0;
-
-Uint64 g_DialogueHoldStart = 0;
-SDL_FingerID g_DialogueHoldFingerID;
-bool g_DialogueHoldActive = false;
 
 bool g_BombPending = false;
 bool g_PausePending = false;
@@ -129,11 +128,14 @@ void AssignFinger(FingerSlot *slot, SDL_FingerID id, f32 px, f32 py)
     slot->id = id;
     slot->lastPxX = px;
     slot->lastPxY = py;
+    slot->start = SDL_GetTicks();
+    slot->end = 0;
 }
 
 void ReleaseFinger(FingerSlot *slot)
 {
     slot->active = false;
+    slot->end = SDL_GetTicks();
 }
 
 bool HasGameplayFinger(SDL_FingerID id)
@@ -202,6 +204,7 @@ void Touch::CancelTouches()
 {
     ReleaseFinger(&g_MoveFinger);
     ReleaseFinger(&g_FocusFinger);
+    ReleaseFinger(&g_DialogueHoldFinger);
 
     g_AccumDx = 0.0f;
     g_AccumDy = 0.0f;
@@ -210,8 +213,6 @@ void Touch::CancelTouches()
     g_PausePending = false;
     g_BombPending = false;
     g_BombedWithTouch = false;
-
-    g_DialogueHoldActive = false;
 }
 
 void Touch::FingerDown(const SDL_TouchFingerEvent &f)
@@ -243,13 +244,6 @@ void Touch::FingerDown(const SDL_TouchFingerEvent &f)
             return;
         }
 
-        if (g_Gui.HasCurrentMsgIdx() && !g_DialogueHoldActive)
-        {
-            g_DialogueHoldActive = true;
-            g_DialogueHoldFingerID = f.fingerID;
-            g_DialogueHoldStart = SDL_GetTicks();
-        }
-
         if (IsBombZone(px, py))
         {
             g_BombPending = true;
@@ -263,8 +257,20 @@ void Touch::FingerDown(const SDL_TouchFingerEvent &f)
             g_PausePending = true;
         }
 
+        if (g_Gui.HasCurrentMsgIdx() && !g_DialogueHoldFinger.active)
+        {
+            AssignFinger(&g_DialogueHoldFinger, f.fingerID, px, py);
+            g_UsedThisRun = true;
+            return;
+        }
+
         if (!g_MoveFinger.active)
         {
+            if (g_FocusFinger.active && f.fingerID == g_FocusFinger.id)
+            {
+                return;
+            }
+
             AssignFinger(&g_MoveFinger, f.fingerID, px, py);
             g_UsedThisRun = true;
             return;
@@ -308,12 +314,11 @@ void Touch::FingerUp(const SDL_TouchFingerEvent &f)
     }
     else
     {
-        if (g_DialogueHoldActive && f.fingerID == g_DialogueHoldFingerID)
-        {
-            g_DialogueHoldActive = false;
-        }
-
         RemoveGameplayFinger(f.fingerID);
+        if (IsFinger(g_DialogueHoldFinger, f.fingerID))
+        {
+            ReleaseFinger(&g_DialogueHoldFinger);
+        }
         if (IsFinger(g_MoveFinger, f.fingerID))
         {
             ReleaseFinger(&g_MoveFinger);
@@ -342,6 +347,12 @@ void Touch::FingerMotion(const SDL_TouchFingerEvent &f)
     }
     else
     {
+        if (IsFinger(g_DialogueHoldFinger, f.fingerID))
+        {
+            g_DialogueHoldFinger.lastPxX = px;
+            g_DialogueHoldFinger.lastPxY = py;
+        }
+
         if (IsFinger(g_MoveFinger, f.fingerID))
         {
             f32 rx, ry, rw, rh, scale;
@@ -401,13 +412,18 @@ u16 Touch::GetButtonBits()
         }
     }
 
-    if (!g_Gui.HasCurrentMsgIdx())
+    if (!g_Gui.HasCurrentMsgIdx() && g_DialogueHoldFinger.active)
     {
-        g_DialogueHoldActive = false;
+        if (!g_MoveFinger.active)
+        {
+            AssignFinger(&g_MoveFinger, g_DialogueHoldFinger.id, g_DialogueHoldFinger.lastPxX,
+                         g_DialogueHoldFinger.lastPxY);
+        }
+        ReleaseFinger(&g_DialogueHoldFinger);
     }
-    else if (g_DialogueHoldActive)
+    else if (g_DialogueHoldFinger.active)
     {
-        u64 held = SDL_GetTicks() - g_DialogueHoldStart;
+        u64 held = SDL_GetTicks() - g_DialogueHoldFinger.start;
 
         if (held >= 500)
         {
@@ -415,7 +431,8 @@ u16 Touch::GetButtonBits()
         }
     }
 
-    if (g_MoveFinger.active)
+    // keep firing for a bit after release
+    if (g_MoveFinger.active || SDL_GetTicks() - g_MoveFinger.end < 200)
     {
         buttons |= TH_BUTTON_SHOOT;
     }

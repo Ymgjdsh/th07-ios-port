@@ -1412,6 +1412,9 @@ i32 Player::HandlePlayerInputs()
 
         this->playerDirection = MOVEMENT_NONE;
 
+        // this is actually pretty useless since playerdirection handling is above which we
+        // completely ignored in the touch handling path. the actual part that handles what
+        // direction the playersprite faces is below
         const f32 dirDeadzone = 0.01f;
         bool left = touchDx < -dirDeadzone;
         bool right = touchDx > dirDeadzone;
