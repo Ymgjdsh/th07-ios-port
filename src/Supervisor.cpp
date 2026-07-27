@@ -447,6 +447,11 @@ i32 Supervisor::CheckVSync()
         g_Supervisor.gfxDevice->SwapBuffers();
         SDL_Delay(16);
     }
+
+#if defined(__ANDROID__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
+    return 0;
+#endif
+
     if (g_GameWindow.window)
     {
         SDL_DisplayID displayID = SDL_GetDisplayForWindow(g_GameWindow.window);

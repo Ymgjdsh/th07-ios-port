@@ -40,7 +40,6 @@ set(SOURCES
     src/Touch.cpp
     src/main.cpp
     src/graphics/Gles.cpp
-    src/graphics/Software.cpp
     src/pbg4/Lzss.cpp
     src/pbg4/Pbg4Archive.cpp
     src/pbg4/Pbg4File.cpp

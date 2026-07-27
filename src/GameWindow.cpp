@@ -17,7 +17,6 @@
 #include "Stage.hpp"
 #include "Supervisor.hpp"
 #include "graphics/Gles.hpp"
-#include "graphics/Software.hpp"
 #include "graphics/ZunGraphics.hpp"
 
 GameWindow g_GameWindow;
@@ -27,7 +26,6 @@ u64 g_LastPerfCounter;
 
 static GfxInit g_RenderingBackends[] = {
     GlesGraphics::Init,
-    SoftwareGraphics::Init,
 };
 
 void GameWindow::Present()
@@ -175,6 +173,10 @@ RenderResult GameWindow::Render()
             goto begin_loop;
         }
     }
+    else
+    {
+        SDL_Delay(1);
+    }
 
     return RENDER_RESULT_KEEP_RUNNING;
 }
@@ -254,6 +256,13 @@ ZunResult GameWindow::CreateGameWindow()
         Supervisor::DebugPrint("sdl window create failed: %s\n", SDL_GetError());
         return ZUN_ERROR;
     }
+
+#if defined(__APPLE__) && TARGET_OS_IPHONE
+    SDL_DisplayMode mode;
+    SDL_zero(mode);
+    mode.refresh_rate = 60.0f;
+    SDL_SetWindowDisplayMode(g_GameWindow.window, &mode);
+#endif
 
     SDL_ShowWindow(g_GameWindow.window);
     SDL_SyncWindow(g_GameWindow.window);
