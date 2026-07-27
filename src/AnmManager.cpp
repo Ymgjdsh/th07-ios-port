@@ -678,6 +678,8 @@ ZunResult AnmManager::DrawInner(AnmVm *vm, u32 drawFlags)
     ZunColor color;
     f32 triangleX1, triangleX2, triangleY1, triangleY2;
 
+    g_AnmManager->TakeScreenshotIfRequested(vm);
+
     g_QuadVertices[0].pos.x += this->offset.x;
     g_QuadVertices[0].pos.y += this->offset.y;
     g_QuadVertices[1].pos.x += this->offset.x;

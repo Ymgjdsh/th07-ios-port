@@ -37,7 +37,6 @@ void GameWindow::Present()
 
     g_Supervisor.gfxDevice->SwapBuffers();
 
-    g_AnmManager->TakeScreenshotIfRequested();
     if (WAS_PRESSED_RAW(TH_BUTTON_HOME))
     {
         std::filesystem::create_directory(FileSystem::GetPrefPath("snapshot"));

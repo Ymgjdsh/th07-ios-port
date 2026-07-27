@@ -20,6 +20,19 @@
 
 struct CachedState
 {
+    void Invalidate()
+    {
+        dirtyMatrix = true;
+        dirtyFog = true;
+        dirtyViewport = true;
+        dirtyColorOp = true;
+        dirtyTexArg = true;
+        dirtyTexFactor = true;
+        dirtyAlphaTest = true;
+
+        currentStride = -1;
+        currentVao = 0xFFFFFFFF;
+    }
     bool dirtyMatrix = true;
     bool dirtyFog = true;
     bool dirtyViewport = true;
@@ -29,6 +42,7 @@ struct CachedState
     bool dirtyAlphaTest = true;
 
     i32 currentStride = -1;
+    GLuint currentVao = 0xFFFFFFFF;
 };
 
 class GlesGraphics : public ZunGraphics
@@ -91,9 +105,11 @@ class GlesGraphics : public ZunGraphics
   private:
     SDL_GLContext ctx;
     u32 shaderProgram;
-    u32 vao;
-    u32 vaos[3];
-    u32 vbo;
+    u32 vaos[3][3];
+    u32 vbos[3];
+    u32 curVbo = 0xFFFFFFFF;
+    u32 blitProgram;
+    u32 blitVao;
     u8 alphaRef = 0;
     TextureArg texArg = TEX_ARG_DIFFUSE;
     ZunColor textureFactor = {0xFFFFFFFF};
@@ -115,6 +131,8 @@ class GlesGraphics : public ZunGraphics
     f32 fogFar = 1.0f;
     ZunColor fogColor = {0};
     ZunColor clearColor = {0};
+    bool blendEnabled = false;
+    bool depthTestEnabled = false;
     bool alphaTestEnabled = false;
     bool depthMaskEnabled = true;
 
@@ -124,6 +142,7 @@ class GlesGraphics : public ZunGraphics
     GLint u_ColorOpRgb, u_ColorOpAlpha, u_TexArg, u_TextureFactor;
     GLint u_AlphaTest, u_AlphaRef;
     GLint u_FogEnabled, u_FogColor, u_FogNear, u_FogFar;
+    GLint u_BlitTexture = -1;
 
     CachedState stateCache;
 

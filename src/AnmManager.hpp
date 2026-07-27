@@ -165,7 +165,7 @@ struct AnmManager
     void SyncRenderState(AnmVm *vm);
     void TakeScreenshot(i32 textureId, i32 srcLeft, i32 srcTop, i32 srcWidth, i32 srcHeight,
                         i32 dstLeft, i32 dstTop, i32 dstWidth, i32 dstHeight);
-    void TakeScreenshotIfRequested();
+    void TakeScreenshotIfRequested(AnmVm *vm);
     void TranslateRotation(VertexTex1DiffuseXyzrhw *vertex, f32 width, f32 height, f32 sine,
                            f32 cosine, f32 xOffset, f32 yOffset);
 
