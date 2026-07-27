@@ -1,6 +1,5 @@
 #include "Gles.hpp"
 
-#include <GLES3/gl3.h>
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_timer.h>
 #include <SDL3/SDL_video.h>
