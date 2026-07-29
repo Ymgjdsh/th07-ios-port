@@ -1314,8 +1314,15 @@ ZunResult AnmManager::Draw3(AnmVm *vm)
         this->currentVertexShader = 2;
     }
 
-    g_Supervisor.gfxDevice->DrawPrimitiveUP(PRIM_TRIANGLE_STRIP, 2, g_Quad3DFallback,
-                                            sizeof(VertexTex1DiffuseXyz));
+    if (!g_Supervisor.cfg.noVertexBuffers)
+    {
+        g_Supervisor.gfxDevice->DrawPrimitive(PRIM_TRIANGLE_STRIP, 0, 2);
+    }
+    else
+    {
+        g_Supervisor.gfxDevice->DrawPrimitiveUP(PRIM_TRIANGLE_STRIP, 2, g_Quad3DFallback,
+                                                sizeof(VertexTex1DiffuseXyz));
+    }
     return ZUN_SUCCESS;
 }
 

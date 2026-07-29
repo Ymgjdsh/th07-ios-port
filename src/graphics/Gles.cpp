@@ -172,6 +172,27 @@ ZunGraphics *GlesGraphics::Init()
 
     glBindFramebuffer(GL_FRAMEBUFFER, gfx->fbo);
 
+    RenderVertexInfo unitQuadData[4] = {{{-128.0f, -128.0f, 0.0f}, {0.0f, 0.0f}},
+                                        {{128.0f, -128.0f, 0.0f}, {1.0f, 0.0f}},
+                                        {{-128.0f, 128.0f, 0.0f}, {0.0f, 1.0f}},
+                                        {{128.0f, 128.0f, 0.0f}, {1.0f, 1.0f}}};
+
+    glGenVertexArrays(1, &gfx->unitQuadVao);
+    glGenBuffers(1, &gfx->unitQuadVbo);
+    glBindVertexArray(gfx->unitQuadVao);
+    glBindBuffer(GL_ARRAY_BUFFER, gfx->unitQuadVbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(unitQuadData), unitQuadData, GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(RenderVertexInfo),
+                          (void *)offsetof(RenderVertexInfo, position));
+    glDisableVertexAttribArray(1);
+    glVertexAttrib4f(1, 1.0f, 1.0f, 1.0f, 1.0f);
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(RenderVertexInfo),
+                          (void *)offsetof(RenderVertexInfo, textureUV));
+    glBindVertexArray(0);
+
     if (!SDL_GL_SetSwapInterval(-1) && !SDL_GL_SetSwapInterval(1))
     {
         // technically this isnt fatal we just go into 60 fps later on in gamewindow::render
@@ -650,6 +671,96 @@ void GlesGraphics::ReadPixels(i32 x, i32 y, i32 width, i32 height, void *pixels)
         memcpy(bottom, tempRow, rowSize);
     }
     delete[] tempRow;
+}
+
+void GlesGraphics::DrawPrimitive(PrimitiveType type, i32 startVertex, i32 primitiveCount)
+{
+    i32 vertexCount = 0;
+    GLenum glMode = GL_TRIANGLES;
+
+    if (type == PRIM_TRIANGLES)
+    {
+        vertexCount = primitiveCount * 3;
+        glMode = GL_TRIANGLES;
+    }
+    else if (type == PRIM_TRIANGLE_STRIP)
+    {
+        vertexCount = primitiveCount + 2;
+        glMode = GL_TRIANGLE_STRIP;
+    }
+    else if (type == PRIM_TRIANGLE_FAN)
+    {
+        vertexCount = primitiveCount + 2;
+        glMode = GL_TRIANGLE_FAN;
+    }
+
+    if (stateCache.currentVao != unitQuadVao)
+    {
+        glBindVertexArray(unitQuadVao);
+        stateCache.currentVao = unitQuadVao;
+    }
+
+    if (stateCache.currentStride != sizeof(RenderVertexInfo))
+    {
+        glUniform1i(u_ScreenSpace, false);
+        glUniform1i(u_UseTexture, true);
+        stateCache.currentStride = sizeof(RenderVertexInfo);
+    }
+
+    if (stateCache.dirtyViewport)
+    {
+        glUniform4f(u_Viewport, (f32)viewport.x, (f32)viewport.y, (f32)viewport.width,
+                    (f32)viewport.height);
+        stateCache.dirtyViewport = false;
+    }
+
+    if (stateCache.dirtyMatrix)
+    {
+        glUniformMatrix4fv(u_Model, 1, GL_FALSE, (GLfloat *)&transforms[MATRIX_MODEL]);
+        glUniformMatrix4fv(u_View, 1, GL_FALSE, (GLfloat *)&transforms[MATRIX_VIEW]);
+        glUniformMatrix4fv(u_Proj, 1, GL_FALSE, (GLfloat *)&transforms[MATRIX_PROJECTION]);
+        glUniformMatrix4fv(u_TextureMatrix, 1, GL_FALSE, (GLfloat *)&transforms[MATRIX_TEXTURE]);
+        stateCache.dirtyMatrix = false;
+    }
+
+    if (stateCache.dirtyColorOp)
+    {
+        glUniform1i(u_ColorOpRgb, colorOpRgb);
+        glUniform1i(u_ColorOpAlpha, colorOpAlpha);
+        stateCache.dirtyColorOp = false;
+    }
+
+    if (stateCache.dirtyTexArg)
+    {
+        glUniform1i(u_TexArg, texArg);
+        stateCache.dirtyTexArg = false;
+    }
+
+    if (stateCache.dirtyTexFactor)
+    {
+        glUniform4f(u_TextureFactor, textureFactor.bytes.r / 255.0f, textureFactor.bytes.g / 255.0f,
+                    textureFactor.bytes.b / 255.0f, textureFactor.bytes.a / 255.0f);
+        stateCache.dirtyTexFactor = false;
+    }
+
+    if (stateCache.dirtyAlphaTest)
+    {
+        glUniform1i(u_AlphaTest, alphaTestEnabled);
+        glUniform1f(u_AlphaRef, alphaRef / 255.0f);
+        stateCache.dirtyAlphaTest = false;
+    }
+
+    if (stateCache.dirtyFog)
+    {
+        glUniform1i(u_FogEnabled, fogEnabled);
+        glUniform4f(u_FogColor, fogColor.bytes.r / 255.0f, fogColor.bytes.g / 255.0f,
+                    fogColor.bytes.b / 255.0f, fogColor.bytes.a / 255.0f);
+        glUniform1f(u_FogNear, fogNear);
+        glUniform1f(u_FogFar, fogFar);
+        stateCache.dirtyFog = false;
+    }
+
+    glDrawArrays(glMode, startVertex, vertexCount);
 }
 
 void GlesGraphics::DrawPrimitiveUP(PrimitiveType type, i32 primitiveCount, const void *vertexData,
