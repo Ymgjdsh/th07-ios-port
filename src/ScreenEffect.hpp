@@ -40,6 +40,7 @@ struct BombEffects
     ChainElem *drawChain;
     i32 field3_0xc;
     i32 alpha;
+    i32 prevAlpha;
     i32 duration;
     u32 args[3];
     ZunTimer timer;

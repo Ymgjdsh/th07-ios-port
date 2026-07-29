@@ -95,6 +95,13 @@ struct Enemy
                                          scaleFactor);
     }
 
+    void UpdatePrev()
+    {
+        this->primaryVm.UpdatePrev();
+        this->vms[0].UpdatePrev();
+        this->vms[1].UpdatePrev();
+    }
+
     AnmVm primaryVm;
     AnmVm vms[2];
     EnemyEclContext currentContext;
@@ -105,6 +112,7 @@ struct Enemy
     i32 interrupts[32];
     i32 runInterrupt;
     ZunVec3 position;
+    ZunVec3 prevPosition;
     ZunVec3 axisSpeed;
     ZunVec3 prevPos;
     ZunVec3 deltaPos;

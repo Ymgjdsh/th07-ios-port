@@ -36,6 +36,15 @@ struct BulletTypeInfo
 
 struct BulletTypeSprites
 {
+    void UpdatePrev()
+    {
+        spriteBullet.UpdatePrev();
+        spriteSpawnEffectFast.UpdatePrev();
+        spriteSpawnEffectNormal.UpdatePrev();
+        spriteSpawnEffectSlow.UpdatePrev();
+        spriteSpawnEffectDonut.UpdatePrev();
+    }
+
     AnmVm spriteBullet;
     AnmVm spriteSpawnEffectFast;
     AnmVm spriteSpawnEffectNormal;
@@ -148,9 +157,13 @@ struct Laser
     struct AnmVm vm0;
     struct AnmVm vm1;
     ZunVec3 pos;
+    ZunVec3 prevPos;
     f32 angle;
+    f32 prevAngle;
     f32 startOffset;
+    f32 prevStartOffset;
     f32 endOffset;
+    f32 prevEndOffset;
     f32 startLength;
     f32 width;
     f32 targetWidth;
@@ -200,12 +213,14 @@ struct Bullet
 
     BulletTypeSprites sprites;
     ZunVec3 pos;
+    ZunVec3 prevPos;
     ZunVec3 velocity;
     ZunVec3 unused_ba4;
     f32 speed;
     f32 acceleration;
     f32 angularVelocity;
     f32 angle;
+    f32 prevAngle;
     f32 unused_bc0;
     f32 unused_bc4;
     ZunTimer timer1;

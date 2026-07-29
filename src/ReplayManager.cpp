@@ -61,9 +61,9 @@ u32 ReplayManager::OnUpdate(ReplayManager *arg)
     arg->replayInputs->inputKey = arg->replayEventFlags;
     if (arg->frameId % 30 == 0)
     {
-        *arg->fpsCursor =
-            (u8)g_Supervisor.curFps | ((g_Supervisor.timingErrorCount != 0) ? 128 : 0);
-        *(arg->fpsCursor + 1) = (u8)g_Supervisor.curFps;
+        *arg->fpsCursor = (u8)(g_Supervisor.curFps > 60 ? 60 : g_Supervisor.curFps) |
+                          ((g_Supervisor.timingErrorCount != 0) ? 128 : 0);
+        *(arg->fpsCursor + 1) = (u8)(g_Supervisor.curFps > 60 ? 60 : g_Supervisor.curFps);
         arg->replayDataEndPointers[stage] = (uintptr_t)(arg->fpsCursor + 2);
         arg->fpsCursor++;
     }

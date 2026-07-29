@@ -79,6 +79,7 @@ static_assert(sizeof(MsgRawHeader) == 0x4);
 struct GuiImplChildB
 {
     ZunVec3 pos;
+    ZunVec3 prevPos;
     i32 fmtArg;
     i32 isShown;
     ZunTimer timer;
@@ -87,6 +88,16 @@ struct GuiImplChildB
 struct GuiMsgVm
 {
     GuiMsgVm();
+
+    void UpdatePrev()
+    {
+        portraits[0].UpdatePrev();
+        portraits[1].UpdatePrev();
+        dialogueLines[0].UpdatePrev();
+        dialogueLines[1].UpdatePrev();
+        introLines[0].UpdatePrev();
+        introLines[1].UpdatePrev();
+    }
 
     MsgRawHeader *msgFile;
     MsgRawInstr *curInstr;
@@ -110,6 +121,38 @@ struct GuiImpl
     ZunResult DrawDialogue();
     void MsgRead(i32 msgIdx);
     ZunResult RunMsg();
+
+    void UpdatePrev()
+    {
+        for (int i = 0; i < 33; i++)
+        {
+            vms0[i].UpdatePrev();
+        }
+        for (int i = 0; i < 5; i++)
+        {
+            vms1[i].UpdatePrev();
+        }
+        bombSpellcardPortrait.UpdatePrev();
+        enemySpellcardPortrait.UpdatePrev();
+        bombSpellcardDecorLeft.UpdatePrev();
+        enemySpellcardRelated1.UpdatePrev();
+        bombSpellcardDecorRight.UpdatePrev();
+        enemySpellcardRelated2.UpdatePrev();
+        bombSpellcardName.UpdatePrev();
+        enemySpellcardName.UpdatePrev();
+        bombSpellcardNameBg.UpdatePrev();
+        enemySpellcardNameBg.UpdatePrev();
+        stageClearTextVm.UpdatePrev();
+        stageClearBonusTextVm.UpdatePrev();
+        stageTransitionSnapshotVm.UpdatePrev();
+        captureBonusVm.UpdatePrev();
+        spellcardBonusIndicator.UpdatePrev();
+        for (i32 i = 0; i < 168; i++)
+        {
+            transitionQuads[i].UpdatePrev();
+        }
+        msg.UpdatePrev();
+    }
 
     AnmVm vms0[33];
     u8 bossHealthBarState;
@@ -199,6 +242,17 @@ struct Gui
         return this->bossPresent;
     }
 
+    void UpdatePrev()
+    {
+        this->impl->UpdatePrev();
+        this->prevBossHealthBarAlpha = this->bossHealthBarAlpha;
+        this->prevBossHealthBarEased = this->bossHealthBarEased;
+        for (i32 i = 0; i < 8; i++)
+        {
+            this->prevBossHealthEased[i] = this->bossHealthEased[i];
+        }
+    }
+
     i32 frameCounter;
     union {
         u32 flags;
@@ -215,6 +269,7 @@ struct Gui
     f32 bombNameBarLength;
     f32 spellcardBarLength;
     u32 bossHealthBarAlpha;
+    u32 prevBossHealthBarAlpha;
     i32 bossLifeMarkers;
     i32 spellcardSecondsRemaining;
     i32 lastSpellcardSecondsRemaining;
@@ -222,9 +277,11 @@ struct Gui
     // pad 3
     f32 bossHealthBar;
     f32 bossHealthBarEased;
+    f32 prevBossHealthBarEased;
     i32 unused_30;
     f32 bossHealth[8];
     f32 bossHealthEased[8];
+    f32 prevBossHealthEased[8];
     u32 bossColor[8];
 };
 

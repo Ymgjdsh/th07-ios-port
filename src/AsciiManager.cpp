@@ -7,7 +7,9 @@
 #include "AnmManager.hpp"
 #include "Chain.hpp"
 #include "Controller.hpp"
+#include "EnemyManager.hpp"
 #include "GameManager.hpp"
+#include "GameWindow.hpp"
 #include "Gui.hpp"
 #include "Player.hpp"
 #include "SoundPlayer.hpp"
@@ -58,6 +60,8 @@ u32 AsciiManager::OnUpdate(AsciiManager *arg)
     i32 i;
     AsciiManagerPopup *curPopup;
 
+    arg->UpdatePrev();
+
     if (!g_GameManager.isInPauseMenu && !g_GameManager.isInRetryMenu)
     {
         curPopup = arg->popups;
@@ -68,6 +72,7 @@ u32 AsciiManager::OnUpdate(AsciiManager *arg)
                 continue;
             }
 
+            curPopup->prevPosition = curPopup->position;
             curPopup->position.y -= 0.5f * g_Supervisor.effectiveFramerateMultiplier;
             curPopup->timer++;
             if (curPopup->timer > 60)
@@ -286,6 +291,7 @@ void AsciiManager::DrawStrings()
         text = string->text;
         this->vm0.scale.x = string->scale.x;
         this->vm0.scale.y = string->scale.y;
+        this->vm0.prevScale = this->vm0.scale;
         charWidth = (f32)this->fontSpacing * string->scale.x;
         if (guiString != string->isGui)
         {
@@ -331,17 +337,40 @@ void AsciiManager::DrawStrings()
                     this->vm0.sprite = &g_AnmManager->sprites[(u8)*text + 124];
                     this->vm0.color.color = 0xffffffff;
                 }
+                this->vm0.prevColor = this->vm0.color;
                 g_AnmManager->DrawNoRotation(&this->vm0);
                 this->vm0.pos.x += charWidth;
             }
             text++;
         }
     }
+
+    g_AnmManager->Flush();
+    g_Supervisor.viewport.x = 0;
+    g_Supervisor.viewport.y = 0;
+    g_Supervisor.viewport.width = 640;
+    g_Supervisor.viewport.height = 480;
+    g_Supervisor.gfxDevice->SetViewport(g_Supervisor.viewport);
+    f32 interpPlayerX =
+        utils::Lerp(g_Player.prevPositionCenter.x, g_Player.positionCenter.x, g_RenderAlpha);
     for (i = 0; i < 4; i++)
     {
+        Enemy *boss = g_EnemyManager.bosses[i];
+        if (boss && !boss->hasNoCollision)
+        {
+            f32 interpBossX = utils::Lerp(boss->prevPosition.x, boss->position.x, g_RenderAlpha);
+            this->bossMarkers[i].pos.x = interpBossX + 32.0f;
+            this->bossMarkers[i].pos.y = 472.0f;
+            this->bossMarkers[i].pos.z = 0.0f;
+        }
+        else
+        {
+            this->bossMarkers[i].pos.x = -999.0f;
+        }
+
         if (this->bossMarkers[i].pos.x >= 56.0f && this->bossMarkers[i].pos.x <= 392.0f)
         {
-            charWidth = fabsf(this->bossMarkers[i].pos.x - 32.0f - g_Player.positionCenter.x);
+            charWidth = fabsf(this->bossMarkers[i].pos.x - 32.0f - interpPlayerX);
             if (charWidth < 64.0f)
             {
                 this->bossMarkers[i].color.bytes.a = charWidth * 128.0f / 64.0f + 48.0f;
@@ -363,6 +392,7 @@ void AsciiManager::DrawStrings()
                 this->bossMarkers[i].color.bytes.g = 255;
                 this->bossMarkers[i].color.bytes.b = 255;
             }
+            this->bossMarkers[i].prevColor = this->bossMarkers[i].color;
             g_AnmManager->DrawNoRotation(&this->bossMarkers[i]);
         }
     }
@@ -402,6 +432,7 @@ void AsciiManager::CreatePopup1(ZunVec3 *position, i32 value, u32 color)
     popup->position = *position;
     popup->position.x += g_GameManager.arcadeRegionTopLeftPos.x;
     popup->position.y += g_GameManager.arcadeRegionTopLeftPos.y;
+    popup->prevPosition = popup->position;
     this->nextPopupIndex1++;
 }
 
@@ -439,12 +470,15 @@ void AsciiManager::CreatePopup2(ZunVec3 *position, i32 value, u32 color)
     popup->position = *position;
     popup->position.x += g_GameManager.arcadeRegionTopLeftPos.x;
     popup->position.y += g_GameManager.arcadeRegionTopLeftPos.y;
+    popup->prevPosition = popup->position;
     this->nextPopupIndex2++;
 }
 
 i32 PauseMenu::OnUpdate()
 {
     u32 i;
+
+    this->UpdatePrev();
 
     if (WAS_PRESSED_RAW(TH_BUTTON_MENU) && this->curState != 4)
     {
@@ -524,6 +558,7 @@ i32 PauseMenu::OnUpdate()
                 this->curState = 0;
                 return 0;
             }
+            g_AnmManager->TakeScreenshotIfRequested();
             this->menuBackground.pos.x = 32.0f;
             this->menuBackground.pos.y = 16.0f;
             this->menuBackground.pos.z = 0.0f;
@@ -663,6 +698,7 @@ i32 PauseMenu::OnUpdate()
                 g_SoundPlayer.PushCommand(AUDIO_UNPAUSE, 0, (char *)"UnPause");
             }
             g_Supervisor.currentTime = SDL_GetTicks();
+            g_GameWindow.ResetAccumulator();
         }
         break;
     case 5:
@@ -817,6 +853,8 @@ i32 RetryMenu::OnUpdate()
 {
     i32 i;
 
+    this->UpdatePrev();
+
     if (g_GameManager.practice)
     {
         g_GameManager.isInRetryMenu = 0;
@@ -867,6 +905,7 @@ i32 RetryMenu::OnUpdate()
                     this->curState = 0;
                     return 0;
                 }
+                g_AnmManager->TakeScreenshotIfRequested();
                 this->menuBackground.pos.x = 32.0f;
                 this->menuBackground.pos.y = 16.0f;
                 this->menuBackground.pos.z = 0.0f;
@@ -990,6 +1029,7 @@ i32 RetryMenu::OnUpdate()
             IncrementCapped(&g_GameManager.plst.playDataByDifficulty[6].retryCount, 999999);
             g_SoundPlayer.PushCommand(AUDIO_UNPAUSE, 0, "UnPause");
             g_Supervisor.currentTime = SDL_GetTicks();
+            g_GameWindow.ResetAccumulator();
             return 0;
         }
         break;
@@ -1064,9 +1104,11 @@ void AsciiManager::DrawPopups()
             continue;
         }
 
-        this->vm1.pos.x = popup->position.x - (f32)(popup->characterCount << 2);
-        this->vm1.pos.y = popup->position.y;
+        ZunVec3 drawPos = popup->prevPosition.Lerp(popup->position, g_RenderAlpha);
+        this->vm1.pos.x = drawPos.x - (f32)(popup->characterCount << 2);
+        this->vm1.pos.y = drawPos.y;
         this->vm1.color.color = popup->color;
+        this->vm1.prevColor = this->vm1.color;
 
         dx = g_Player.positionCenter.x - popup->position.x;
         dy = g_Player.positionCenter.y - popup->position.y;
@@ -1107,6 +1149,7 @@ void AsciiManager::DrawPopups()
                 this->vm1.sprite = &g_AnmManager->sprites[*digits + 21];
                 this->vm1.color.bytes.a = alpha;
             }
+            this->vm1.prevColor = this->vm1.color;
 
             g_AnmManager->DrawNoRotation(&this->vm1);
             this->vm1.pos.x += 8.0f;
@@ -1126,6 +1169,7 @@ void AsciiManager::DrawPopups()
         this->cherryDigit.pos.y = this->cherryGauge.pos.y + 11.0f;
         this->cherryDigit.pos.z = this->cherryGauge.pos.z;
         this->cherryDigit.color.bytes.a = this->cherryGauge.color.bytes.a;
+        this->cherryDigit.prevColor = this->cherryDigit.color;
 
         if (g_GameManager.IsCherryAtMax())
         {
@@ -1165,6 +1209,7 @@ void AsciiManager::DrawPopups()
             if (hasNonZeroDigit || divisor == 1)
             {
                 g_AnmManager->SetActiveSprite(&this->cherryDigit, j + 132);
+                this->cherryDigit.prevColor = this->cherryDigit.color;
                 g_AnmManager->DrawNoRotation(&this->cherryDigit);
             }
             this->cherryDigit.pos.x += 7.0f;
@@ -1200,6 +1245,7 @@ void AsciiManager::DrawPopups()
             if (hasNonZeroDigit || divisor == 1)
             {
                 g_AnmManager->SetActiveSprite(&this->cherryDigit, j + 132);
+                this->cherryDigit.prevColor = this->cherryDigit.color;
                 g_AnmManager->DrawNoRotation(&this->cherryDigit);
             }
             this->cherryDigit.pos.x += 7.0f;
@@ -1207,6 +1253,7 @@ void AsciiManager::DrawPopups()
 
         this->cherryDigit.scale.x = 1.0f;
         this->cherryDigit.scale.y = 1.0f;
+        this->cherryDigit.prevScale = this->cherryDigit.scale;
         hasNonZeroDigit = false;
         this->cherryDigit.pos.x = this->cherryGauge.pos.x + 40.0f + 6.0f + 7.0f;
         this->cherryDigit.pos.y = this->cherryGauge.pos.y + 2.0f;
@@ -1225,6 +1272,7 @@ void AsciiManager::DrawPopups()
             this->cherryDigit.color.bytes.b = cherry * 192 / 50000 + divisor * 64 / 2000;
             this->cherryDigit.scale.x = 1.41f;
             this->cherryDigit.scale.y = 1.41f;
+            this->cherryDigit.prevScale = this->cherryDigit.scale;
             xInc = 10;
             this->cherryDigit.pos.x += 2.0f;
             this->cherryDigit.pos.y -= 2.0f;
@@ -1248,6 +1296,7 @@ void AsciiManager::DrawPopups()
             if (hasNonZeroDigit || divisor == 1)
             {
                 g_AnmManager->SetActiveSprite(&this->cherryDigit, j + 132);
+                this->cherryDigit.prevColor = this->cherryDigit.color;
                 g_AnmManager->DrawNoRotation(&this->cherryDigit);
             }
             this->cherryDigit.pos.x += (f32)xInc;
@@ -1255,6 +1304,7 @@ void AsciiManager::DrawPopups()
 
         this->cherryDigit.scale.x = 1.0f;
         this->cherryDigit.scale.y = 1.0f;
+        this->cherryDigit.prevScale = this->cherryDigit.scale;
 
         if (g_Player.hasBorder == BORDER_ACTIVE)
         {
@@ -1262,6 +1312,7 @@ void AsciiManager::DrawPopups()
             this->cherryBorderActive.pos.x += 24.0f;
             this->cherryBorderActive.pos.y += 8.0f;
             this->cherryBorderActive.color.color = this->cherryGauge.color.color;
+            this->cherryBorderActive.prevColor.color = this->cherryGauge.prevColor.color;
             g_AnmManager->DrawNoRotation(&this->cherryBorderActive);
         }
     }

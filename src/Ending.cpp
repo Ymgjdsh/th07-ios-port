@@ -7,6 +7,7 @@
 #include "FileSystem.hpp"
 #include "GameErrorContext.hpp"
 #include "GameManager.hpp"
+#include "GameWindow.hpp"
 #include "ScreenEffect.hpp"
 #include "Supervisor.hpp"
 
@@ -25,6 +26,10 @@ u32 Ending::OnUpdate(Ending *arg)
 {
     i32 i;
     i32 framesSkipPressed;
+    u32 color;
+
+    arg->UpdatePrev();
+    arg->prevEndingFadeRectColor = arg->endingFadeRectColor;
 
     framesSkipPressed = 0;
     for (;;)
@@ -46,16 +51,70 @@ u32 Ending::OnUpdate(Ending *arg)
 
         break;
     }
+    switch (arg->fadeType)
+    {
+    case 1:
+        if (arg->timeFading >= arg->fadeFrames)
+        {
+            arg->fadeType = 0;
+            arg->endingFadeRectColor.color = 0;
+            break;
+        }
+
+        color = 255 - arg->timeFading * 255 / arg->fadeFrames;
+        arg->endingFadeRectColor.color = color * 0x1000000;
+        arg->timeFading++;
+        break;
+    case 2:
+        if (arg->timeFading >= arg->fadeFrames)
+        {
+            arg->endingFadeRectColor.color = 0xff000000;
+            break;
+        }
+
+        color = arg->timeFading * 255 / arg->fadeFrames;
+        arg->endingFadeRectColor.color = color << 24;
+        arg->timeFading++;
+        break;
+    case 3:
+        if (arg->timeFading >= arg->fadeFrames)
+        {
+            arg->fadeType = 0;
+            arg->endingFadeRectColor.color = 0;
+            break;
+        }
+
+        color = 255 - arg->timeFading * 255 / arg->fadeFrames;
+        arg->endingFadeRectColor.color = color * 0x1000000 | 0xffffff;
+        arg->timeFading++;
+        break;
+    case 4:
+        if (arg->timeFading >= arg->fadeFrames)
+        {
+            arg->endingFadeRectColor.color = 0xffffffff;
+            break;
+        }
+
+        color = arg->timeFading * 255 / arg->fadeFrames;
+        arg->endingFadeRectColor.color = color << 24 | 0xffffff;
+        arg->timeFading++;
+        break;
+    case 0:
+        arg->endingFadeRectColor.color = 0;
+        break;
+    }
     return CHAIN_CALLBACK_RESULT_CONTINUE;
 }
 
 u32 Ending::OnDraw(Ending *arg)
 {
-    g_AnmManager->DrawEndingRect(0, 0, 0, (i32)arg->backgroundPos.x, (i32)arg->backgroundPos.y, 640,
-                                 480);
+    f32 drawX = utils::Lerp(arg->prevBackgroundPos.x, arg->backgroundPos.x, g_RenderAlpha);
+    f32 drawY = utils::Lerp(arg->prevBackgroundPos.y, arg->backgroundPos.y, g_RenderAlpha);
+
+    g_AnmManager->DrawEndingRect(0, 0, 0, drawX, drawY, 640, 480);
     for (i32 i = 0; i < 15; i++)
     {
-        g_AnmManager->Draw(&arg->sprites[i]);
+        g_AnmManager->DrawInterp(&arg->sprites[i]);
     }
     arg->FadingEffect();
     return CHAIN_CALLBACK_RESULT_CONTINUE;
@@ -78,67 +137,17 @@ i32 Ending::ReadEndFileParameter()
 void Ending::FadingEffect()
 {
     ZunRect rect;
-    u32 color;
 
     rect.left = 0.0f;
     rect.top = 0.0f;
     rect.right = 640.0f;
     rect.bottom = 480.0f;
-    switch (this->fadeType)
+    if ((this->endingFadeRectColor.color & 0xff000000) != 0 ||
+        (this->prevEndingFadeRectColor.color & 0xff000000) != 0)
     {
-    case 1:
-        if (this->timeFading >= this->fadeFrames)
-        {
-            this->fadeType = 0;
-            this->endingFadeRectColor.color = 0;
-            break;
-        }
-
-        color = 255 - this->timeFading * 255 / this->fadeFrames;
-        this->endingFadeRectColor.color = color * 0x1000000;
-        this->timeFading++;
-        break;
-    case 2:
-        if (this->timeFading >= this->fadeFrames)
-        {
-            this->endingFadeRectColor.color = 0xff000000;
-            break;
-        }
-
-        color = this->timeFading * 255 / this->fadeFrames;
-        this->endingFadeRectColor.color = color << 24;
-        this->timeFading++;
-        break;
-    case 3:
-        if (this->timeFading >= this->fadeFrames)
-        {
-            this->fadeType = 0;
-            this->endingFadeRectColor.color = 0;
-            break;
-        }
-
-        color = 255 - this->timeFading * 255 / this->fadeFrames;
-        this->endingFadeRectColor.color = color * 0x1000000 | 0xffffff;
-        this->timeFading++;
-        break;
-    case 4:
-        if (this->timeFading >= this->fadeFrames)
-        {
-            this->endingFadeRectColor.color = 0xffffffff;
-            break;
-        }
-
-        color = this->timeFading * 255 / this->fadeFrames;
-        this->endingFadeRectColor.color = color << 24 | 0xffffff;
-        this->timeFading++;
-        break;
-    case 0:
-        this->endingFadeRectColor.color = 0;
-        break;
-    }
-    if ((this->endingFadeRectColor.color & 0xff000000) != 0)
-    {
-        ScreenEffect::DrawSquare(&rect, this->endingFadeRectColor.color);
+        ScreenEffect::DrawSquare(&rect, ZunColor::Lerp(this->prevEndingFadeRectColor,
+                                                       this->endingFadeRectColor, g_RenderAlpha)
+                                            .color);
     }
 }
 

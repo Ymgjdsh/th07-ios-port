@@ -28,9 +28,19 @@ struct Ending
     ZunResult ParseEndFile();
     i32 ReadEndFileParameter();
 
+    void UpdatePrev()
+    {
+        this->prevBackgroundPos = this->backgroundPos;
+        for (i32 i = 0; i < 16; i++)
+        {
+            this->sprites[i].UpdatePrev();
+        }
+    }
+
     ChainElem *calcChain;
     ChainElem *drawChain;
     Float2 backgroundPos;
+    Float2 prevBackgroundPos;
     f32 backgroundScrollSpeed;
     AnmVm sprites[16];
     char *endFileData;
@@ -46,6 +56,7 @@ struct Ending
     i32 timesFileParsed;
     ZunColor textColor;
     ZunColor endingFadeRectColor;
+    ZunColor prevEndingFadeRectColor;
     i32 timeFading;
     i32 fadeFrames;
     i32 fadeType;

@@ -10,6 +10,7 @@ struct Effect
 {
     AnmVm vm;
     ZunVec3 pos1;
+    ZunVec3 prevPos;
     ZunVec3 custom;
     ZunVec3 velocity;
     ZunVec3 acceleration;

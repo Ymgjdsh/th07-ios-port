@@ -34,6 +34,19 @@ struct MusicRoom
     ZunResult CheckInputEnable();
     i32 ProcessInput();
 
+    void UpdatePrev()
+    {
+        this->vm[0].UpdatePrev();
+        for (i32 i = 0; i < 31; i++)
+        {
+            this->titleSprites[i].UpdatePrev();
+        }
+        for (i32 i = 0; i < 8; i++)
+        {
+            this->descriptionSprites[i].UpdatePrev();
+        }
+    }
+
     struct ChainElem *calcChain;
     struct ChainElem *drawChain;
     i32 waitFramesCounter;

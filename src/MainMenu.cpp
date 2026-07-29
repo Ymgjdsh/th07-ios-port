@@ -110,6 +110,8 @@ u32 MainMenu::OnUpdate(MainMenu *arg)
 {
     u32 result;
 
+    arg->UpdatePrev();
+
     switch (arg->gameState)
     {
     case STATE_PRE_INPUT:
@@ -2322,7 +2324,8 @@ u32 MainMenu::OnDraw(MainMenu *arg)
         if (g_AnmManager->ShouldDraw(local_c))
         {
             savedPos = local_c->pos;
-            local_c->pos += local_c->offset;
+            ZunVec3 drawPos = local_c->prevPos.Lerp(local_c->pos, g_RenderAlpha);
+            local_c->pos = drawPos + local_c->offset;
             if (local_c->rotation.z != 0.0f)
             {
                 g_AnmManager->Draw(local_c);
@@ -2336,7 +2339,7 @@ u32 MainMenu::OnDraw(MainMenu *arg)
     }
     if (arg->cursorVm)
     {
-        g_AnmManager->DrawNoRotation(arg->cursorVm);
+        g_AnmManager->DrawInterpNoRotation(arg->cursorVm);
     }
     return CHAIN_CALLBACK_RESULT_CONTINUE;
 }

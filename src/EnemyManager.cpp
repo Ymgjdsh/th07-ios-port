@@ -5,6 +5,7 @@
 #include "Chain.hpp"
 #include "EclManager.hpp"
 #include "GameManager.hpp"
+#include "GameWindow.hpp"
 #include "Gui.hpp"
 #include "Player.hpp"
 #include "Rng.hpp"
@@ -155,7 +156,7 @@ Enemy *EnemyManager::SpawnEnemy(i32 eclSubId, ZunVec3 *pos, i32 life, i32 itemDr
         {
             enemy->life = life;
         }
-        enemy->position = *pos;
+        enemy->prevPosition = enemy->position = *pos;
         g_EclManager.CallEclSub(&enemy->currentContext, eclSubId);
         if (g_EclManager.RunEcl(enemy) == ZUN_ERROR)
         {
@@ -163,6 +164,7 @@ Enemy *EnemyManager::SpawnEnemy(i32 eclSubId, ZunVec3 *pos, i32 life, i32 itemDr
         }
         else
         {
+            enemy->UpdatePrev();
             enemy->color.color = enemy->primaryVm.color.color;
             enemy->itemDrop = (i8)itemDrop;
             if (score >= 0)
@@ -195,7 +197,7 @@ Enemy *EnemyManager::SpawnEnemyEx(i32 eclSubId, ZunVec3 *pos, i32 life, i32 item
         {
             enemy->life = life;
         }
-        enemy->position = *pos;
+        enemy->prevPosition = enemy->position = *pos;
         g_EclManager.CallEclSub(&enemy->currentContext, eclSubId);
         enemy->currentContext.eclContextArgs = *args;
         if (g_EclManager.RunEcl(enemy) == ZUN_ERROR)
@@ -204,6 +206,7 @@ Enemy *EnemyManager::SpawnEnemyEx(i32 eclSubId, ZunVec3 *pos, i32 life, i32 item
         }
         else
         {
+            enemy->UpdatePrev();
             enemy->color.color = enemy->primaryVm.color.color;
             enemy->itemDrop = (i8)itemDrop;
             if (life >= 0)
@@ -705,6 +708,8 @@ u32 EnemyManager::OnUpdate(EnemyManager *arg)
         {
             continue;
         }
+        enemy->UpdatePrev();
+        enemy->prevPosition = enemy->position;
         arg->enemyCountReal++;
         if (enemy->freezeEclDuringBombs &&
             (g_Player.bombInfo.isInUse || g_Player.playerState != PLAYER_STATE_ALIVE))
@@ -1112,18 +1117,6 @@ u32 EnemyManager::OnUpdate(EnemyManager *arg)
 
             if (enemy->bossId < 4)
             {
-                if (!enemy->hasNoCollision)
-                {
-                    bossMarkerPos.x = enemy->position.x + 32.0f;
-                }
-                else
-                {
-                    bossMarkerPos.x = -999.0f;
-                }
-                bossMarkerPos.y = 472.0f;
-                bossMarkerPos.z = 0.0f;
-
-                g_AsciiManager.SetBossMarkerPos(enemy->bossId, &bossMarkerPos);
                 g_AsciiManager.SetBossDamageTint(enemy->bossId, enemy->primaryVm.useColor2);
             }
         }
@@ -1194,11 +1187,32 @@ u32 EnemyManager::ActualOnDraw(EnemyManager *arg, i32 first, i32 last)
     i32 i;
     Float2 scale;
 
+    auto getHistoryPos = [](EnemyHistory *history, i32 idx, i32 maxCount) {
+        ZunVec3 cur = history[idx].position;
+        ZunVec3 prev = cur;
+        if (idx + 1 < maxCount && history[idx + 1].position.x >= -990.0f)
+        {
+            prev = history[idx + 1].position;
+        }
+        return prev.Lerp(cur, g_RenderAlpha);
+    };
+
+    auto getHistoryAngle = [](EnemyHistory *history, i32 idx, i32 maxCount) {
+        f32 cur = history[idx].angle;
+        f32 prev = cur;
+        if (idx + 1 < maxCount && history[idx + 1].position.x >= -990.0f)
+        {
+            prev = history[idx + 1].angle;
+        }
+        return utils::LerpAngle(prev, cur, g_RenderAlpha);
+    };
+
     for (i = first; i < last; i++)
     {
         enemy = arg->enemyHead[i];
         while (enemy)
         {
+            ZunVec3 drawPos = enemy->prevPosition.Lerp(enemy->position, g_RenderAlpha);
             vm = &enemy->vms[0];
             for (j = 0; j < 1; j++, vm++)
             {
@@ -1210,7 +1224,7 @@ u32 EnemyManager::ActualOnDraw(EnemyManager *arg, i32 first, i32 last)
                         vm->updateRotation = 1;
                     }
 
-                    vm->pos = enemy->position + vm->offset;
+                    vm->pos = drawPos + vm->offset;
                     vm->pos.z = 0.3f;
                     vm->pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
                     vm->pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
@@ -1224,7 +1238,7 @@ u32 EnemyManager::ActualOnDraw(EnemyManager *arg, i32 first, i32 last)
                 enemy->primaryVm.SetRotationZ(enemy->angle);
                 enemy->primaryVm.updateRotation = 1;
             }
-            enemy->primaryVm.pos = enemy->position + enemy->primaryVm.offset;
+            enemy->primaryVm.pos = drawPos + enemy->primaryVm.offset;
             enemy->primaryVm.pos.z = 0.29f;
             if ((enemy->trailFlags & 16) == 0 && !enemy->invisibleOnBomb)
             {
@@ -1242,7 +1256,7 @@ u32 EnemyManager::ActualOnDraw(EnemyManager *arg, i32 first, i32 last)
                         vm->SetRotationZ(-enemy->angle);
                         vm->updateRotation = 1;
                     }
-                    vm->pos = enemy->position + vm->offset;
+                    vm->pos = drawPos + vm->offset;
                     vm->pos.z = 0.3f;
                     vm->pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
                     vm->pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
@@ -1253,7 +1267,13 @@ u32 EnemyManager::ActualOnDraw(EnemyManager *arg, i32 first, i32 last)
             if (enemy->trailFlags != 0)
             {
                 scale = enemy->primaryVm.scale;
-                baseColor.color = enemy->primaryVm.color.color;
+
+                baseColor = ZunColor::Lerp(enemy->primaryVm.prevColor, enemy->primaryVm.color,
+                                           g_RenderAlpha);
+
+                ZunColor origColor = enemy->primaryVm.color;
+                Float2 origPrevScale = enemy->primaryVm.prevScale;
+                ZunColor origPrevColor = {enemy->primaryVm.prevColor.color};
 
                 if ((enemy->trailFlags & 8) == 0)
                 {
@@ -1266,21 +1286,26 @@ u32 EnemyManager::ActualOnDraw(EnemyManager *arg, i32 first, i32 last)
 
                         if (enemy->primaryVmAutoRotate)
                         {
-                            enemy->primaryVm.SetRotationZ(enemy->enemyHistory[j].angle);
+                            enemy->primaryVm.SetRotationZ(
+                                getHistoryAngle(enemy->enemyHistory, j, enemy->trailCount));
+                            enemy->primaryVm.prevRotation.z = enemy->primaryVm.rotation.z;
                             enemy->primaryVm.updateRotation = 1;
                         }
                         if ((enemy->trailFlags & 2) != 0)
                         {
                             enemy->primaryVm.scale.x =
                                 scale.x - (f32)j * scale.x / (f32)enemy->trailCount;
+                            enemy->primaryVm.prevScale.x = enemy->primaryVm.scale.x;
                         }
                         if ((enemy->trailFlags & 4) != 0)
                         {
                             enemy->primaryVm.color.bytes.a =
                                 baseColor.bytes.a - baseColor.bytes.a * j / enemy->trailCount;
+                            enemy->primaryVm.prevColor.bytes.a = enemy->primaryVm.color.bytes.a;
                         }
                         enemy->primaryVm.pos =
-                            enemy->enemyHistory[j].position + enemy->primaryVm.offset;
+                            getHistoryPos(enemy->enemyHistory, j, enemy->trailCount) +
+                            enemy->primaryVm.offset;
                         enemy->primaryVm.pos.z = 0.3f;
                         enemy->primaryVm.pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
                         enemy->primaryVm.pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
@@ -1303,9 +1328,12 @@ u32 EnemyManager::ActualOnDraw(EnemyManager *arg, i32 first, i32 last)
                     {
                         uvDiff =
                             enemy->primaryVm.sprite->uvEnd.x - enemy->primaryVm.sprite->uvStart.x;
-                        uvStep = uvDiff / (f32)(i32)((vertexCount + 1) / 2 - 1);
-                        currentUvX =
-                            enemy->primaryVm.sprite->uvEnd.x + enemy->primaryVm.uvScrollPos.x;
+                        i32 numSegments = (vertexCount / 2) - 1;
+                        uvStep = (numSegments > 0) ? (uvDiff / (f32)numSegments) : 0.0f;
+                        Float2 drawUv = enemy->primaryVm.prevUvScrollPos.LerpUv(
+                            enemy->primaryVm.uvScrollPos, g_RenderAlpha);
+
+                        currentUvX = enemy->primaryVm.sprite->uvEnd.x + drawUv.x;
                         trailVert = enemy->trailVertices;
 
                         for (j = 0; j < enemy->trailCount;
@@ -1318,20 +1346,26 @@ u32 EnemyManager::ActualOnDraw(EnemyManager *arg, i32 first, i32 last)
 
                             if (j == 0)
                             {
-                                angle1 = enemy->enemyHistory[0].angle;
+                                angle1 = getHistoryAngle(enemy->enemyHistory, 0, enemy->trailCount);
                             }
                             else
                             {
-                                angle1 = AngleLerp(enemy->enemyHistory[j - 1].angle,
-                                                   enemy->enemyHistory[j].angle, 0.5f);
+                                angle1 = AngleLerp(
+                                    getHistoryAngle(enemy->enemyHistory, j - 1, enemy->trailCount),
+                                    getHistoryAngle(enemy->enemyHistory, j, enemy->trailCount),
+                                    0.5f);
                             }
 
                             if ((enemy->trailFlags & 2) != 0 && j > 0 &&
                                 j + enemy->trailNodeStep < enemy->trailCount)
                             {
-                                sinAngle = AngleLerp(
-                                    enemy->enemyHistory[j + enemy->trailNodeStep - 1].angle,
-                                    enemy->enemyHistory[enemy->trailNodeStep].angle, 0.5f);
+                                sinAngle = AngleLerp(getHistoryAngle(enemy->enemyHistory,
+                                                                     j + enemy->trailNodeStep - 1,
+                                                                     enemy->trailCount),
+                                                     getHistoryAngle(enemy->enemyHistory,
+                                                                     j + enemy->trailNodeStep,
+                                                                     enemy->trailCount),
+                                                     0.5f);
                                 if (fabsf(prevAngle - angle1) < 0.00001f &&
                                     fabsf(angle1 - sinAngle) < 0.00001f)
                                 {
@@ -1363,20 +1397,22 @@ u32 EnemyManager::ActualOnDraw(EnemyManager *arg, i32 first, i32 last)
                                 trailVert[0].color.bytes.a = trailVert[1].color.bytes.a;
                             }
 
-                            trailVert[0].pos = enemy->enemyHistory[j].position;
+                            ZunVec3 drawHistPos =
+                                getHistoryPos(enemy->enemyHistory, j, enemy->trailCount);
+
+                            trailVert[0].pos = drawHistPos;
                             trailVert[0].pos.x += cosAngle * xOffset - sinAngle * yOffset + 32.0f;
                             trailVert[0].pos.y += sinAngle * xOffset + cosAngle * yOffset + 16.0f;
                             trailVert[0].textureUV.x = currentUvX;
                             trailVert[0].textureUV.y =
-                                enemy->primaryVm.sprite->uvStart.y + enemy->primaryVm.uvScrollPos.y;
+                                enemy->primaryVm.sprite->uvStart.y + drawUv.y;
                             trailVert++;
 
-                            trailVert[0].pos = enemy->enemyHistory[j].position;
+                            trailVert[0].pos = drawHistPos;
                             trailVert[0].pos.x += cosAngle * xOffset + sinAngle * yOffset + 32.0f;
                             trailVert[0].pos.y += sinAngle * xOffset - cosAngle * yOffset + 16.0f;
                             trailVert[0].textureUV.x = currentUvX;
-                            trailVert[0].textureUV.y =
-                                enemy->primaryVm.sprite->uvEnd.y + enemy->primaryVm.uvScrollPos.y;
+                            trailVert[0].textureUV.y = enemy->primaryVm.sprite->uvEnd.y + drawUv.y;
                             trailVert++;
                         }
                         if (vertexCount > 2)
@@ -1387,7 +1423,9 @@ u32 EnemyManager::ActualOnDraw(EnemyManager *arg, i32 first, i32 last)
                     }
                 }
                 enemy->primaryVm.scale = scale;
-                enemy->primaryVm.color.color = baseColor.color;
+                enemy->primaryVm.color = origColor;
+                enemy->primaryVm.prevScale = origPrevScale;
+                enemy->primaryVm.prevColor = origPrevColor;
             }
             enemy = enemy->next;
         }

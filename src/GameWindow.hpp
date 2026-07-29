@@ -1,9 +1,12 @@
 #pragma once
 
+#include <SDL3/SDL_timer.h>
 #include <SDL3/SDL_video.h>
 
 #include "ZunResult.hpp"
 #include "inttypes.hpp"
+
+extern u64 g_LastPerfCounter;
 
 typedef enum RenderResult
 {
@@ -23,11 +26,18 @@ struct GameWindow
     RenderResult Render();
     static void ResetRenderState();
 
+    void ResetAccumulator()
+    {
+        this->accumulator = 0.0;
+        g_LastPerfCounter = SDL_GetPerformanceCounter();
+    }
+
     SDL_Window *window;
     i32 isAppActive;
     i8 curFrame;
     // pad 3
     i64 frequency;
+    f64 accumulator = 0.0;
     bool usesRelativePath;
     // pad 3
     u32 screen_save_active;
@@ -36,3 +46,6 @@ struct GameWindow
 };
 
 extern GameWindow g_GameWindow;
+
+extern f32 g_RenderAlpha;
+extern bool g_SuppressAnmAdvance;

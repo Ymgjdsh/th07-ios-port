@@ -203,6 +203,20 @@ struct ResultScreen
     static i32 ParseLsnm(ScoreDat *scoreDat, Lsnm *outLsnm);
     void WriteScore();
 
+    void UpdatePrev()
+    {
+        for (i32 i = 0; i < 41; i++)
+        {
+            this->vms[i].UpdatePrev();
+        }
+        for (i32 i = 0; i < 15; i++)
+        {
+            this->spellcardListVms[i].UpdatePrev();
+        }
+        this->leftArrowVm.UpdatePrev();
+        this->rightArrowVm.UpdatePrev();
+    }
+
     ScoreDat *scoreDat;
     i32 frameTimer;
     i32 resultScreenState;

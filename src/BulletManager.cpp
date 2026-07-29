@@ -5,6 +5,7 @@
 #include "AsciiManager.hpp"
 #include "Chain.hpp"
 #include "GameManager.hpp"
+#include "GameWindow.hpp"
 #include "ItemManager.hpp"
 #include "Player.hpp"
 #include "Rng.hpp"
@@ -177,8 +178,8 @@ i32 BulletManager::SpawnSingleBullet(EnemyBulletShooter *bulletProps, i32 x, i32
     bullet->timer1 = 0;
     bullet->timer2 = 0;
     bullet->speed = bulletSpeed;
-    bullet->angle = utils::AddNormalizeAngle(bulletAngle, 0.0f);
-    bullet->pos = bulletProps->position;
+    bullet->prevAngle = bullet->angle = utils::AddNormalizeAngle(bulletAngle, 0.0f);
+    bullet->prevPos = bullet->pos = bulletProps->position;
     bullet->pos.z = 0.1f;
     AngleToVector(&bullet->velocity, bulletAngle,
                   bulletSpeed * g_Supervisor.effectiveFramerateMultiplier);
@@ -240,6 +241,7 @@ i32 BulletManager::SpawnSingleBullet(EnemyBulletShooter *bulletProps, i32 x, i32
                                     bulletProps->spriteOffset);
         bullet->state = BULLET_SPAWNING_FAST;
         bullet->pos -= bullet->velocity * 4.0f;
+        bullet->prevPos = bullet->pos;
     }
     else if (bulletProps->flags & 4)
     {
@@ -250,6 +252,7 @@ i32 BulletManager::SpawnSingleBullet(EnemyBulletShooter *bulletProps, i32 x, i32
                                     (i32)bulletProps->spriteOffset);
         bullet->state = BULLET_SPAWNING_NORMAL;
         bullet->pos -= bullet->velocity * 4.0f;
+        bullet->prevPos = bullet->pos;
     }
     else if (bulletProps->flags & 8)
     {
@@ -260,12 +263,15 @@ i32 BulletManager::SpawnSingleBullet(EnemyBulletShooter *bulletProps, i32 x, i32
                                     (i32)bulletProps->spriteOffset);
         bullet->state = BULLET_SPAWNING_SLOW;
         bullet->pos -= bullet->velocity * 4.0f;
+        bullet->prevPos = bullet->pos;
     }
     memcpy(bullet->commands, bulletProps->commands, sizeof(bullet->commands));
     bullet->moreFlags = bulletProps->flags;
     bullet->exFlags = 0;
     bullet->curCmdIdx = 0;
     bullet->RunCommands();
+    bullet->sprites.UpdatePrev();
+
     if (this->screenClearTime != 0 && (bullet->moreFlags & 0x1000) == 0)
     {
         bullet->state = BULLET_DESPAWN;
@@ -600,18 +606,19 @@ Laser *BulletManager::SpawnLaserPattern(EnemyLaserShooter *laserShooter)
         g_AnmManager->InitializeAndSetActiveSprite(
             &laser->vm1, g_BulletSpriteOffset16Px[laserShooter->spriteOffset] + 658);
         laser->vm1.blendMode = 1;
-        laser->pos = laserShooter->position;
+        laser->prevPos = laser->pos = laserShooter->position;
         laser->color = laserShooter->spriteOffset;
         laser->inUse = 1;
-        laser->angle = laserShooter->angle1;
+        laser->prevAngle = laser->angle = laserShooter->angle1;
         if (laserShooter->type == 0)
         {
-            laser->angle = g_Player.AngleToPlayer(&laserShooter->position) + laser->angle;
+            laser->prevAngle = laser->angle =
+                g_Player.AngleToPlayer(&laserShooter->position) + laser->angle;
         }
         laser->flags = laserShooter->flags;
         laser->timer = 0;
-        laser->startOffset = laserShooter->startOffset;
-        laser->endOffset = laserShooter->endOffset;
+        laser->prevStartOffset = laser->startOffset = laserShooter->startOffset;
+        laser->prevEndOffset = laser->endOffset = laserShooter->endOffset;
         laser->startLength = laserShooter->startLength;
         laser->width = laserShooter->width;
         laser->speed = laserShooter->speed1;
@@ -624,9 +631,13 @@ Laser *BulletManager::SpawnLaserPattern(EnemyLaserShooter *laserShooter)
         if (laser->startTime == 0)
         {
             laser->state = LASER_ACTIVE;
-            break;
         }
-        laser->state = LASER_SPAWNING;
+        else
+        {
+            laser->state = LASER_SPAWNING;
+        }
+        laser->vm0.UpdatePrev();
+        laser->vm1.UpdatePrev();
         break;
     }
     return laser;
@@ -816,6 +827,16 @@ u32 BulletManager::OnUpdate(BulletManager *arg)
     f32 width;
     i32 i;
     i32 collisionRes;
+
+    for (i = 0; i < 1024; i++)
+    {
+        if (arg->bullets[i].state != BULLET_INACTIVE)
+        {
+            arg->bullets[i].sprites.UpdatePrev();
+            arg->bullets[i].prevPos = arg->bullets[i].pos;
+            arg->bullets[i].prevAngle = arg->bullets[i].angle;
+        }
+    }
 
     blockIdx = 0;
     bullet = arg->bullets;
@@ -1021,6 +1042,14 @@ u32 BulletManager::OnUpdate(BulletManager *arg)
             continue;
         }
 
+        laser->vm0.UpdatePrev();
+        laser->vm1.UpdatePrev();
+
+        laser->prevPos = laser->pos;
+        laser->prevAngle = laser->angle;
+        laser->prevStartOffset = laser->startOffset;
+        laser->prevEndOffset = laser->endOffset;
+
         laser->endOffset =
             g_Supervisor.effectiveFramerateMultiplier * laser->speed + laser->endOffset;
         if (laser->startLength < laser->endOffset - laser->startOffset)
@@ -1178,13 +1207,18 @@ void Bullet::Draw()
         vm = &this->sprites.spriteBullet;
         break;
     }
-    vm->pos.x = g_GameManager.arcadeRegionTopLeftPos.x + this->pos.x;
-    vm->pos.y = g_GameManager.arcadeRegionTopLeftPos.y + this->pos.y;
+
+    ZunVec3 drawPos = this->prevPos.Lerp(this->pos, g_RenderAlpha);
+    vm->pos.x = g_GameManager.arcadeRegionTopLeftPos.x + drawPos.x;
+    vm->pos.y = g_GameManager.arcadeRegionTopLeftPos.y + drawPos.y;
     vm->pos.z = 0.05f;
     vm->color.color = (vm->color.color & 0xff000000) | 0xffffff;
+    vm->prevColor = vm->color;
     if (vm->autoRotate)
     {
-        vm->SetRotationZ(utils::AddNormalizeAngle(1.5707964f + this->angle, 0.0f));
+        vm->SetRotationZ(utils::AddNormalizeAngle(
+            1.5707964f + utils::LerpAngle(this->prevAngle, this->angle, g_RenderAlpha), 0.0f));
+        vm->prevRotation.z = vm->rotation.z;
         vm->updateRotation = 1;
     }
     g_AnmManager->Draw(vm);
@@ -1206,34 +1240,70 @@ u32 BulletManager::OnDraw(BulletManager *arg)
         {
             continue;
         }
-        sincosf(&local_c, &local_18, laser->angle);
-        local_14 = (laser->endOffset - laser->startOffset) / 2.0f + laser->startOffset;
-        laser->vm0.pos.x = local_18 * local_14 + laser->pos.x;
-        laser->vm0.pos.y = local_c * local_14 + laser->pos.y;
+        ZunVec3 drawPos = laser->prevPos.Lerp(laser->pos, g_RenderAlpha);
+        f32 drawAngle = utils::LerpAngle(laser->prevAngle, laser->angle, g_RenderAlpha);
+        f32 drawStart = utils::Lerp(laser->prevStartOffset, laser->startOffset, g_RenderAlpha);
+        f32 drawEnd = utils::Lerp(laser->prevEndOffset, laser->endOffset, g_RenderAlpha);
+
+        sincosf(&local_c, &local_18, drawAngle);
+        ZunVec3 origVm0Pos = laser->vm0.pos;
+        f32 origVm0RotZ = laser->vm0.rotation.z;
+        f32 origVm0PrevRotZ = laser->vm0.prevRotation.z;
+        Float2 origVm0Scale = laser->vm0.scale;
+        Float2 origVm0PrevScale = laser->vm0.prevScale;
+
+        local_14 = (drawEnd - drawStart) / 2.0f + drawStart;
+        laser->vm0.pos.x = local_18 * local_14 + drawPos.x + g_GameManager.arcadeRegionTopLeftPos.x;
+        laser->vm0.pos.y = local_c * local_14 + drawPos.y + g_GameManager.arcadeRegionTopLeftPos.y;
         laser->vm0.pos.z = 0.05f;
+        laser->vm0.rotation.z = utils::AddNormalizeAngle(ZUN_PI / 2.0f + drawAngle, 0.0f);
+        laser->vm0.prevRotation.z = laser->vm0.rotation.z;
+        laser->vm0.updateRotation = 1;
+
+        if (laser->vm0.sprite && laser->vm0.sprite->heightPx > 0.0f)
+        {
+            laser->vm0.scale.y = (drawEnd - drawStart) / laser->vm0.sprite->heightPx;
+            laser->vm0.prevScale.y = laser->vm0.scale.y;
+        }
+
         laser->color = (laser->color & 0xff000000) | 0xffffff;
-        laser->vm0.pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
-        laser->vm0.pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
         g_AnmManager->Draw(&laser->vm0);
-        if ((laser->startOffset < 16.0f || laser->speed == 0.0f) &&
+
+        laser->vm0.pos = origVm0Pos;
+        laser->vm0.rotation.z = origVm0RotZ;
+        laser->vm0.prevRotation.z = origVm0PrevRotZ;
+        laser->vm0.scale = origVm0Scale;
+        laser->vm0.prevScale = origVm0PrevScale;
+
+        if ((drawStart < 16.0f || laser->speed == 0.0f) &&
             (laser->hideWarning == 0 || laser->state != LASER_SPAWNING))
         {
-            laser->vm1.pos.x = local_18 * laser->startOffset + laser->pos.x;
-            laser->vm1.pos.y = local_c * laser->startOffset + laser->pos.y;
+            ZunVec3 origVm1Pos = laser->vm1.pos;
+            Float2 origVm1Scale = laser->vm1.scale;
+            Float2 origVm1PrevScale = laser->vm1.prevScale;
+
+            laser->vm1.pos.x =
+                local_18 * drawStart + drawPos.x + g_GameManager.arcadeRegionTopLeftPos.x;
+            laser->vm1.pos.y =
+                local_c * drawStart + drawPos.y + g_GameManager.arcadeRegionTopLeftPos.y;
             laser->vm1.pos.z = 0.05f;
             laser->vm1.color.color = laser->vm0.color.color;
             laser->vm1.flag6 = 1;
             laser->vm1.color.color = (laser->vm1.color.color & 0xffffff) | 0xff000000;
-            laser->vm1.scale.x = laser->width / 10.0f * ((16.0f - laser->startOffset) / 16.0f);
+            laser->vm1.prevColor.color = laser->vm1.color.color;
+            laser->vm1.scale.x = laser->width / 10.0f * ((16.0f - drawStart) / 16.0f);
             laser->vm1.scale.y = laser->vm1.scale.x;
             if (laser->vm1.scale.y <= 0.0f)
             {
                 laser->vm1.scale.x = laser->width / 10.0f;
                 laser->vm1.scale.y = laser->vm1.scale.x;
             }
-            laser->vm1.pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
-            laser->vm1.pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
+            laser->vm1.prevScale = laser->vm1.scale;
             g_AnmManager->Draw(&laser->vm1);
+
+            laser->vm1.pos = origVm1Pos;
+            laser->vm1.scale = origVm1Scale;
+            laser->vm1.prevScale = origVm1PrevScale;
         }
     }
     g_ItemManager.OnDraw();

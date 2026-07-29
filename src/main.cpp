@@ -21,11 +21,12 @@
 
 static i32 renderRes = RENDER_RESULT_KEEP_RUNNING;
 
-void AnmManager::TakeScreenshotIfRequested(AnmVm *vm)
+void AnmManager::TakeScreenshotIfRequested()
 {
-    if (this->screenshotTextureId >= 0 &&
-        (!vm || (vm->sprite && vm->sprite->sourceFileIndex == this->screenshotTextureId)))
+    if (this->screenshotTextureId >= 0)
     {
+        Flush();
+
         TakeScreenshot(this->screenshotTextureId, this->screenshotSrcLeft, this->screenshotSrcTop,
                        this->screenshotSrcWidth, this->screenshotSrcHeight, this->screenshotDstLeft,
                        this->screenshotDstTop, this->screenshotDstWidth, this->screenshotDstHeight);

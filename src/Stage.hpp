@@ -137,6 +137,7 @@ struct Stage
     i32 stageFrameCounter;
     u32 stage;
     ZunVec3 position;
+    ZunVec3 prevPosition;
     u32 color;
     StageFog skyFog;
     StageFog fogEnd;
@@ -158,6 +159,8 @@ struct Stage
     StageCamera camTangentEnd;
     StageCamera camTangentStart;
     StageCamera cam;
+    StageCamera prevCam;
+    StageCamera drawCam;
     i32 timersMax[4];
     ZunTimer timers[4];
     i32 interpModes[4];

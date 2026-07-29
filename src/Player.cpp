@@ -10,6 +10,7 @@
 #include "EnemyManager.hpp"
 #include "FileSystem.hpp"
 #include "GameManager.hpp"
+#include "GameWindow.hpp"
 #include "Gui.hpp"
 #include "Rng.hpp"
 #include "SoundPlayer.hpp"
@@ -74,10 +75,11 @@ void DefaultFireBulletCallback(Player *player, PlayerBullet *bullet, ShtEntry *s
     *bullet->GetPosX() += shtEntry->offset.x;
     *bullet->GetPosY() += shtEntry->offset.y;
     bullet->pos.z = 0.495f;
+    bullet->prevPos = bullet->pos;
     bullet->hitboxSize.x = shtEntry->hitboxSize.x;
     bullet->hitboxSize.y = shtEntry->hitboxSize.y;
     bullet->hitboxSize.z = 1.0f;
-    bullet->angle = shtEntry->angle;
+    bullet->prevAngle = bullet->angle = shtEntry->angle;
     bullet->speed = shtEntry->speed;
     bullet->velocity.x = cosf(shtEntry->angle) * shtEntry->speed;
     bullet->velocity.y = sinf(shtEntry->angle) * shtEntry->speed;
@@ -424,8 +426,10 @@ i32 ShtData::DrawBulletWithTrail(Player *player, PlayerBullet *bullet)
 
     i32 i;
     i32 origAlpha;
+    i32 origPrevAlpha;
 
     origAlpha = bullet->vm.color.bytes.a;
+    origPrevAlpha = bullet->vm.prevColor.bytes.a;
     for (i = 0; i < bullet->trailLength; i++)
     {
         if (bullet->posHistory[i].x == -999.0f)
@@ -433,11 +437,16 @@ i32 ShtData::DrawBulletWithTrail(Player *player, PlayerBullet *bullet)
             break;
         }
 
-        bullet->vm.pos.x = bullet->posHistory[i].x;
-        bullet->vm.pos.y = bullet->posHistory[i].y;
-        bullet->vm.pos.z = bullet->posHistory[i].z;
+        ZunVec3 prevPos = bullet->posHistory[i];
+        if (i + 1 < 16 && bullet->posHistory[i + 1].x != -999.0f)
+        {
+            prevPos = bullet->posHistory[i + 1];
+        }
 
-        bullet->vm.color.bytes.a = origAlpha - origAlpha * i / bullet->trailLength;
+        bullet->vm.pos = prevPos.Lerp(bullet->posHistory[i], g_RenderAlpha);
+
+        bullet->vm.prevColor.bytes.a = bullet->vm.color.bytes.a =
+            origAlpha - origAlpha * i / bullet->trailLength;
 
         *bullet->GetVmPosX() += g_GameManager.arcadeRegionTopLeftPos.x;
         *bullet->GetVmPosY() += g_GameManager.arcadeRegionTopLeftPos.y;
@@ -445,6 +454,7 @@ i32 ShtData::DrawBulletWithTrail(Player *player, PlayerBullet *bullet)
         g_AnmManager->Draw(&bullet->vm);
     }
     bullet->vm.color.bytes.a = origAlpha;
+    bullet->vm.prevColor.bytes.a = origPrevAlpha;
     return 0;
 }
 
@@ -651,6 +661,9 @@ void Player::UpdateShots()
             continue;
         }
 
+        bullet->prevPos = bullet->pos;
+        bullet->prevAngle = bullet->angle;
+
         if (bullet->updateCallback && bullet->updateCallback(this, bullet))
         {
             bullet->bulletState = 0;
@@ -688,12 +701,16 @@ void Player::DrawBullets()
 
         if (bullet->vm.autoRotate)
         {
-            f32 angle = utils::AddNormalizeAngle(bullet->angle, 1.5707964f);
+            f32 angle = utils::AddNormalizeAngle(
+                utils::LerpAngle(bullet->prevAngle, bullet->angle, g_RenderAlpha), 1.5707964f);
             bullet->vm.rotation.z = angle;
+            bullet->vm.prevRotation.z = angle;
             bullet->vm.updateRotation = 1;
         }
-        bullet->vm.pos.x = g_GameManager.arcadeRegionTopLeftPos.x + bullet->pos.x;
-        bullet->vm.pos.y = g_GameManager.arcadeRegionTopLeftPos.y + bullet->pos.y;
+
+        ZunVec3 drawPos = bullet->prevPos.Lerp(bullet->pos, g_RenderAlpha);
+        bullet->vm.pos.x = g_GameManager.arcadeRegionTopLeftPos.x + drawPos.x;
+        bullet->vm.pos.y = g_GameManager.arcadeRegionTopLeftPos.y + drawPos.y;
         bullet->vm.pos.z = 0.4f;
         g_AnmManager->Draw(&bullet->vm);
         if (bullet->drawCallback)
@@ -722,8 +739,10 @@ void Player::DrawBulletExplosions()
             bullet->vm.rotation.z = angle;
             bullet->vm.updateRotation = 1;
         }
-        bullet->vm.pos.x = g_GameManager.arcadeRegionTopLeftPos.x + bullet->pos.x;
-        bullet->vm.pos.y = g_GameManager.arcadeRegionTopLeftPos.y + bullet->pos.y;
+
+        ZunVec3 drawPos = bullet->prevPos.Lerp(bullet->pos, g_RenderAlpha);
+        bullet->vm.pos.x = g_GameManager.arcadeRegionTopLeftPos.x + drawPos.x;
+        bullet->vm.pos.y = g_GameManager.arcadeRegionTopLeftPos.y + drawPos.y;
         bullet->vm.pos.z = 0.4f;
         g_AnmManager->Draw(&bullet->vm);
     }
@@ -1943,6 +1962,7 @@ i32 Player::UpdateDeath()
             this->positionCenter.x = g_GameManager.arcadeRegionSize.x / 2.0f;
             this->positionCenter.y = g_GameManager.arcadeRegionSize.y - 64.0f;
             this->positionCenter.z = 0.2f;
+            this->prevPositionCenter = this->positionCenter;
             this->invulnerabilityTimer = 0;
             this->playerSprite.scale.x = 3.0f;
             this->playerSprite.scale.y = 3.0f;
@@ -2290,6 +2310,11 @@ void Player::UpdateUI()
 
 u32 Player::OnUpdate(Player *arg)
 {
+    arg->UpdatePrev();
+
+    arg->prevPositionCenter = arg->positionCenter;
+    arg->prevOptionsPosition[0] = arg->optionsPosition[0];
+    arg->prevOptionsPosition[1] = arg->optionsPosition[1];
     if (g_GameManager.isTimeStopped)
     {
         return CHAIN_CALLBACK_RESULT_CONTINUE;
@@ -2348,8 +2373,12 @@ u32 Player::OnDrawHighPrio(Player *arg)
     }
     if (!g_GameManager.isInRetryMenu)
     {
-        arg->playerSprite.pos.x = g_GameManager.arcadeRegionTopLeftPos.x + arg->positionCenter.x;
-        arg->playerSprite.pos.y = g_GameManager.arcadeRegionTopLeftPos.y + arg->positionCenter.y;
+        ZunVec3 drawPlayerPos = arg->prevPositionCenter.Lerp(arg->positionCenter, g_RenderAlpha);
+        ZunVec3 drawOptionsPos[2] = {
+            arg->prevOptionsPosition[0].Lerp(arg->optionsPosition[0], g_RenderAlpha),
+            arg->prevOptionsPosition[1].Lerp(arg->optionsPosition[1], g_RenderAlpha)};
+        arg->playerSprite.pos.x = g_GameManager.arcadeRegionTopLeftPos.x + drawPlayerPos.x;
+        arg->playerSprite.pos.y = g_GameManager.arcadeRegionTopLeftPos.y + drawPlayerPos.y;
         arg->playerSprite.pos.z = 0.0f;
         g_AnmManager->DrawNoRotation(&arg->playerSprite);
         if (arg->optionState != OPTION_HIDDEN &&
@@ -2357,45 +2386,18 @@ u32 Player::OnDrawHighPrio(Player *arg)
              arg->playerState == PLAYER_STATE_INVULNERABLE))
         {
             arg->optionsSprite[0].pos.x =
-                g_GameManager.arcadeRegionTopLeftPos.x + arg->optionsPosition[0].x;
+                g_GameManager.arcadeRegionTopLeftPos.x + drawOptionsPos[0].x;
             arg->optionsSprite[0].pos.y =
-                g_GameManager.arcadeRegionTopLeftPos.y + arg->optionsPosition[0].y;
+                g_GameManager.arcadeRegionTopLeftPos.y + drawOptionsPos[0].y;
             arg->optionsSprite[0].pos.z = 0.0f;
             arg->optionsSprite[1].pos.x =
-                g_GameManager.arcadeRegionTopLeftPos.x + arg->optionsPosition[1].x;
+                g_GameManager.arcadeRegionTopLeftPos.x + drawOptionsPos[1].x;
             arg->optionsSprite[1].pos.y =
-                g_GameManager.arcadeRegionTopLeftPos.y + arg->optionsPosition[1].y;
+                g_GameManager.arcadeRegionTopLeftPos.y + drawOptionsPos[1].y;
             arg->optionsSprite[1].pos.z = 0.0f;
             g_AnmManager->Draw(&arg->optionsSprite[0]);
             g_AnmManager->Draw(&arg->optionsSprite[1]);
         }
-    }
-    if (arg->playerState == PLAYER_STATE_BORDER && arg->invulnerabilityTimer.GetCurrent() > 0)
-    {
-        if (arg->invulnerabilityTimer.GetCurrent() % 4 < 2)
-        {
-            arg->playerSprite.color.color = 0xffff0000;
-        }
-        else
-        {
-            arg->playerSprite.color.color = 0xffffffff;
-        }
-        color.bytes.a = 128;
-        if (g_Player.invulnerabilityTimer >= 510)
-        {
-            color.bytes.r = color.bytes.g = color.bytes.b =
-                128 - (540 - g_Player.invulnerabilityTimer.GetCurrent()) * 80 / 30;
-        }
-        else if (g_Player.invulnerabilityTimer < 30)
-        {
-            color.bytes.r = color.bytes.g = color.bytes.b =
-                128 - g_Player.invulnerabilityTimer.GetCurrent() * 80 / 30;
-        }
-        else
-        {
-            color.bytes.r = color.bytes.g = color.bytes.b = 48;
-        }
-        g_Stage.SmoothBlendColor(color);
     }
     return CHAIN_CALLBACK_RESULT_CONTINUE;
 }
@@ -2474,6 +2476,9 @@ ZunResult Player::AddedCallback(Player *arg)
     arg->positionCenter.z = 0.49f;
     arg->optionsPosition[0].z = 0.49f;
     arg->optionsPosition[1].z = 0.49f;
+    arg->prevPositionCenter = arg->positionCenter;
+    arg->prevOptionsPosition[0] = arg->optionsPosition[0];
+    arg->prevOptionsPosition[1] = arg->optionsPosition[1];
 
     for (i = 0; i < 112; i++)
     {

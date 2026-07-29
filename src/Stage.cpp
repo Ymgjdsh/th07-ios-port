@@ -7,6 +7,7 @@
 #include "FileSystem.hpp"
 #include "GameErrorContext.hpp"
 #include "GameManager.hpp"
+#include "GameWindow.hpp"
 #include "Gui.hpp"
 #include "ScreenEffect.hpp"
 #include "Supervisor.hpp"
@@ -114,6 +115,25 @@ u32 Stage::OnUpdate(Stage *arg)
     ZunVec3 pos;
     StdRawInstr *curInstr;
 
+    for (i32 i = 0; i < arg->quadCount; i++)
+    {
+        arg->quadVms[i].UpdatePrev();
+    }
+    arg->vm1.UpdatePrev();
+    arg->vm2.UpdatePrev();
+    for (i32 i = 0; i < 32; i++)
+    {
+        arg->spellcardVms[i].UpdatePrev();
+    }
+
+    arg->prevPosition = arg->position;
+    arg->prevCam = arg->cam;
+
+    arg->color2.bytes.a = 0;
+    arg->color2.bytes.r = 128;
+    arg->color2.bytes.g = 128;
+    arg->color2.bytes.b = 128;
+
     if (!arg->stdData)
     {
         return CHAIN_CALLBACK_RESULT_CONTINUE;
@@ -149,6 +169,7 @@ loop_begin:
                 arg->position.x = arg->positionInterpInitial.x;
                 arg->position.y = arg->positionInterpInitial.y;
                 arg->position.z = arg->positionInterpInitial.z;
+                arg->prevPosition = arg->position;
             }
             else
             {
@@ -190,6 +211,7 @@ loop_begin:
             if (arg->timersMax[0] == 0)
             {
                 arg->cam.pos = *curInstr->args.AsVec();
+                arg->prevCam.pos = arg->cam.pos;
             }
             break;
         case 6:
@@ -251,6 +273,7 @@ loop_begin:
             arg->scriptTime = curInstr->args.args[1].i;
             arg->timersMax[0] = 0;
             arg->cameraTeleported = 1;
+            arg->prevCam = arg->cam;
             goto loop_begin;
         case 14:
             arg->camStart.pos = *curInstr->args.AsVec();
@@ -444,6 +467,9 @@ LAB_004061aa: {
     {
         g_AnmManager->ExecuteScript(&arg->vm2);
     }
+    arg->cam.right.Cross(&arg->cam.lookAt, &arg->cam.up);
+    arg->cam.right.Normalize(&arg->cam.right);
+    arg->cam.lookAtDir.Normalize(&arg->cam.lookAt);
     arg->stageFrameCounter++;
     if (arg->stageFrameCounter % 500 == 250)
     {
@@ -492,6 +518,16 @@ u32 Stage::OnDrawHighPrio(Stage *arg)
         g_Supervisor.DisableFog();
     }
     g_AnmManager->Flush();
+    if (g_GameManager.notInMenu)
+    {
+        g_Supervisor.viewport.x = (u32)g_GameManager.arcadeRegionTopLeftPos.x;
+        g_Supervisor.viewport.y = (u32)g_GameManager.arcadeRegionTopLeftPos.y;
+        g_Supervisor.viewport.width = (u32)g_GameManager.arcadeRegionSize.x;
+        g_Supervisor.viewport.height = (u32)g_GameManager.arcadeRegionSize.y;
+        g_Supervisor.viewport.minZ = 0.0f;
+        g_Supervisor.viewport.maxZ = 1.0f;
+        g_Supervisor.gfxDevice->SetViewport(g_Supervisor.viewport);
+    }
     if (arg->clearBackground)
     {
         viewport.x = 32;
@@ -508,21 +544,17 @@ u32 Stage::OnDrawHighPrio(Stage *arg)
     {
         g_AnmManager->SetColorWithMulEnabled(arg->color2.color);
     }
-    arg->color2.bytes.a = 0;
-    arg->color2.bytes.r = 128;
-    arg->color2.bytes.g = 128;
-    arg->color2.bytes.b = 128;
     if (arg->spellCardState <= 1)
     {
         if (!g_Gui.IsStageFinished())
         {
             if (0 < arg->vm1.activeSpriteIdx)
             {
-                g_AnmManager->DrawAndFlush(&arg->vm1);
+                g_AnmManager->DrawInterpAndFlush(&arg->vm1);
             }
             if (0 < arg->vm2.activeSpriteIdx)
             {
-                g_AnmManager->DrawAndFlush(&arg->vm2);
+                g_AnmManager->DrawInterpAndFlush(&arg->vm2);
             }
         }
     }
@@ -608,18 +640,17 @@ u32 Stage::OnDrawLowPrio(Stage *arg)
     {
         for (i = 0; i < arg->numSpellcardVms; i++)
         {
-            g_AnmManager->DrawAndFlush(&arg->spellcardVms[i]);
+            g_AnmManager->DrawInterpAndFlush(&arg->spellcardVms[i]);
         }
     }
     AnmManager::SetCameraModeStatic(g_AnmManager, 0);
     arg->SetupCameraStageBackground();
     g_Supervisor.gfxDevice->SetViewport(g_Supervisor.viewport);
     g_Supervisor.gfxDevice->SetFogRange(1000.0f, 2000.0f);
-    if (!arg->isDarkening)
-    {
-        g_AnmManager->SetColor(0x80808080);
-    }
+
+    g_AnmManager->SetColor(0x80808080);
     arg->isDarkening = 0;
+
     return CHAIN_CALLBACK_RESULT_CONTINUE;
 }
 
@@ -728,6 +759,7 @@ ZunResult Stage::AddedCallback(Stage *arg)
     arg->cam.lookAt = ZunVec3(0.0f, 0.0f, 0.0f);
     arg->cam.up = ZunVec3(0.0f, 1.0f, 0.0f);
     arg->cam.fov = ZUN_PI / 6.0f;
+    arg->prevCam = arg->cam;
     arg->camEnd = arg->cam;
     arg->camStart = arg->cam;
     for (i = 0; i < 4; i++)
@@ -899,10 +931,13 @@ i32 Stage::RenderObjects(i32 zLevel)
 
     UpdateCamera();
 
+    drawCam.pos = this->prevCam.pos.Lerp(this->cam.pos, g_RenderAlpha);
+
     AnmManager::SetCameraModeStatic(g_AnmManager, 1);
 
     worldMatrix.Identity();
 
+    ZunVec3 drawPosition = this->prevPosition.Lerp(this->position, g_RenderAlpha);
     while (instance->id >= 0)
     {
         obj = this->objects[instance->id];
@@ -910,11 +945,11 @@ i32 Stage::RenderObjects(i32 zLevel)
         {
             curQuad = &obj->firstQuad;
 
-            quadPos.x = obj->pos.x + instance->pos.x - this->position.x + obj->size.x / 2.0f;
-            quadPos.y = obj->pos.y + instance->pos.y - this->position.y + obj->size.y / 2.0f;
-            quadPos.z = obj->pos.z + instance->pos.z - this->position.z + obj->size.z / 2.0f;
+            quadPos.x = obj->pos.x + instance->pos.x - drawPosition.x + obj->size.x / 2.0f;
+            quadPos.y = obj->pos.y + instance->pos.y - drawPosition.y + obj->size.y / 2.0f;
+            quadPos.z = obj->pos.z + instance->pos.z - drawPosition.z + obj->size.z / 2.0f;
 
-            quadPos = quadPos - this->cam.pos;
+            quadPos = quadPos - drawCam.pos;
 
             if (quadPos.LengthSq() > 1690000.0f)
             {
@@ -922,7 +957,7 @@ i32 Stage::RenderObjects(i32 zLevel)
             }
             else
             {
-                dotProd = quadPos.Dot(&this->cam.lookAtDir);
+                dotProd = quadPos.Dot(&this->drawCam.lookAtDir);
                 radius = obj->size.Length() / 2.0f + 880.0f;
 
                 if (dotProd > radius || dotProd < 60.0f)
@@ -940,19 +975,21 @@ i32 Stage::RenderObjects(i32 zLevel)
                         {
                         case 0:
                             curQuadVm->pos.x = curQuadVm->offset.x + curQuad->pos.x +
-                                               instance->pos.x - this->position.x;
+                                               instance->pos.x - drawPosition.x;
                             curQuadVm->pos.y = curQuadVm->offset.y + curQuad->pos.y +
-                                               instance->pos.y - this->position.y;
+                                               instance->pos.y - drawPosition.y;
                             curQuadVm->pos.z = curQuadVm->offset.z + curQuad->pos.z +
-                                               instance->pos.z - this->position.z;
+                                               instance->pos.z - drawPosition.z;
 
                             if (curQuad->size.x != 0.0f)
                             {
                                 curQuadVm->scale.x = curQuad->size.x / curQuadVm->sprite->widthPx;
+                                curQuadVm->prevScale.x = curQuadVm->scale.x;
                             }
                             if (curQuad->size.y != 0.0f)
                             {
                                 curQuadVm->scale.y = curQuad->size.y / curQuadVm->sprite->heightPx;
+                                curQuadVm->prevScale.y = curQuadVm->scale.y;
                             }
 
                             if (curQuadVm->autoRotate == 2)
@@ -989,8 +1026,9 @@ i32 Stage::RenderObjects(i32 zLevel)
 
                                 curQuadVm->scale.x = diffPos.Length() / var_98;
                                 curQuadVm->scale.y = curQuadVm->scale.x;
+                                curQuadVm->prevScale = curQuadVm->scale;
 
-                                diffPos = curQuadVm->pos - this->cam.pos;
+                                diffPos = curQuadVm->pos - drawCam.pos;
 
                                 var_98 = diffPos.Length();
                                 origColor = curQuadVm->color;
@@ -1036,9 +1074,11 @@ i32 Stage::RenderObjects(i32 zLevel)
                                         }
                                         fogState = 0;
                                     }
+                                    curQuadVm->prevColor = curQuadVm->color;
                                     g_AnmManager->DrawFacingCamera(curQuadVm);
                                 }
                                 curQuadVm->color = origColor;
+                                curQuadVm->prevColor = origColor;
                             }
                             else
                             {
@@ -1103,14 +1143,22 @@ void Stage::SetupCameraStageBackground()
 
 void Stage::UpdateCamera()
 {
-    ZunVec3 at = this->cam.lookAt + this->cam.pos;
-    g_Supervisor.viewMatrix.LookAtLH(&this->cam.pos, &at, &this->cam.up);
+    drawCam.pos = this->prevCam.pos.Lerp(this->cam.pos, g_RenderAlpha);
+    drawCam.lookAt = this->prevCam.lookAt.Lerp(this->cam.lookAt, g_RenderAlpha);
+    drawCam.up = this->prevCam.up.Lerp(this->cam.up, g_RenderAlpha);
+    drawCam.fov = utils::LerpAngle(this->prevCam.fov, this->cam.fov, g_RenderAlpha);
+
+    ZunVec3 at = drawCam.lookAt + drawCam.pos;
+    g_Supervisor.viewMatrix.LookAtLH(&drawCam.pos, &at, &drawCam.up);
     g_Supervisor.projectionMatrix.PerspectiveFovLH(
-        this->cam.fov, (f32)g_Supervisor.viewport.width / (f32)g_Supervisor.viewport.height, 30.0f,
+        drawCam.fov, (f32)g_Supervisor.viewport.width / (f32)g_Supervisor.viewport.height, 30.0f,
         1800.0f);
+
     g_Supervisor.viewProjectionMatrix = g_Supervisor.viewMatrix * g_Supervisor.projectionMatrix;
     g_Supervisor.gfxDevice->SetTransformMatrix(MATRIX_VIEW, g_Supervisor.viewMatrix);
     g_Supervisor.gfxDevice->SetTransformMatrix(MATRIX_PROJECTION, g_Supervisor.projectionMatrix);
-    this->cam.right.Cross(&this->cam.lookAt, &this->cam.up);
-    this->cam.right.Normalize(&this->cam.right);
+
+    drawCam.right.Cross(&drawCam.lookAt, &drawCam.up);
+    drawCam.right.Normalize(&drawCam.right);
+    drawCam.lookAtDir.Normalize(&drawCam.lookAt);
 }

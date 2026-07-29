@@ -137,6 +137,8 @@ u32 MusicRoom::OnUpdate(MusicRoom *arg)
     i32 iVar1;
     i32 i;
 
+    arg->UpdatePrev();
+
     iVar1 = arg->enableInput;
 recheck:
     switch (arg->enableInput)
@@ -185,7 +187,7 @@ u32 MusicRoom::OnDraw(MusicRoom *arg)
     local_c[1] = 0;
     g_AnmManager->SetTexture(0);
     g_AnmManager->CopySurfaceToBackBuffer(0, 0, 0, 0, 0);
-    g_AnmManager->DrawNoRotation(&arg->vm[0]);
+    g_AnmManager->DrawInterpNoRotation(&arg->vm[0]);
     for (i = arg->listingOffset; i < arg->listingOffset + 10; i++)
     {
         if (i >= arg->numDescriptors)
@@ -196,7 +198,7 @@ u32 MusicRoom::OnDraw(MusicRoom *arg)
         arg->titleSprites[i].pos.x = 93.0f;
         arg->titleSprites[i].pos.y = (f32)((i + 1 - arg->listingOffset) * 18) + 104.0f - 20.0f;
         arg->titleSprites[i].pos.z = 0.0f;
-        g_AnmManager->DrawNoRotation(arg->titleSprites + i);
+        g_AnmManager->DrawInterpNoRotation(arg->titleSprites + i);
         local_18 = arg->titleSprites[i].pos;
         local_18.x -= 60.0f;
         if (arg->cursor == i)
@@ -209,7 +211,7 @@ u32 MusicRoom::OnDraw(MusicRoom *arg)
     i++;
     for (i = 0; i < 8; i++)
     {
-        g_AnmManager->DrawNoRotation(&arg->descriptionSprites[i]);
+        g_AnmManager->DrawInterpNoRotation(&arg->descriptionSprites[i]);
     }
     g_AsciiManager.color = 0xffffffff;
     return CHAIN_CALLBACK_RESULT_CONTINUE;

@@ -9,6 +9,7 @@
 #include "AnmVm.hpp"
 #include "FileSystem.hpp"
 #include "GameErrorContext.hpp"
+#include "GameWindow.hpp"
 #include "Rng.hpp"
 #include "Stage.hpp"
 #include "Supervisor.hpp"
@@ -545,13 +546,13 @@ ZunResult AnmManager::SetActiveSprite(AnmVm *vm, i32 spriteIdx)
 
     vm->activeSpriteIdx = (i16)spriteIdx;
     vm->sprite = &this->sprites[spriteIdx];
-    vm->matrix.Identity();
+    vm->baseTransformMatrix.Identity();
+    vm->baseTransformMatrix.m[0][0] = vm->sprite->widthPx / 256.0f;
+    vm->baseTransformMatrix.m[1][1] = vm->sprite->heightPx / 256.0f;
     vm->uvMatrix.Identity();
-    vm->matrix.m[0][0] = vm->sprite->widthPx / 256.0f;
-    vm->matrix.m[1][1] = vm->sprite->heightPx / 256.0f;
     vm->uvMatrix.m[0][0] = vm->sprite->widthPx / vm->sprite->textureWidth * vm->sprite->cols;
     vm->uvMatrix.m[1][1] = vm->sprite->heightPx / vm->sprite->textureHeight * vm->sprite->rows;
-    vm->worldTransformMatrix = vm->matrix;
+    vm->worldTransformMatrix = vm->matrix = vm->baseTransformMatrix;
     return ZUN_SUCCESS;
 }
 
@@ -570,6 +571,7 @@ void AnmManager::SetAndExecuteScript(AnmVm *vm, AnmRawInstr *beginningOfScript)
         vm->currentTimeInScript = 0;
         vm->visible = 0;
         ExecuteScript(vm);
+        vm->UpdatePrev();
         this->scriptsExecutedThisFrame++;
     }
 }
@@ -577,6 +579,7 @@ void AnmManager::SetAndExecuteScript(AnmVm *vm, AnmRawInstr *beginningOfScript)
 void AnmManager::SetRenderStateForVm(AnmVm *vm)
 {
     ZunColor color;
+    ZunColor prevColor;
 
     if ((u32)this->currentBlendMode != vm->blendMode)
     {
@@ -592,6 +595,10 @@ void AnmManager::SetRenderStateForVm(AnmVm *vm)
         }
     }
     color.color = vm->useColor2 ? vm->color2.color : vm->color.color;
+    prevColor.color = vm->prevUseColor2 ? vm->prevColor2.color : vm->prevColor.color;
+
+    color = ZunColor::Lerp(prevColor, color, g_RenderAlpha);
+
     if (!g_Supervisor.cfg.noVertexBuffers)
     {
         if (this->colorMulEnabled)
@@ -675,11 +682,10 @@ void AnmManager::SyncRenderState(AnmVm *vm)
 
 ZunResult AnmManager::DrawInner(AnmVm *vm, u32 drawFlags)
 {
-    ZunColor color;
+    ZunColor color, prevColor;
     f32 triangleX1, triangleX2, triangleY1, triangleY2;
 
-    g_AnmManager->TakeScreenshotIfRequested(vm);
-
+    Float2 drawUv = vm->prevUvScrollPos.LerpUv(vm->uvScrollPos, g_RenderAlpha);
     g_QuadVertices[0].pos.x += this->offset.x;
     g_QuadVertices[0].pos.y += this->offset.y;
     g_QuadVertices[1].pos.x += this->offset.x;
@@ -702,13 +708,11 @@ ZunResult AnmManager::DrawInner(AnmVm *vm, u32 drawFlags)
     }
 
     g_QuadVertices[0].textureUV.x = g_QuadVertices[2].textureUV.x =
-        vm->sprite->uvStart.x + vm->uvScrollPos.x;
-    g_QuadVertices[1].textureUV.x = g_QuadVertices[3].textureUV.x =
-        vm->sprite->uvEnd.x + vm->uvScrollPos.x;
+        vm->sprite->uvStart.x + drawUv.x;
+    g_QuadVertices[1].textureUV.x = g_QuadVertices[3].textureUV.x = vm->sprite->uvEnd.x + drawUv.x;
     g_QuadVertices[0].textureUV.y = g_QuadVertices[1].textureUV.y =
-        vm->sprite->uvStart.y + vm->uvScrollPos.y;
-    g_QuadVertices[2].textureUV.y = g_QuadVertices[3].textureUV.y =
-        vm->sprite->uvEnd.y + vm->uvScrollPos.y;
+        vm->sprite->uvStart.y + drawUv.y;
+    g_QuadVertices[2].textureUV.y = g_QuadVertices[3].textureUV.y = vm->sprite->uvEnd.y + drawUv.y;
 
     triangleX1 = std::max(g_QuadVertices[0].pos.x, g_QuadVertices[1].pos.x);
     triangleX1 = std::max(g_QuadVertices[2].pos.x, triangleX1);
@@ -747,6 +751,9 @@ ZunResult AnmManager::DrawInner(AnmVm *vm, u32 drawFlags)
     if ((drawFlags & 2) == 0)
     {
         color.color = vm->useColor2 ? vm->color2.color : vm->color.color;
+        prevColor.color = vm->prevUseColor2 ? vm->prevColor2.color : vm->prevColor.color;
+
+        color = ZunColor::Lerp(prevColor, color, g_RenderAlpha);
         if (this->colorMulEnabled)
         {
             color.bytes.r = ZunColor::Multiply(color.bytes.r, this->color.bytes.r);
@@ -824,8 +831,10 @@ ZunResult AnmManager::DrawNoRotation(AnmVm *vm)
         return ZUN_ERROR;
     }
 
-    centerX = vm->sprite->widthPx * vm->scale.x / 2.0f;
-    centerY = vm->sprite->heightPx * vm->scale.y / 2.0f;
+    Float2 drawScale = vm->prevScale.Lerp(vm->scale, g_RenderAlpha);
+
+    centerX = vm->sprite->widthPx * drawScale.x / 2.0f;
+    centerY = vm->sprite->heightPx * drawScale.y / 2.0f;
 
     if ((vm->anchor & 1) == 0)
     {
@@ -872,7 +881,7 @@ ZunResult AnmManager::Draw(AnmVm *vm)
     f32 width;
     f32 height;
 
-    if (vm->rotation.z == 0.0f)
+    if (vm->rotation.z == 0.0f && vm->prevRotation.z == 0.0f)
     {
         return DrawNoRotation(vm);
     }
@@ -889,12 +898,15 @@ ZunResult AnmManager::Draw(AnmVm *vm)
         return ZUN_ERROR;
     }
 
-    z = vm->rotation.z;
+    f32 drawRotZ = utils::LerpAngle(vm->prevRotation.z, vm->rotation.z, g_RenderAlpha);
+    Float2 drawScale = vm->prevScale.Lerp(vm->scale, g_RenderAlpha);
+
+    z = drawRotZ;
     sincosf(&sinZ, &cosZ, z);
     xOffset = vm->pos.x;
     yOffset = vm->pos.y;
-    width = vm->sprite->widthPx * vm->scale.x / 2.0f;
-    height = vm->sprite->heightPx * vm->scale.y / 2.0f;
+    width = vm->sprite->widthPx * drawScale.x / 2.0f;
+    height = vm->sprite->heightPx * drawScale.y / 2.0f;
 
     TranslateRotation(&g_QuadVertices[0], -width, -height, sinZ, cosZ, xOffset, yOffset);
     TranslateRotation(&g_QuadVertices[1], width, -height, sinZ, cosZ, xOffset, yOffset);
@@ -939,8 +951,10 @@ ZunResult AnmManager::DrawFacingCamera(AnmVm *vm)
         return ZUN_ERROR;
     }
 
-    centerX = vm->sprite->widthPx * vm->scale.x / 2.0f;
-    centerY = vm->sprite->heightPx * vm->scale.y / 2.0f;
+    Float2 drawScale = vm->prevScale.Lerp(vm->scale, g_RenderAlpha);
+
+    centerX = vm->sprite->widthPx * drawScale.x / 2.0f;
+    centerY = vm->sprite->heightPx * drawScale.y / 2.0f;
 
     if ((vm->anchor & 1) == 0)
     {
@@ -984,7 +998,10 @@ ZunResult AnmManager::CalcBillboardTransform(AnmVm *vm)
     ZunVec3 projectRightOffset;
     f32 cosZ;
 
-    sincosf(&sinZ, &cosZ, z);
+    f32 drawRotZ = utils::LerpAngle(vm->prevRotation.z, vm->rotation.z, g_RenderAlpha);
+    Float2 drawScale = vm->prevScale.Lerp(vm->scale, g_RenderAlpha);
+
+    sincosf(&sinZ, &cosZ, drawRotZ);
 
     ZunVec3 origin(0.0f, 0.0f, 0.0f);
 
@@ -1006,8 +1023,8 @@ ZunResult AnmManager::CalcBillboardTransform(AnmVm *vm)
     projectRightOffset = projectRight - projectCenter;
 
     halfLength = projectRightOffset.Length() * 0.5f;
-    halfWidth = halfLength * vm->sprite->widthPx * vm->scale.x;
-    halfHeight = halfLength * vm->sprite->heightPx * vm->scale.y;
+    halfWidth = halfLength * vm->sprite->widthPx * drawScale.x;
+    halfHeight = halfLength * vm->sprite->heightPx * drawScale.y;
 
     halfLength = projectCenter.x; // used as screen center x here
     screenCenterY = projectCenter.y;
@@ -1066,6 +1083,43 @@ ZunResult AnmManager::DrawBillboard(AnmVm *vm)
     return DrawInner(vm, 0);
 }
 
+static ZunMatrix BuildInterpolatedTransform(const AnmVm *vm)
+{
+    const Float2 drawScale = vm->prevScale.Lerp(vm->scale, g_RenderAlpha);
+    const ZunVec3 drawRotation = {
+        utils::LerpAngle(vm->prevRotation.x, vm->rotation.x, g_RenderAlpha),
+        utils::LerpAngle(vm->prevRotation.y, vm->rotation.y, g_RenderAlpha),
+        utils::LerpAngle(vm->prevRotation.z, vm->rotation.z, g_RenderAlpha),
+    };
+
+    ZunMatrix world = vm->baseTransformMatrix;
+
+    world.m[0][0] *= drawScale.x;
+    world.m[1][1] *= drawScale.y;
+
+    ZunMatrix rot;
+
+    if (drawRotation.x != 0.0f)
+    {
+        rot.RotateX(drawRotation.x);
+        world *= rot;
+    }
+
+    if (drawRotation.y != 0.0f)
+    {
+        rot.RotateY(drawRotation.y);
+        world *= rot;
+    }
+
+    if (drawRotation.z != 0.0f)
+    {
+        rot.RotateZ(drawRotation.z);
+        world *= rot;
+    }
+
+    return world;
+}
+
 void AnmManager::CalcProjectedTransform(AnmVm *vm)
 {
     ZunMatrix world;
@@ -1073,7 +1127,7 @@ void AnmManager::CalcProjectedTransform(AnmVm *vm)
 
     if (vm->skipTransform == 0 && (vm->updateScale || vm->updateRotation))
     {
-        vm->worldTransformMatrix = vm->matrix;
+        vm->worldTransformMatrix = vm->baseTransformMatrix;
         vm->worldTransformMatrix.m[0][0] *= vm->scale.x;
         vm->worldTransformMatrix.m[1][1] *= vm->scale.y;
         vm->updateScale = 0;
@@ -1095,14 +1149,17 @@ void AnmManager::CalcProjectedTransform(AnmVm *vm)
         vm->updateRotation = 0;
     }
 
-    world = vm->worldTransformMatrix;
+    Float2 drawScale = vm->prevScale.Lerp(vm->scale, g_RenderAlpha);
+
+    world = vm->skipTransform == 0 ? BuildInterpolatedTransform(vm) : vm->worldTransformMatrix;
+
     if ((vm->anchor & 1) == 0)
     {
         world.m[3][0] = vm->pos.x;
     }
     else
     {
-        world.m[3][0] = fabsf(vm->sprite->widthPx * vm->scale.x / 2.0f) + vm->pos.x;
+        world.m[3][0] = fabsf(vm->sprite->widthPx * drawScale.x / 2.0f) + vm->pos.x;
     }
 
     if ((vm->anchor & 2) == 0)
@@ -1111,7 +1168,7 @@ void AnmManager::CalcProjectedTransform(AnmVm *vm)
     }
     else
     {
-        world.m[3][1] = fabsf(vm->sprite->heightPx * vm->scale.y / 2.0f) + vm->pos.y;
+        world.m[3][1] = fabsf(vm->sprite->heightPx * drawScale.y / 2.0f) + vm->pos.y;
     }
     world.m[3][2] = vm->pos.z;
 
@@ -1125,8 +1182,6 @@ void AnmManager::CalcProjectedTransform(AnmVm *vm)
                                   &wvp);
     g_QuadVertices[3].pos.Project(&this->vertexBufferContents[3].position, &g_Supervisor.viewport,
                                   &wvp);
-
-    this->matrix = world;
 }
 
 ZunResult AnmManager::DrawProjected(AnmVm *vm)
@@ -1178,7 +1233,7 @@ ZunResult AnmManager::Draw3(AnmVm *vm)
 
     if (vm->skipTransform == 0 && (vm->updateScale || vm->updateRotation))
     {
-        vm->worldTransformMatrix = vm->matrix;
+        vm->worldTransformMatrix = vm->baseTransformMatrix;
         vm->worldTransformMatrix.m[0][0] *= vm->scale.x;
         vm->worldTransformMatrix.m[1][1] *= vm->scale.y;
         vm->updateScale = 0;
@@ -1202,14 +1257,17 @@ ZunResult AnmManager::Draw3(AnmVm *vm)
         vm->updateRotation = 0;
     }
 
-    world = vm->worldTransformMatrix;
+    Float2 drawScale = vm->prevScale.Lerp(vm->scale, g_RenderAlpha);
+
+    world = vm->skipTransform == 0 ? BuildInterpolatedTransform(vm) : vm->worldTransformMatrix;
+
     if ((vm->anchor & 1) == 0)
     {
         world.m[3][0] = vm->pos.x;
     }
     else
     {
-        world.m[3][0] = fabsf(vm->sprite->widthPx * vm->scale.x / 2.0f) + vm->pos.x;
+        world.m[3][0] = fabsf(vm->sprite->widthPx * drawScale.x / 2.0f) + vm->pos.x;
     }
 
     if ((vm->anchor & 2) == 0)
@@ -1218,7 +1276,7 @@ ZunResult AnmManager::Draw3(AnmVm *vm)
     }
     else
     {
-        world.m[3][1] = fabsf(vm->sprite->heightPx * vm->scale.y / 2.0f) + vm->pos.y;
+        world.m[3][1] = fabsf(vm->sprite->heightPx * drawScale.y / 2.0f) + vm->pos.y;
     }
 
     world.m[3][0] += this->offset.x;
@@ -1233,8 +1291,12 @@ ZunResult AnmManager::Draw3(AnmVm *vm)
     {
         this->currentSprite = vm->sprite;
         uv = vm->uvMatrix;
-        uv.m[2][0] = vm->sprite->uvStart.x + vm->uvScrollPos.x;
-        uv.m[2][1] = vm->sprite->uvStart.y + vm->uvScrollPos.y;
+
+        Float2 drawUv = vm->prevUvScrollPos.LerpUv(vm->uvScrollPos, g_RenderAlpha);
+
+        uv.m[2][0] = vm->sprite->uvStart.x + drawUv.x;
+        uv.m[2][1] = vm->sprite->uvStart.y + drawUv.y;
+
         g_Supervisor.gfxDevice->SetTransformMatrix(MATRIX_TEXTURE, uv);
 
         if (this->currentTexture != this->textures[vm->sprite->sourceFileIndex])
@@ -1385,6 +1447,11 @@ i32 AnmManager::ExecuteScript(AnmVm *vm)
     if (!vm->currentInstruction)
     {
         return 1;
+    }
+
+    if (g_SuppressAnmAdvance)
+    {
+        return 0;
     }
 
     if (vm->pendingInterrupt != 0)
@@ -2202,9 +2269,10 @@ void AnmManager::CopySurfaceToBackBuffer(i32 surfaceIdx, i32 left, i32 top, i32 
     g_Supervisor.gfxDevice->DrawPrimitiveUP(PRIM_TRIANGLE_STRIP, 2, vertices,
                                             sizeof(VertexTex1DiffuseXyzrhw));
     g_Supervisor.gfxDevice->Enable(CAPS_ALPHA_TEST);
+    this->SetBlendMode(255);
 }
 
-void AnmManager::DrawEndingRect(i32 surfaceIdx, i32 rectX, i32 rectY, i32 rectLeft, i32 rectTop,
+void AnmManager::DrawEndingRect(i32 surfaceIdx, f32 rectX, f32 rectY, f32 rectLeft, f32 rectTop,
                                 i32 width, i32 height)
 {
     if (!this->surfacesBis[surfaceIdx])
@@ -2227,10 +2295,10 @@ void AnmManager::DrawEndingRect(i32 surfaceIdx, i32 rectX, i32 rectY, i32 rectLe
     vertices[3].pos = ZunVec3(rectX + drawWidth, rectY + drawHeight, 0.0f);
     vertices[0].w = vertices[1].w = vertices[2].w = vertices[3].w = 1.0f;
 
-    f32 u0 = (f32)rectLeft / surf->w;
-    f32 v0 = (f32)rectTop / surf->h;
-    f32 u1 = (f32)(rectLeft + width) / surf->w;
-    f32 v1 = (f32)(rectTop + height) / surf->h;
+    f32 u0 = rectLeft / surf->w;
+    f32 v0 = rectTop / surf->h;
+    f32 u1 = (rectLeft + width) / surf->w;
+    f32 v1 = (rectTop + height) / surf->h;
 
     vertices[0].textureUV = {u0, v0};
     vertices[1].textureUV = {u1, v0};
@@ -2246,6 +2314,7 @@ void AnmManager::DrawEndingRect(i32 surfaceIdx, i32 rectX, i32 rectY, i32 rectLe
     g_Supervisor.gfxDevice->SetColorOp(COMPONENT_ALPHA, COLOR_OP_MODULATE);
     g_Supervisor.gfxDevice->DrawPrimitiveUP(PRIM_TRIANGLE_STRIP, 2, vertices,
                                             sizeof(VertexTex1DiffuseXyzrhw));
+    this->SetBlendMode(255);
 }
 
 void AnmManager::TakeScreenshot(i32 textureId, i32 srcLeft, i32 srcTop, i32 srcWidth, i32 srcHeight,

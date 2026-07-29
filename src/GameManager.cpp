@@ -9,6 +9,7 @@
 #include "EclManager.hpp"
 #include "EnemyManager.hpp"
 #include "GameErrorContext.hpp"
+#include "GameWindow.hpp"
 #include "Gui.hpp"
 #include "Player.hpp"
 #include "Rng.hpp"
@@ -154,6 +155,11 @@ void GameManager::Pause()
     g_GameManager.arcadeRegionSize.x = 384.0f;
     g_GameManager.arcadeRegionSize.y = 448.0f;
     this->isPaused = 1;
+    g_Player.prevPositionCenter = g_Player.positionCenter;
+    g_Player.prevOptionsPosition[0] = g_Player.optionsPosition[0];
+    g_Player.prevOptionsPosition[1] = g_Player.optionsPosition[1];
+    g_Stage.prevCam = g_Stage.cam;
+    g_Stage.prevPosition = g_Stage.position;
     if (g_GameManager.currentStage != 6 || g_Gui.frameCounter >= 300)
     {
         g_SoundPlayer.PushCommand(AUDIO_PAUSE, 0, "Pause");
@@ -486,6 +492,7 @@ ZunResult GameManager::AddedCallback(GameManager *arg)
 
     Touch::ResetRunUsage();
 
+    g_GameWindow.ResetAccumulator();
     g_Supervisor.checkTiming = 0;
     arg->difficultyMask = 1 << arg->difficulty;
     arg->shotTypeAndCharacter = arg->character * 2 + arg->shotType;

@@ -2,6 +2,7 @@
 
 #include "AnmManager.hpp"
 #include "GameManager.hpp"
+#include "GameWindow.hpp"
 #include "Rng.hpp"
 #include "Supervisor.hpp"
 #include "graphics/ZunGraphics.hpp"
@@ -32,6 +33,11 @@ void ScreenEffect::SetViewport(u32 color)
 
 u32 BombEffects::OnUpdateFadeOut(BombEffects *arg)
 {
+    if (arg->timer == 0)
+    {
+        arg->alpha = 255;
+    }
+    arg->prevAlpha = arg->alpha;
     if (arg->duration != 0)
     {
         arg->alpha = (i32)(255.0f - arg->timer.AsFloat() * 255.0f / (f32)arg->duration);
@@ -107,7 +113,7 @@ void ScreenEffect::DrawColoredQuad(ZunRect *rect, u32 param_2, u32 param_3, u32 
     g_Supervisor.gfxDevice->SetColorOp(COMPONENT_RGB, COLOR_OP_DISABLE);
     g_Supervisor.gfxDevice->SetColorOp(COMPONENT_ALPHA, COLOR_OP_DISABLE);
     g_Supervisor.gfxDevice->DrawPrimitiveUP(PRIM_TRIANGLE_STRIP, 2, vertices,
-                                   sizeof(VertexDiffuseXyzrhw));
+                                            sizeof(VertexDiffuseXyzrhw));
     g_AnmManager->SetVertexShader(255);
     g_AnmManager->SetSprite(NULL);
     g_AnmManager->SetTexture(0);
@@ -131,12 +137,15 @@ u32 BombEffects::OnDrawFullScreenColor(BombEffects *arg)
     g_Supervisor.viewport.width = 640;
     g_Supervisor.viewport.height = 480;
     g_Supervisor.gfxDevice->SetViewport(g_Supervisor.viewport);
-    ScreenEffect::DrawSquare(&rect, arg->alpha << 24 | arg->args[0]);
+
+    u32 drawAlpha = utils::Lerp(arg->prevAlpha, arg->alpha, g_RenderAlpha);
+    ScreenEffect::DrawSquare(&rect, drawAlpha << 24 | arg->args[0]);
     return 1;
 }
 
 u32 BombEffects::OnUpdateFadeIn(BombEffects *arg)
 {
+    arg->prevAlpha = arg->alpha;
     if (arg->duration != 0)
     {
         arg->alpha = (i32)(arg->timer.AsFloat() * 255.0f / (f32)arg->duration);
@@ -162,12 +171,19 @@ u32 BombEffects::OnDrawPlayAreaColor(BombEffects *arg)
     rect.top = 16.0f;
     rect.right = 416.0f;
     rect.bottom = 464.0f;
-    ScreenEffect::DrawSquare(&rect, arg->alpha << 24 | arg->args[0]);
+
+    u32 drawAlpha = utils::Lerp(arg->prevAlpha, arg->alpha, g_RenderAlpha);
+    ScreenEffect::DrawSquare(&rect, drawAlpha << 24 | arg->args[0]);
     return 1;
 }
 
 u32 BombEffects::OnUpdatePulse(BombEffects *arg)
 {
+    if (arg->timer == 0)
+    {
+        arg->alpha = (arg->args[1] >> 24) & 255;
+    }
+    arg->prevAlpha = arg->alpha;
     if (arg->timer < arg->duration)
     {
         arg->alpha = ((arg->args[1] >> 24) & 255) -
@@ -199,7 +215,8 @@ u32 BombEffects::OnDrawPlayAreaPulseColor(BombEffects *arg)
     rect.top = 16.0f;
     rect.right = 416.0f;
     rect.bottom = 464.0f;
-    ScreenEffect::DrawSquare(&rect, arg->alpha << 24 | (arg->args[1] & 0xffffff));
+    u32 drawAlpha = utils::Lerp(arg->prevAlpha, arg->alpha, g_RenderAlpha);
+    ScreenEffect::DrawSquare(&rect, drawAlpha << 24 | (arg->args[1] & 0xffffff));
     return 1;
 }
 
@@ -212,14 +229,22 @@ u32 BombEffects::OnUpdateScreenShake(BombEffects *arg)
 
     if (g_GameManager.framesThisStage <= 1)
     {
+        g_AnmManager->shakeOffset.x = 0.0f;
+        g_AnmManager->shakeOffset.y = 0.0f;
+        g_AnmManager->prevShakeOffset = g_AnmManager->shakeOffset;
         return 0;
     }
 
     arg->timer++;
     if (arg->timer >= arg->duration)
     {
+        g_AnmManager->shakeOffset.x = 0.0f;
+        g_AnmManager->shakeOffset.y = 0.0f;
+        g_AnmManager->prevShakeOffset = g_AnmManager->shakeOffset;
         return 0;
     }
+
+    g_AnmManager->prevShakeOffset = g_AnmManager->shakeOffset;
 
     f32 fVar1 = (f32)(i32)(arg->args[1] - arg->args[0]) * arg->timer.AsFloat();
     fVar1 /= (f32)arg->duration;
@@ -227,24 +252,24 @@ u32 BombEffects::OnUpdateScreenShake(BombEffects *arg)
     switch (g_Rng.GetRandomU32InRange(3))
     {
     case 0:
-        g_AnmManager->offset.x = 0.0f;
+        g_AnmManager->shakeOffset.x = 0.0f;
         break;
     case 1:
-        g_AnmManager->offset.x = fVar1;
+        g_AnmManager->shakeOffset.x = fVar1;
         break;
     case 2:
-        g_AnmManager->offset.x = -fVar1;
+        g_AnmManager->shakeOffset.x = -fVar1;
     }
     switch (g_Rng.GetRandomU32InRange(3))
     {
     case 0:
-        g_AnmManager->offset.y = 0.0f;
+        g_AnmManager->shakeOffset.y = 0.0f;
         break;
     case 1:
-        g_AnmManager->offset.y = fVar1;
+        g_AnmManager->shakeOffset.y = fVar1;
         break;
     case 2:
-        g_AnmManager->offset.y = -fVar1;
+        g_AnmManager->shakeOffset.y = -fVar1;
     }
     return 1;
 }
@@ -257,6 +282,11 @@ ZunResult BombEffects::AddedCallback(BombEffects *arg)
 
 ZunResult BombEffects::DeletedCallback(BombEffects *arg)
 {
+    if (arg->type == 1)
+    {
+        g_AnmManager->shakeOffset.x = 0.0f;
+        g_AnmManager->shakeOffset.y = 0.0f;
+    }
     arg->calcChain->deletedCallback = NULL;
     g_Chain.Cut(arg->drawChain);
     arg->drawChain = NULL;

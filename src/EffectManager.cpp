@@ -3,6 +3,7 @@
 #include "AnmIdx.hpp"
 #include "AnmManager.hpp"
 #include "GameManager.hpp"
+#include "GameWindow.hpp"
 #include "Player.hpp"
 #include "Rng.hpp"
 #include "Stage.hpp"
@@ -490,6 +491,8 @@ Effect *EffectManager::SpawnParticles(i32 effectId, ZunVec3 *pos, i32 numParticl
         {
             effect->inUseFlag = 0;
         }
+        effect->prevPos = effect->pos1;
+        effect->vm.UpdatePrev();
         numParticles--;
         if (numParticles == 0)
         {
@@ -552,6 +555,8 @@ Effect *EffectManager::SpawnMovingParticles(i32 effectId, ZunVec3 *pos, ZunVec3 
         {
             effect->inUseFlag = 0;
         }
+        effect->prevPos = effect->pos1;
+        effect->vm.UpdatePrev();
         numParticles--;
         if (numParticles == 0)
         {
@@ -596,6 +601,8 @@ Effect *EffectManager::SpawnEffect(i32 effectId, ZunVec3 *pos, i32 param_3, i32 
             effect->inUseFlag = 0;
         }
     }
+    effect->prevPos = effect->pos1;
+    effect->vm.UpdatePrev();
     return effect;
 }
 
@@ -621,6 +628,11 @@ u32 EffectManager::OnUpdate(EffectManager *arg)
             continue;
         }
 
+        bool firstUpdate = effect->timer.GetCurrent() == 0;
+
+        effect->vm.UpdatePrev();
+        effect->prevPos = effect->pos1;
+
         arg->activeEffectsCount++;
         if (effect->callback && effect->callback(effect) != 1)
         {
@@ -632,6 +644,12 @@ u32 EffectManager::OnUpdate(EffectManager *arg)
         {
             effect->inUseFlag = 0;
             continue;
+        }
+
+        if (firstUpdate)
+        {
+            effect->prevPos = effect->pos1;
+            effect->vm.UpdatePrev();
         }
 
         effect->timer++;
@@ -691,7 +709,7 @@ u32 EffectManager::OnDraw(EffectManager *arg)
 
         for (i32 i = 0; i < count; i++)
         {
-            active[i]->vm.pos = active[i]->pos1;
+            active[i]->vm.pos = active[i]->prevPos.Lerp(active[i]->pos1, g_RenderAlpha);
             if (isBillboard)
             {
                 g_AnmManager->DrawBillboard(&active[i]->vm);
@@ -758,9 +776,10 @@ i32 EffectManager::UpdateSpecialEffect()
 
             temp = (i32)(a * this->globalColorMultiplierA);
             effect->vm.color.bytes.a = temp > 255 ? 255 : temp;
+            effect->vm.prevColor = effect->vm.color;
         }
 
-        effect->vm.pos = effect->pos1;
+        effect->vm.pos = effect->prevPos.Lerp(effect->pos1, g_RenderAlpha);
         if (effect->is2D == 1)
         {
             g_AnmManager->DrawBillboard(&effect->vm);

@@ -4,6 +4,7 @@
 #include "AnmManager.hpp"
 #include "BulletManager.hpp"
 #include "GameManager.hpp"
+#include "GameWindow.hpp"
 #include "Gui.hpp"
 #include "Player.hpp"
 #include "Rng.hpp"
@@ -51,7 +52,6 @@ void BombData::DarkenViewport(Player *player)
         color.bytes.g = color.bytes.b;
         color.bytes.r = color.bytes.g;
     }
-    g_AnmManager->SetColor(0x80808080);
     g_Stage.SmoothBlendColor(color);
     g_Stage.isDarkening = 1;
 }
@@ -114,6 +114,7 @@ void BombData::BombReimuACalc(Player *player)
     PlayerBombInfo *bombInfo = &player->bombInfo;
     f32 angle;
 
+    DarkenViewport(player);
     if (player->bombInfo.bombTimer >= player->bombInfo.bombDuration)
     {
         g_Gui.EndPlayerSpellcard();
@@ -145,7 +146,7 @@ void BombData::BombReimuACalc(Player *player)
         subInfo = &bombInfo->subInfo[i];
         subInfo->state = 1;
         subInfo->speed = 15.0f;
-        subInfo->bombRegionPositions = player->positionCenter;
+        subInfo->prevBombRegionPositions = subInfo->bombRegionPositions = player->positionCenter;
 
         if ((*(ZunVec3 *)(bombInfo + 1)).x < 192.0f)
         {
@@ -238,7 +239,6 @@ void BombData::BombReimuADraw(Player *player)
     i32 i;
     AnmVm *vm;
 
-    DarkenViewport(player);
     for (i = 0, subInfo = player->bombInfo.subInfo; i < 8; i++, subInfo++)
     {
         if (subInfo->state == 0)
@@ -246,27 +246,30 @@ void BombData::BombReimuADraw(Player *player)
             continue;
         }
 
+        ZunVec3 drawPos =
+            subInfo->prevBombRegionPositions.Lerp(subInfo->bombRegionPositions, g_RenderAlpha);
+
         vm = subInfo->vms;
 
-        vm->pos = subInfo->bombRegionPositions + vm->offset;
+        vm->pos = drawPos + vm->offset;
         vm->pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
         vm->pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
         vm->pos.z = 0.0f;
         g_AnmManager->DrawNoRotation(vm);
         vm++;
-        vm->pos = subInfo->bombRegionPositions + vm->offset;
+        vm->pos = drawPos + vm->offset;
         vm->pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
         vm->pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
         vm->pos.z = 0.0f;
         g_AnmManager->DrawNoRotation(vm);
         vm++;
-        vm->pos = subInfo->bombRegionPositions + vm->offset;
+        vm->pos = drawPos + vm->offset;
         vm->pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
         vm->pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
         vm->pos.z = 0.0f;
         g_AnmManager->DrawNoRotation(vm);
         vm++;
-        vm->pos = subInfo->bombRegionPositions + vm->offset;
+        vm->pos = drawPos + vm->offset;
         vm->pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
         vm->pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
         vm->pos.z = 0.0f;
@@ -287,6 +290,7 @@ void BombData::BombReimuACalcFocus(Player *player)
     f32 tmpFloat2;
     f32 tmpFloat3;
 
+    DarkenViewport(player);
     if (bombInfo->bombTimer >= bombInfo->bombDuration)
     {
         g_Gui.EndPlayerSpellcard();
@@ -324,7 +328,8 @@ void BombData::BombReimuACalcFocus(Player *player)
                 subInfo->state = 1;
                 subInfo->counter = 0;
                 subInfo->accel = 8.0f;
-                subInfo->bombRegionPositions = player->positionCenter;
+                subInfo->prevBombRegionPositions = subInfo->bombRegionPositions =
+                    player->positionCenter;
 
                 tmpFloat2 = g_Rng.GetRandomFloat() * ZUN_2PI - ZUN_PI;
                 AngleToVector(&subInfo->bombRegionVelocities, tmpFloat2, subInfo->accel);
@@ -431,31 +436,35 @@ void BombData::BombReimuACalcFocus(Player *player)
 
 void BombData::BombReimuADrawFocus(Player *player)
 {
+    PlayerBombSubInfo *subInfo;
     i32 i;
     AnmVm *vm;
 
-    DarkenViewport(player);
-    for (i = 0; i < 8; i++)
+    subInfo = player->bombInfo.subInfo;
+    for (i = 0; i < 8; i++, subInfo++)
     {
-        if (player->bombInfo.subInfo[i].state == 0)
+        if (subInfo->state == 0)
         {
             continue;
         }
 
-        vm = player->bombInfo.subInfo[i].vms;
-        vm->pos = player->bombInfo.subInfo[i].bombRegionPositions + vm->offset;
+        ZunVec3 drawPos =
+            subInfo->prevBombRegionPositions.Lerp(subInfo->bombRegionPositions, g_RenderAlpha);
+
+        vm = subInfo->vms;
+        vm->pos = drawPos + vm->offset;
         player->SetToTopLeftPos(vm);
         g_AnmManager->DrawNoRotation(vm);
         vm++;
-        vm->pos = player->bombInfo.subInfo[i].bombRegionPositions + vm->offset;
+        vm->pos = drawPos + vm->offset;
         player->SetToTopLeftPos(vm);
         g_AnmManager->DrawNoRotation(vm);
         vm++;
-        vm->pos = player->bombInfo.subInfo[i].bombRegionPositions + vm->offset;
+        vm->pos = drawPos + vm->offset;
         player->SetToTopLeftPos(vm);
         g_AnmManager->DrawNoRotation(vm);
         vm++;
-        vm->pos = player->bombInfo.subInfo[i].bombRegionPositions + vm->offset;
+        vm->pos = drawPos + vm->offset;
         player->SetToTopLeftPos(vm);
         g_AnmManager->DrawNoRotation(vm);
         vm++;
@@ -468,6 +477,7 @@ void BombData::BombReimuBCalc(Player *player)
     AnmVm *vm;
     i32 i;
 
+    DarkenViewport(player);
     if (player->bombInfo.bombTimer >= player->bombInfo.bombDuration)
     {
         g_Gui.EndPlayerSpellcard();
@@ -491,15 +501,23 @@ void BombData::BombReimuBCalc(Player *player)
         player->bombInfo.subInfo[0].bombRegionPositions.x = player->positionCenter.x;
         player->bombInfo.subInfo[0].bombRegionPositions.y = 224.0f;
         player->bombInfo.subInfo[0].bombRegionPositions.z = 0.42f;
+        player->bombInfo.subInfo[0].prevBombRegionPositions =
+            player->bombInfo.subInfo[0].bombRegionPositions;
         player->bombInfo.subInfo[1].bombRegionPositions.x = 192.0f;
         player->bombInfo.subInfo[1].bombRegionPositions.y = player->positionCenter.y;
         player->bombInfo.subInfo[1].bombRegionPositions.z = 0.415f;
+        player->bombInfo.subInfo[1].prevBombRegionPositions =
+            player->bombInfo.subInfo[1].bombRegionPositions;
         player->bombInfo.subInfo[2].bombRegionPositions.x = player->positionCenter.x;
         player->bombInfo.subInfo[2].bombRegionPositions.y = 224.0f;
         player->bombInfo.subInfo[2].bombRegionPositions.z = 0.41f;
+        player->bombInfo.subInfo[2].prevBombRegionPositions =
+            player->bombInfo.subInfo[2].bombRegionPositions;
         player->bombInfo.subInfo[3].bombRegionPositions.x = 192.0f;
         player->bombInfo.subInfo[3].bombRegionPositions.y = player->positionCenter.y;
         player->bombInfo.subInfo[3].bombRegionPositions.z = 0.405f;
+        player->bombInfo.subInfo[3].prevBombRegionPositions =
+            player->bombInfo.subInfo[3].bombRegionPositions;
         BombEffects::RegisterChain(1, 60, 2, 6, 0);
         ComputeBombCherryDrain(player, 3000, 0.17f);
     }
@@ -542,12 +560,15 @@ void BombData::BombReimuBDraw(Player *player)
 {
     i32 i;
     AnmVm *vm;
+    PlayerBombSubInfo *subInfo;
 
-    DarkenViewport(player);
-    for (i = 0; i < 4; i++)
+    subInfo = player->bombInfo.subInfo;
+    for (i = 0; i < 4; i++, subInfo++)
     {
-        vm = player->bombInfo.subInfo[i].vms;
-        vm->pos = player->bombInfo.subInfo[i].bombRegionPositions + vm->offset;
+        ZunVec3 drawPos =
+            subInfo->prevBombRegionPositions.Lerp(subInfo->bombRegionPositions, g_RenderAlpha);
+        vm = subInfo->vms;
+        vm->pos = drawPos + vm->offset;
         vm->pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
         vm->pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
         vm->pos.z = 0.0f;
@@ -560,6 +581,7 @@ void BombData::BombReimuBCalcFocus(Player *player)
     AnmVm *vm;
     i32 i;
 
+    DarkenViewport(player);
     if (player->bombInfo.bombTimer >= player->bombInfo.bombDuration)
     {
         g_Gui.EndPlayerSpellcard();
@@ -614,7 +636,6 @@ void BombData::BombReimuBDrawFocus(Player *player)
     i32 i;
     AnmVm *vm;
 
-    DarkenViewport(player);
     for (i = 0; i < 3; i++)
     {
         vm = &player->bombInfo.subInfo[0].vms[i];
@@ -632,6 +653,7 @@ void BombData::BombMarisaACalc(Player *player)
     AnmVm *vm;
     i32 i;
 
+    DarkenViewport(player);
     if (player->bombInfo.bombTimer >= player->bombInfo.bombDuration)
     {
         g_Gui.EndPlayerSpellcard();
@@ -688,35 +710,41 @@ void BombData::BombMarisaADraw(Player *player)
 {
     i32 i;
     AnmVm *vm;
+    PlayerBombSubInfo *subInfo;
 
-    DarkenViewport(player);
-    for (i = 0; i < 8; i++)
+    subInfo = player->bombInfo.subInfo;
+    for (i = 0; i < 8; i++, subInfo++)
     {
-        vm = player->bombInfo.subInfo[i].vms;
-        vm->pos = player->bombInfo.subInfo[i].bombRegionPositions;
+        ZunVec3 drawPos =
+            subInfo->prevBombRegionPositions.Lerp(subInfo->bombRegionPositions, g_RenderAlpha);
+        vm = subInfo->vms;
+        vm->pos = drawPos;
         vm->pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
         vm->pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
         vm->pos.z = 0.0f;
         vm->scale.x = 3.2f;
         vm->scale.y = 3.2f;
+        vm->prevScale = vm->scale;
         g_AnmManager->Draw(vm);
-        vm->pos -= player->bombInfo.subInfo[i].bombRegionVelocities * 6;
+        vm->pos -= subInfo->bombRegionVelocities * 6;
         vm->pos.x += -32.0f;
         vm->pos.y += -32.0f;
         vm->pos.z = 0.0f;
         vm->scale.x = 2.2f;
         vm->scale.y = 2.2f;
+        vm->prevScale = vm->scale;
         g_AnmManager->Draw(vm);
-        vm->pos -= player->bombInfo.subInfo[i].bombRegionVelocities * 2;
+        vm->pos -= subInfo->bombRegionVelocities * 2;
         vm->pos.x += 64.0f;
         vm->pos.y += 64.0f;
         vm->pos.z = 0.0f;
-        vm->pos -= player->bombInfo.subInfo[i].bombRegionVelocities * 2;
+        vm->pos -= subInfo->bombRegionVelocities * 2;
         vm->pos.x += -32.0f;
         vm->pos.y += -32.0f;
         vm->pos.z = 0.0f;
         vm->scale.x = 1.0f;
         vm->scale.y = 1.0f;
+        vm->prevScale = vm->scale;
         g_AnmManager->Draw(vm);
         vm++;
     }
@@ -730,6 +758,7 @@ void BombData::BombMarisaACalcFocus(Player *player)
     PlayerBombSubInfo *subInfo;
     i32 i;
 
+    DarkenViewport(player);
     if (player->bombInfo.bombTimer >= player->bombInfo.bombDuration)
     {
         g_Gui.EndPlayerSpellcard();
@@ -820,7 +849,6 @@ void BombData::BombMarisaADrawFocus(Player *player)
     i32 i;
     AnmVm *vm;
 
-    DarkenViewport(player);
     subInfo = player->bombInfo.subInfo;
     for (i = 0; i < 24; i++, subInfo++)
     {
@@ -829,27 +857,39 @@ void BombData::BombMarisaADrawFocus(Player *player)
             continue;
         }
 
+        auto getTrailPos = [&](int idx) {
+            ZunVec3 cur = subInfo->bombRegionPositionsTrails[idx];
+            // despite there being 32 positions, marisaa focus only uses 8 of them in its calc func
+            ZunVec3 prev = (idx + 1 < 7) ? subInfo->bombRegionPositionsTrails[idx + 1] : cur;
+            return prev.Lerp(cur, g_RenderAlpha);
+        };
+
         vm = subInfo->vms;
-        vm->pos = subInfo->bombRegionPositions;
+
+        vm->pos =
+            subInfo->prevBombRegionPositions.Lerp(subInfo->bombRegionPositions, g_RenderAlpha);
         vm->pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
         vm->pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
         vm->pos.z = 0.3f;
         vm->scale.x = 3.2f;
         vm->scale.y = 3.2f;
+        vm->prevScale = vm->scale;
         g_AnmManager->Draw(vm);
-        vm->pos = subInfo->bombRegionPositionsTrails[3];
+        vm->pos = getTrailPos(3);
         vm->pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
         vm->pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
         vm->pos.z = 0.32f;
         vm->scale.x = 2.2f;
         vm->scale.y = 2.2f;
+        vm->prevScale = vm->scale;
         g_AnmManager->Draw(vm);
-        vm->pos = subInfo->bombRegionPositionsTrails[7];
+        vm->pos = getTrailPos(7);
         vm->pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
         vm->pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
         vm->pos.z = 0.34f;
         vm->scale.x = 1.3f;
         vm->scale.y = 1.3f;
+        vm->prevScale = vm->scale;
         g_AnmManager->Draw(vm);
         vm++;
     }
@@ -864,6 +904,7 @@ void BombData::BombMarisaBCalc(Player *player)
     PlayerBombSubInfo *subInfo;
     i32 i;
 
+    DarkenViewport(player);
     if (player->bombInfo.bombTimer >= player->bombInfo.bombDuration)
     {
         g_Gui.EndPlayerSpellcard();
@@ -885,8 +926,9 @@ void BombData::BombMarisaBCalc(Player *player)
         for (i = 0; i < 3; i++, subInfo++)
         {
             g_AnmManager->ExecuteAnmIdx(subInfo->vms, i + ANM_SCRIPT_MARISA_B_BOMB_ARRAY);
-            subInfo->bombRegionPositions = player->positionCenter;
-            subInfo->accel = (f32)i * ZUN_2PI / 3.0f + -1.5707964f;
+            subInfo->prevBombRegionPositions = subInfo->bombRegionPositions =
+                player->positionCenter;
+            subInfo->prevAccel = subInfo->accel = (f32)i * ZUN_2PI / 3.0f + -1.5707964f;
         }
         g_SoundPlayer.PlaySoundByIdx(SOUND_BOMB_SAKUMARI, 0);
         player->verticalMovementSpeedMultiplierDuringBomb = 0.4f;
@@ -947,20 +989,21 @@ void BombData::BombMarisaBCalc(Player *player)
 void BombData::BombMarisaBDraw(Player *player)
 {
     f32 angle;
-    f32 accel;
+    f32 drawAccel;
     i32 i;
     AnmVm *vm;
 
-    DarkenViewport(player);
     for (i = 0; i < 3; i++)
     {
         vm = player->bombInfo.subInfo[i].vms;
-        accel = player->bombInfo.subInfo[i].accel;
-        vm->pos = player->positionCenter;
-        vm->pos.x += cosf(accel) * vm->sprite->heightPx * vm->scale.y / 2.0f;
-        vm->pos.y += sinf(accel) * vm->sprite->heightPx * vm->scale.y / 2.0f;
-        angle = utils::AddNormalizeAngle(accel, 1.5707964f);
+        drawAccel = utils::LerpAngle(player->bombInfo.subInfo[i].prevAccel,
+                                     player->bombInfo.subInfo[i].accel, g_RenderAlpha);
+        vm->pos = player->prevPositionCenter.Lerp(player->positionCenter, g_RenderAlpha);
+        vm->pos.x += cosf(drawAccel) * vm->sprite->heightPx * vm->scale.y / 2.0f;
+        vm->pos.y += sinf(drawAccel) * vm->sprite->heightPx * vm->scale.y / 2.0f;
+        angle = utils::AddNormalizeAngle(drawAccel, 1.5707964f);
         vm->rotation.z = angle;
+        vm->prevRotation.z = angle;
         vm->updateRotation = 1;
         vm->pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
         vm->pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
@@ -975,6 +1018,7 @@ void BombData::BombMarisaBCalcFocus(Player *player)
     AnmVm *vm;
     i32 i;
 
+    DarkenViewport(player);
     if (player->bombInfo.bombTimer >= player->bombInfo.bombDuration)
     {
         g_Gui.EndPlayerSpellcard();
@@ -1042,16 +1086,16 @@ void BombData::BombMarisaBDrawFocus(Player *player)
     i32 i;
     AnmVm *vm;
 
-    DarkenViewport(player);
     vm = player->bombInfo.subInfo[0].vms;
     for (i = 0; i < 4; i++)
     {
         accel = (f32)i * 0.62831855f / 3.0f - ZUN_PI + 1.2566371f;
-        vm->pos = player->positionCenter;
+        vm->pos = player->prevPositionCenter.Lerp(player->positionCenter, g_RenderAlpha);
         vm->pos.x += cosf(accel) * vm->sprite->heightPx * vm->scale.y / 2.0f;
         vm->pos.y += sinf(accel) * vm->sprite->heightPx * vm->scale.y / 2.0f;
         angle = utils::AddNormalizeAngle(accel, 1.5707964f);
         vm->rotation.z = angle;
+        vm->prevRotation.z = angle;
         vm->updateRotation = 1;
         vm->pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
         vm->pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
@@ -1069,6 +1113,7 @@ void BombData::BombSakuyaACalc(Player *player)
     PlayerBombSubInfo *subInfo;
     i32 i;
 
+    DarkenViewport(player);
     if (player->bombInfo.bombTimer >= player->bombInfo.bombDuration)
     {
         g_Gui.EndPlayerSpellcard();
@@ -1115,7 +1160,7 @@ void BombData::BombSakuyaACalc(Player *player)
                         g_Rng.GetRandomFloatInRange(0.06283186f) - 0.03141593f;
                     subInfo->bombRegionVelocities.x = cosf(subInfo->angle) * 24.0f;
                     subInfo->bombRegionVelocities.y = sinf(subInfo->angle) * 24.0f;
-                    subInfo->bombRegionPositions =
+                    subInfo->prevBombRegionPositions = subInfo->bombRegionPositions =
                         player->bombStartPos + subInfo->bombRegionVelocities;
                     subInfo->bombRegionVelocities.z = 0.0f;
                     player->bombDamageBoxes[i].damage = 0;
@@ -1164,7 +1209,6 @@ void BombData::BombSakuyaADraw(Player *player)
     PlayerBombSubInfo *subInfo;
     i32 i;
 
-    DarkenViewport(player);
     subInfo = player->bombInfo.subInfo;
     for (i = 0; i < 96; i++, subInfo++)
     {
@@ -1177,7 +1221,9 @@ void BombData::BombSakuyaADraw(Player *player)
         vm = subInfo->vms;
         vm->rotation.z = angle;
         vm->updateRotation = 1;
-        subInfo->vms[0].pos = subInfo->bombRegionPositions;
+
+        subInfo->vms[0].pos =
+            subInfo->prevBombRegionPositions.Lerp(subInfo->bombRegionPositions, g_RenderAlpha);
         subInfo->vms[0].pos.z = 0.0f;
         g_AnmManager->Draw(subInfo->vms);
     }
@@ -1190,6 +1236,7 @@ void BombData::BombSakuyaACalcFocus(Player *player)
     PlayerBombSubInfo *subInfo;
     i32 i;
 
+    DarkenViewport(player);
     if (player->bombInfo.bombTimer >= player->bombInfo.bombDuration)
     {
         g_Gui.EndPlayerSpellcard();
@@ -1243,7 +1290,8 @@ void BombData::BombSakuyaACalcFocus(Player *player)
                 g_Rng.GetRandomU16InRange(1) ? 0.15707964f : -0.15707964f;
             subInfo->bombRegionVelocities.x = cosf(subInfo->angle) * 24.0f;
             subInfo->bombRegionVelocities.y = sinf(subInfo->angle) * 24.0f;
-            subInfo->bombRegionPositions = player->positionCenter + subInfo->bombRegionVelocities;
+            subInfo->prevBombRegionPositions = subInfo->bombRegionPositions =
+                player->positionCenter + subInfo->bombRegionVelocities;
             subInfo->timer = 0;
             subInfo->bombRegionVelocities.z = 0.0f;
             player->bombDamageBoxes[i].damage = 0;
@@ -1315,7 +1363,6 @@ void BombData::BombSakuyaADrawFocus(Player *player)
     PlayerBombSubInfo *subInfo;
     i32 i;
 
-    DarkenViewport(player);
     subInfo = player->bombInfo.subInfo;
     for (i = 0; i < 96; i++, subInfo++)
     {
@@ -1327,7 +1374,9 @@ void BombData::BombSakuyaADrawFocus(Player *player)
         vm = subInfo->vms;
         vm->rotation.z = angle;
         vm->updateRotation = 1;
-        subInfo->vms[0].pos = subInfo->bombRegionPositions;
+
+        subInfo->vms[0].pos =
+            subInfo->prevBombRegionPositions.Lerp(subInfo->bombRegionPositions, g_RenderAlpha);
         subInfo->vms[0].pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
         subInfo->vms[0].pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
         subInfo->vms[0].pos.z = 0.0f;
@@ -1341,6 +1390,7 @@ void BombData::BombSakuyaBCalc(Player *player)
     PlayerBombSubInfo *subInfo;
     i32 i;
 
+    DarkenViewport(player);
     if (player->bombInfo.bombTimer >= player->bombInfo.bombDuration)
     {
         g_Gui.EndPlayerSpellcard();
@@ -1430,7 +1480,6 @@ void BombData::BombSakuyaBDraw(Player *player)
     PlayerBombSubInfo *subInfo;
     i32 i;
 
-    DarkenViewport(player);
     subInfo = player->bombInfo.subInfo;
     for (i = 0; i < 4; i++, subInfo++)
     {
@@ -1455,6 +1504,7 @@ void BombData::BombSakuyaBCalcFocus(Player *player)
     PlayerBombSubInfo *subInfo;
     i32 i;
 
+    DarkenViewport(player);
     if (player->bombInfo.bombTimer >= player->bombInfo.bombDuration)
     {
         g_Gui.EndPlayerSpellcard();
@@ -1484,7 +1534,8 @@ void BombData::BombSakuyaBCalcFocus(Player *player)
             subInfo->state = 1;
             vm = subInfo->vms;
             g_AnmManager->ExecuteAnmIdx(vm, i + ANM_SCRIPT_SAKUYA_B_FOCUS_BOMB_ARRAY);
-            subInfo->bombRegionPositions = player->positionCenter;
+            subInfo->prevBombRegionPositions = subInfo->bombRegionPositions =
+                player->positionCenter;
             for (j = 31; j >= 0; j--)
             {
                 subInfo->bombRegionPositionsTrails[j] = subInfo->bombRegionPositions;
@@ -1549,8 +1600,8 @@ void BombData::BombSakuyaBDrawFocus(Player *player)
     PlayerBombSubInfo *subInfo;
     i32 i;
     i32 oldAlpha;
+    i32 oldPrevAlpha;
 
-    DarkenViewport(player);
     subInfo = player->bombInfo.subInfo;
     for (i = 0; i < 2; i++, subInfo++)
     {
@@ -1560,20 +1611,28 @@ void BombData::BombSakuyaBDrawFocus(Player *player)
         }
 
         oldAlpha = subInfo->vms[0].color.bytes.a;
-        subInfo->vms[0].pos = subInfo->bombRegionPositions;
+        oldPrevAlpha = subInfo->vms[0].prevColor.bytes.a;
+
+        subInfo->vms[0].pos =
+            subInfo->prevBombRegionPositions.Lerp(subInfo->bombRegionPositions, g_RenderAlpha);
         subInfo->vms[0].pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
         subInfo->vms[0].pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
         subInfo->vms[0].pos.z = 0.0f;
         g_AnmManager->Draw(subInfo->vms);
         for (j = 3; j < 32; j += 4)
         {
-            subInfo->vms[0].pos = subInfo->bombRegionPositionsTrails[j];
+            ZunVec3 cur = subInfo->bombRegionPositionsTrails[j];
+            ZunVec3 prev = (j + 1 < 31) ? subInfo->bombRegionPositionsTrails[j + 1] : cur;
+            subInfo->vms[0].pos = prev.Lerp(cur, g_RenderAlpha);
+
             subInfo->vms[0].color.bytes.a = oldAlpha - oldAlpha * j / 32;
+            subInfo->vms[0].prevColor.bytes.a = oldPrevAlpha - oldPrevAlpha * j / 32;
             subInfo->vms[0].pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
             subInfo->vms[0].pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
             subInfo->vms[0].pos.z = 0.0f;
             g_AnmManager->Draw(subInfo->vms);
         }
         subInfo->vms[0].color.bytes.a = oldAlpha;
+        subInfo->vms[0].prevColor.bytes.a = oldPrevAlpha;
     }
 }

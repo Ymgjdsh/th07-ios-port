@@ -26,6 +26,35 @@ struct ZunViewport
 
 struct Float2
 {
+    Float2 Lerp(const Float2 &to, f32 t) const
+    {
+        return {this->x + (to.x - this->x) * t, this->y + (to.y - this->y) * t};
+    }
+
+    Float2 LerpUv(const Float2 &to, f32 alpha) const
+    {
+        f32 diffUvX = to.x - this->x;
+        if (diffUvX < -0.5f)
+        {
+            diffUvX += 1.0f;
+        }
+        else if (diffUvX > 0.5f)
+        {
+            diffUvX -= 1.0f;
+        }
+        f32 diffUvY = to.y - this->y;
+        if (diffUvY < -0.5f)
+        {
+            diffUvY += 1.0f;
+        }
+        else if (diffUvY > 0.5f)
+        {
+            diffUvY -= 1.0f;
+        }
+
+        return {this->x + diffUvX * alpha, this->y + diffUvY * alpha};
+    }
+
     f32 x;
     f32 y;
 };
@@ -95,6 +124,11 @@ struct ZunVec3
     f32 LengthSq() const
     {
         return x * x + y * y + z * z;
+    }
+
+    ZunVec3 Lerp(const ZunVec3 &to, f32 t) const
+    {
+        return *this + (to - *this) * t;
     }
 
     ZunVec3 operator-() const

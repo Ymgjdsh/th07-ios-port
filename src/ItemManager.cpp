@@ -6,6 +6,7 @@
 #include "EffectManager.hpp"
 #include "EnemyManager.hpp"
 #include "GameManager.hpp"
+#include "GameWindow.hpp"
 #include "Gui.hpp"
 #include "Player.hpp"
 #include "Rng.hpp"
@@ -81,7 +82,7 @@ Item *ItemManager::SpawnItem(ZunVec3 *heading, i32 itemType, i32 state)
             this->nextIndex = 0;
         }
         item->isInUse = 1;
-        item->currentPosition = *heading;
+        item->prevPosition = item->currentPosition = *heading;
         item->startPosition.x = 0.0f;
         item->startPosition.y = -2.2f;
         item->startPosition.z = 0.0f;
@@ -105,6 +106,7 @@ Item *ItemManager::SpawnItem(ZunVec3 *heading, i32 itemType, i32 state)
         }
         g_AnmManager->SetAnmIdxAndExecuteScript(&item->sprite, itemType + 708);
         item->sprite.color.color = 0xffffffff;
+        item->sprite.UpdatePrev();
         item->sprite.zWriteDisable = 1;
         item->autoCollect = 0;
         item->isOnscreen = 1;
@@ -141,6 +143,9 @@ void ItemManager::OnUpdate()
         {
             continue;
         }
+
+        item->sprite.UpdatePrev();
+        item->prevPosition = item->currentPosition;
 
         this->activeItemCount++;
         if (item->state == 2)
@@ -589,8 +594,9 @@ void ItemManager::OnDraw()
     item = this->listHead.next;
     while (item)
     {
-        item->sprite.pos.x = g_GameManager.arcadeRegionTopLeftPos.x + item->currentPosition.x;
-        item->sprite.pos.y = g_GameManager.arcadeRegionTopLeftPos.y + item->currentPosition.y;
+        ZunVec3 drawPos = item->prevPosition.Lerp(item->currentPosition, g_RenderAlpha);
+        item->sprite.pos.x = g_GameManager.arcadeRegionTopLeftPos.x + drawPos.x;
+        item->sprite.pos.y = g_GameManager.arcadeRegionTopLeftPos.y + drawPos.y;
         item->sprite.pos.z = 0.01f;
         if (item->currentPosition.y < -8.0f)
         {

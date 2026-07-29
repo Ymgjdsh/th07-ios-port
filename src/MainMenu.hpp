@@ -77,6 +77,21 @@ struct MainMenu
         return selected;
     }
 
+    void UpdatePrev()
+    {
+        if (this->vmHead)
+        {
+            for (i32 i = 0; i < this->vmCount; i++)
+            {
+                this->vmHead[i].UpdatePrev();
+            }
+        }
+        for (i32 i = 0; i < 14; i++)
+        {
+            this->vms[i].UpdatePrev();
+        }
+    }
+
     i32 cursor;
     i32 selected;
     i32 menuSubState;

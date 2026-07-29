@@ -86,9 +86,11 @@ struct PlayerBombSubInfo
     i32 state;
     i32 counter;
     f32 accel;
+    f32 prevAccel;
     f32 speed;
     f32 angle;
     ZunVec3 bombRegionPositions;
+    ZunVec3 prevBombRegionPositions;
     ZunVec3 bombRegionPositionsTrails[32];
     ZunVec3 bombRegionVelocities;
     ZunVec3 bombRegionAcceleration;
@@ -147,12 +149,14 @@ struct PlayerBullet
 
     AnmVm vm;
     ZunVec3 pos;
+    ZunVec3 prevPos;
     ZunVec3 posHistory[16];
     ZunVec3 hitboxSize;
     Float2 velocity;
     Float2 offset;
     f32 speed;
     f32 angle;
+    f32 prevAngle;
     ZunTimer timer;
     i16 damage;
     i16 bulletState;
@@ -255,9 +259,37 @@ struct Player
         this->focusEffect = effect;
     }
 
+    void UpdatePrev()
+    {
+        this->playerSprite.UpdatePrev();
+        this->optionsSprite[0].UpdatePrev();
+        this->optionsSprite[1].UpdatePrev();
+        for (i32 i = 0; i < 96; i++)
+        {
+            if (this->bullets[i].bulletState != 0)
+            {
+                this->bullets[i].vm.UpdatePrev();
+            }
+        }
+        if (this->bombInfo.isInUse)
+        {
+            for (i32 i = 0; i < 128; i++)
+            {
+                this->bombInfo.subInfo[i].prevBombRegionPositions =
+                    this->bombInfo.subInfo[i].bombRegionPositions;
+                this->bombInfo.subInfo[i].prevAccel = this->bombInfo.subInfo[i].accel;
+                for (i32 j = 0; j < 8; j++)
+                {
+                    this->bombInfo.subInfo[i].vms[j].UpdatePrev();
+                }
+            }
+        }
+    }
+
     AnmVm playerSprite;
     AnmVm optionsSprite[3];
     ZunVec3 positionCenter;
+    ZunVec3 prevPositionCenter;
     ZunVec3 prevFramePos;
     ZunVec3 hitboxTopLeft;
     ZunVec3 hitboxBottomRight;
@@ -269,6 +301,7 @@ struct Player
     ZunVec3 grazeSize;
     ZunVec3 grabItemSize;
     ZunVec3 optionsPosition[2];
+    ZunVec3 prevOptionsPosition[2];
     Float2 velocity;
     i32 unused_9d4;
     Effect *focusEffect;

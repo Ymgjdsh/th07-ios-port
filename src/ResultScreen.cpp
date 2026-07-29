@@ -11,6 +11,7 @@
 #include "Controller.hpp"
 #include "FileSystem.hpp"
 #include "GameManager.hpp"
+#include "GameWindow.hpp"
 #include "Rng.hpp"
 #include "SoundPlayer.hpp"
 #include "Touch.hpp"
@@ -711,6 +712,8 @@ u32 ResultScreen::OnUpdate(ResultScreen *arg)
     i32 i;
     AnmVm *vm;
     i32 vmIdx;
+
+    arg->UpdatePrev();
 
     switch (arg->resultScreenState)
     {
@@ -2085,16 +2088,17 @@ u32 ResultScreen::OnDraw(ResultScreen *arg)
     for (i = 0; i < 41; i++, vm++)
     {
         pos = vm->pos;
-        vm->pos += vm->offset;
+        ZunVec3 drawPos = vm->prevPos.Lerp(vm->pos, g_RenderAlpha);
+        vm->pos = drawPos + vm->offset;
         g_AnmManager->DrawNoRotation(vm);
         vm->pos = pos;
     }
     vm = arg->vms + 16;
     if (vm->pos.x < 640.0f)
     {
+        pos = vm->prevPos.Lerp(vm->pos, g_RenderAlpha);
         if (arg->stateStep != 9)
         {
-            pos = vm->pos;
             arg->spellcardListVms[0].pos = pos;
             arg->spellcardListVms[0].pos.x += 64.0f;
             g_AnmManager->DrawNoRotation(arg->spellcardListVms);
@@ -2159,7 +2163,6 @@ u32 ResultScreen::OnDraw(ResultScreen *arg)
         }
         else
         {
-            pos = vm->pos;
             arg->spellcardListVms[10].pos = pos;
             g_AnmManager->DrawNoRotation(arg->spellcardListVms + 10);
             pos.y += 16.0f;
@@ -2237,13 +2240,17 @@ u32 ResultScreen::OnDraw(ResultScreen *arg)
                 {
                     pos.y += 33.0f;
                 }
-                else if (arg->frameTimer < 20)
-                {
-                    pos.y += (f32)((i32)((20 - arg->frameTimer) * 33 / 20));
-                }
                 else
                 {
-                    pos.y += (f32)((i32)((arg->frameTimer - 20) * 33 / 20));
+                    f32 animTime = (f32)arg->frameTimer + g_RenderAlpha;
+                    if (animTime < 20.0f)
+                    {
+                        pos.y += (20.0f - animTime) * (33.0f / 20.0f);
+                    }
+                    else
+                    {
+                        pos.y += (animTime - 20.0f) * (33.0f / 20.0f);
+                    }
                 }
             }
             if (arg->frameTimer >= 40)

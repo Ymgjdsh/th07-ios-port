@@ -17,7 +17,9 @@ void AnmVm::Initialize()
     memset(this, 0, (u8 *)&this->pos - (u8 *)this);
     this->scale.x = 1.0f;
     this->scale.y = 1.0f;
-    this->color.color = 0xffffffff;
+    this->prevScale.x = 1.0f;
+    this->prevScale.y = 1.0f;
+    this->prevColor.color = this->color.color = 0xffffffff;
     this->matrix.Identity();
     *(u16 *)&this->flags = 7;
     this->currentTimeInScript.Initialize();

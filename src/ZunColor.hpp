@@ -13,6 +13,16 @@ union ZunColor {
         return tmp;
     }
 
+    static ZunColor Lerp(ZunColor a, ZunColor b, f32 t)
+    {
+        ZunColor res;
+        res.bytes.r = (u8)(a.bytes.r + (b.bytes.r - a.bytes.r) * t);
+        res.bytes.g = (u8)(a.bytes.g + (b.bytes.g - a.bytes.g) * t);
+        res.bytes.b = (u8)(a.bytes.b + (b.bytes.b - a.bytes.b) * t);
+        res.bytes.a = (u8)(a.bytes.a + (b.bytes.a - a.bytes.a) * t);
+        return res;
+    }
+
     u32 color;
     struct ColorBytes
     {

@@ -94,6 +94,9 @@ void Supervisor::CheckTiming()
         {
             this->timingErrorCount--;
         }
+        this->prevTime = this->curTime;
+        this->prevPerfCounter = this->curPerfCounter;
+
         this->checkTiming = 0;
     }
 
@@ -157,6 +160,7 @@ u32 Supervisor::OnUpdate(Supervisor *arg)
     if (arg->wantedState != arg->curState)
     {
         arg->prevState = arg->wantedState;
+        g_GameWindow.ResetAccumulator();
         Supervisor::DebugPrint("scene %d -> %d\n", arg->wantedState, arg->curState);
         switch (arg->wantedState)
         {
@@ -341,6 +345,11 @@ u32 Supervisor::OnUpdate(Supervisor *arg)
     }
     arg->wantedState = arg->curState;
     arg->calcCount = arg->calcCount + 1;
+
+    if (g_Supervisor.renderSkipFrames != 0)
+    {
+        g_Supervisor.renderSkipFrames--;
+    }
 
     return CHAIN_CALLBACK_RESULT_CONTINUE;
 }

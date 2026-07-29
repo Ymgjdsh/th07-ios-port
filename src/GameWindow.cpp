@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_properties.h>
 #include <SDL3/SDL_video.h>
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -12,6 +13,7 @@
 #include "Controller.hpp"
 #include "FileSystem.hpp"
 #include "GameErrorContext.hpp"
+#include "GameManager.hpp"
 #include "ScreenEffect.hpp"
 #include "SoundPlayer.hpp"
 #include "Stage.hpp"
@@ -23,6 +25,8 @@ GameWindow g_GameWindow;
 i32 g_FrameCount;
 f64 g_LastFrameTime;
 u64 g_LastPerfCounter;
+f32 g_RenderAlpha = 1.0f;
+bool g_SuppressAnmAdvance;
 
 static GfxInit g_RenderingBackends[] = {
     GlesGraphics::Init,
@@ -51,38 +55,51 @@ void GameWindow::Present()
             g_Supervisor.SnapshotScreen(snapshotPath);
         }
     }
-    if (g_Supervisor.renderSkipFrames != 0)
-    {
-        g_Supervisor.renderSkipFrames--;
-    }
 }
 
 RenderResult GameWindow::Render()
 {
-    f64 perfDiff;
-    u64 perfCounter;
-    i32 chainRes;
-
     if (!this->isAppActive)
     {
 #ifndef __EMSCRIPTEN__
-        SDL_WaitEventTimeout(NULL, 1000);
+        SDL_WaitEventTimeout(nullptr, 1000);
 #endif
         return RENDER_RESULT_KEEP_RUNNING;
     }
 
-    if (!g_Supervisor.VsyncEnabled())
-    {
-        g_Supervisor.viewport.x = 0;
-        g_Supervisor.viewport.y = 0;
-        g_Supervisor.viewport.width = 640;
-        g_Supervisor.viewport.height = 480;
-        g_Supervisor.gfxDevice->SetViewport(g_Supervisor.viewport);
+    const f64 targetDt = 1.0 / 60.0;
 
+    u64 currentPerfCounter = SDL_GetPerformanceCounter();
+    if (g_LastPerfCounter == 0)
+    {
+        g_LastPerfCounter = currentPerfCounter;
+    }
+
+    f64 elapsed = (f64)(currentPerfCounter - g_LastPerfCounter) / (f64)g_GameWindow.frequency;
+    g_LastPerfCounter = currentPerfCounter;
+
+    if (elapsed < 0.0)
+    {
+        elapsed = 0.0;
+    }
+    if (elapsed > 0.1)
+    {
+        elapsed = 0.1;
+    }
+
+    this->accumulator += elapsed;
+
+    i32 chainRes = CHAIN_CALLBACK_RESULT_CONTINUE;
+    bool updated = false;
+
+    u64 timeToRender = SDL_GetTicksNS();
+
+    while (this->accumulator >= targetDt)
+    {
         chainRes = g_Chain.RunCalcChain();
         g_SoundPlayer.ProcessQueues();
 
-        if (!chainRes)
+        if (chainRes == 0)
         {
             return RENDER_RESULT_EXIT_SUCCESS;
         }
@@ -91,91 +108,48 @@ RenderResult GameWindow::Render()
             return RENDER_RESULT_EXIT_ERROR;
         }
 
-        g_Supervisor.gfxDevice->BeginFrame();
-        g_AnmManager->ResetVertexBuffer();
-        g_Supervisor.fogEnabled = 255;
-        g_Supervisor.DisableFog();
-        g_Chain.RunDrawChain();
-        g_AnmManager->Flush();
-        g_Supervisor.gfxDevice->BindTexture({0});
-        g_Supervisor.gfxDevice->EndFrame();
+        this->accumulator -= targetDt;
+        updated = true;
+    }
 
-        Present();
-        this->curFrame = 0;
+    g_RenderAlpha = std::clamp((f32)(this->accumulator / targetDt), 0.0f, 1.0f);
+    if (g_GameManager.isInPauseMenu || g_GameManager.isInRetryMenu)
+    {
+        g_RenderAlpha = 1.0f;
+    }
+
+    g_Supervisor.gfxDevice->BeginFrame();
+    g_AnmManager->ResetVertexBuffer();
+    g_Supervisor.fogEnabled = 255;
+    g_Supervisor.DisableFog();
+
+    g_SuppressAnmAdvance = !updated;
+    if (g_AnmManager)
+    {
+        g_AnmManager->offset =
+            g_AnmManager->prevShakeOffset.Lerp(g_AnmManager->shakeOffset, g_RenderAlpha);
+    }
+    g_Chain.RunDrawChain();
+    g_SuppressAnmAdvance = false;
+
+    g_AnmManager->Flush();
+    g_Supervisor.gfxDevice->BindTexture({0});
+    g_Supervisor.gfxDevice->EndFrame();
+
+    Present();
+
+    if (updated)
+    {
         g_FrameCount++;
-
-        return RENDER_RESULT_KEEP_RUNNING;
     }
 
-    if (this->curFrame == 0)
+    timeToRender = SDL_GetTicksNS() - timeToRender;
+
+    constexpr u64 nsPerFrame = 1000000000 / 60;
+    if (g_Supervisor.vsyncEnabled && timeToRender < nsPerFrame)
     {
-    begin_loop:
-        if ((i32)g_Supervisor.cfg.frameskipConfig <= (i32)this->curFrame)
-        {
-            g_Supervisor.gfxDevice->BeginFrame();
-            g_AnmManager->ResetVertexBuffer();
-            g_Supervisor.fogEnabled = 255;
-            g_Supervisor.DisableFog();
-            g_Chain.RunDrawChain();
-            g_AnmManager->Flush();
-            g_Supervisor.gfxDevice->BindTexture({0});
-            g_Supervisor.gfxDevice->EndFrame();
-        }
-
-        g_AnmManager->Flush();
-        g_Supervisor.viewport.x = 0;
-        g_Supervisor.viewport.y = 0;
-        g_Supervisor.viewport.width = 640;
-        g_Supervisor.viewport.height = 480;
-        g_Supervisor.gfxDevice->SetViewport(g_Supervisor.viewport);
-
-        chainRes = g_Chain.RunCalcChain();
-        g_SoundPlayer.ProcessQueues();
-
-        if (!chainRes)
-        {
-            return RENDER_RESULT_EXIT_SUCCESS;
-        }
-        if (chainRes == -1)
-        {
-            return RENDER_RESULT_EXIT_ERROR;
-        }
-
-        this->curFrame++;
-    }
-
-    perfCounter = SDL_GetPerformanceCounter();
-    perfDiff = (f64)(perfCounter - g_LastPerfCounter) / (f64)g_GameWindow.frequency;
-
-    if (perfDiff < 0.0)
-    {
-        g_LastPerfCounter = perfCounter;
-    }
-
-    if (perfDiff >= (1.0 / 60.0) || g_GameWindow.usesRelativePath)
-    {
-        u64 frameTicks = g_GameWindow.frequency / 60.0;
-
-        while (perfDiff >= (1.0 / 60.0))
-        {
-            g_LastPerfCounter += frameTicks;
-            perfDiff -= (1.0 / 60.0);
-        }
-
-        if ((i32)g_Supervisor.cfg.frameskipConfig < (i32)this->curFrame)
-        {
-            Present();
-            this->curFrame = 0;
-            g_FrameCount++;
-        }
-        else
-        {
-            goto begin_loop;
-        }
-    }
-    else
-    {
-        SDL_Delay(1);
+        // should have gotten ACTUAL vsync then
+        SDL_DelayNS(nsPerFrame - timeToRender);
     }
 
     return RENDER_RESULT_KEEP_RUNNING;
@@ -256,13 +230,6 @@ ZunResult GameWindow::CreateGameWindow()
         Supervisor::DebugPrint("sdl window create failed: %s\n", SDL_GetError());
         return ZUN_ERROR;
     }
-
-#if defined(__APPLE__) && TARGET_OS_IPHONE
-    SDL_DisplayMode mode;
-    SDL_zero(mode);
-    mode.refresh_rate = 60.0f;
-    SDL_SetWindowDisplayMode(g_GameWindow.window, &mode);
-#endif
 
     SDL_ShowWindow(g_GameWindow.window);
     SDL_SyncWindow(g_GameWindow.window);

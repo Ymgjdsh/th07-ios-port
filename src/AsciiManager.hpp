@@ -12,6 +12,15 @@ struct PauseMenu
     void OnDraw();
     i32 OnUpdate();
 
+    void UpdatePrev()
+    {
+        for (i32 i = 0; i < 10; i++)
+        {
+            menuSprites[i].UpdatePrev();
+        }
+        menuBackground.UpdatePrev();
+    }
+
     i32 curState;
     i32 numFrames;
     AnmVm menuSprites[10];
@@ -25,6 +34,15 @@ struct RetryMenu
     i32 OnUpdate();
     void OnDraw();
 
+    void UpdatePrev()
+    {
+        for (i32 i = 0; i < 6; i++)
+        {
+            menuSprites[i].UpdatePrev();
+        }
+        menuBackground.UpdatePrev();
+    }
+
     i32 curState;
     i32 numFrames;
     AnmVm menuSprites[6];
@@ -35,6 +53,7 @@ struct AsciiManagerPopup
 {
     u8 digits[8];
     ZunVec3 position;
+    ZunVec3 prevPosition;
     u32 color;
     ZunTimer timer;
     u8 inUse;
@@ -109,6 +128,17 @@ struct AsciiManager
     void SetBossMarkerInterrupt(i32 idx, i32 interrupt)
     {
         this->bossMarkers[idx].pendingInterrupt = interrupt;
+    }
+
+    void UpdatePrev()
+    {
+        this->cherryGauge.UpdatePrev();
+        this->cherryDigit.UpdatePrev();
+        this->cherryBorderActive.UpdatePrev();
+        for (i32 i = 0; i < 4; i++)
+        {
+            this->bossMarkers[i].UpdatePrev();
+        }
     }
 
     AnmVm vm0;

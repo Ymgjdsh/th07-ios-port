@@ -43,5 +43,15 @@ inline f32 AddNormalizeAngle(f32 param_1, f32 param_2)
     return param_1;
 }
 
+inline f32 Lerp(f32 a, f32 b, f32 t)
+{
+    return a + (b - a) * t;
+}
+
+inline f32 LerpAngle(f32 from, f32 to, f32 alpha)
+{
+    return from + utils::AddNormalizeAngle(to - from, 0.0f) * alpha;
+}
+
 void Rotate(ZunVec3 *out, ZunVec3 *point, f32 angle);
 } // namespace utils

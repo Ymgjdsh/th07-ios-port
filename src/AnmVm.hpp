@@ -124,10 +124,13 @@ static_assert(sizeof(AnmRawInstr) == 0x8);
 struct AnmVmBase
 {
     ZunVec3 rotation;
+    ZunVec3 prevRotation;
     ZunVec3 angleVel;
     Float2 scale;
+    Float2 prevScale;
     Float2 scaleGrowth;
     Float2 uvScrollPos;
+    Float2 prevUvScrollPos;
     ZunTimer currentTimeInScript;
     ZunTimer waitTimer;
     ZunTimer interpStartTimes[5]; /* pos = 0, color, alpha, rotate, scale
@@ -166,6 +169,17 @@ struct AnmVm : AnmVmBase
         }
     }
 
+    void UpdatePrev()
+    {
+        this->prevRotation = this->rotation;
+        this->prevScale = this->scale;
+        this->prevUvScrollPos = this->uvScrollPos;
+        this->prevColor = this->color;
+        this->prevColor2 = this->color2;
+        this->prevUseColor2 = this->useColor2;
+        this->prevPos = this->pos;
+    }
+
     i32 *GetVar(i32 *paramId, u16 mask, u32 idx);
     f32 *GetFloatVar(f32 *paramId, u16 mask, u32 idx);
     f32 GetFloatVarValue(f32 arg);
@@ -178,11 +192,14 @@ struct AnmVm : AnmVmBase
     f32 floatVars[4];
     i32 intVars2[2];
     Float2 uvScrollVel;
+    ZunMatrix baseTransformMatrix;
     ZunMatrix matrix;
     ZunMatrix worldTransformMatrix;
     ZunMatrix uvMatrix;
     ZunColor color;
     ZunColor color2;
+    ZunColor prevColor;
+    ZunColor prevColor2;
     union {
         u32 flags;
         struct
@@ -202,11 +219,13 @@ struct AnmVm : AnmVmBase
             u32 cameraMode : 1;
             u32 skipTransform : 1;
             u32 useColor2 : 1;
+            u32 prevUseColor2 : 1;
         };
     };
     i16 autoRotate;
     i16 pendingInterrupt;
     ZunVec3 pos;
+    ZunVec3 prevPos;
     i16 activeSpriteIdx;
     i16 baseSpriteIdx;
     i16 anmFileIdx;

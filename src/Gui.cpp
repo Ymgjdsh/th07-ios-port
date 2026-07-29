@@ -12,6 +12,7 @@
 #include "FileSystem.hpp"
 #include "GameErrorContext.hpp"
 #include "GameManager.hpp"
+#include "GameWindow.hpp"
 #include "ItemManager.hpp"
 #include "Player.hpp"
 #include "SoundPlayer.hpp"
@@ -67,7 +68,7 @@ i32 Gui::IsDialogueSkippable()
 
 void Gui::ShowBonusScore(i32 score)
 {
-    this->impl->bonusScore.pos = ZunVec3(416.0f, 48.0f, 0.0f);
+    this->impl->bonusScore.prevPos = this->impl->bonusScore.pos = ZunVec3(416.0f, 48.0f, 0.0f);
     this->impl->bonusScore.isShown = 1;
     this->impl->bonusScore.timer = 0;
     this->impl->bonusScore.fmtArg = score;
@@ -76,7 +77,8 @@ void Gui::ShowBonusScore(i32 score)
 
 void Gui::ShowFullPowerMode(i32 fmtArg, i32 isShown)
 {
-    this->impl->fullPowerMode.pos = ZunVec3(416.0f, 168.0f, 0.0f);
+    this->impl->fullPowerMode.prevPos = this->impl->fullPowerMode.pos =
+        ZunVec3(416.0f, 168.0f, 0.0f);
     this->impl->fullPowerMode.isShown = isShown;
     this->impl->fullPowerMode.timer = 0;
     this->impl->fullPowerMode.fmtArg = fmtArg;
@@ -85,7 +87,8 @@ void Gui::ShowFullPowerMode(i32 fmtArg, i32 isShown)
 
 void Gui::ShowSpellcardBonus(i32 fmtArg)
 {
-    this->impl->spellCardBonus.pos = ZunVec3(224.0f, 16.0f, 0.0f);
+    this->impl->spellCardBonus.prevPos = this->impl->spellCardBonus.pos =
+        ZunVec3(224.0f, 16.0f, 0.0f);
     this->impl->spellCardBonus.isShown = 1;
     this->impl->spellCardBonus.timer = 0;
     this->impl->spellCardBonus.fmtArg = fmtArg;
@@ -239,19 +242,23 @@ u32 Gui::OnDraw(Gui *arg)
     arg->DrawStageElements();
     arg->DrawGameScene();
     g_AsciiManager.isGui = 1;
+
+    ZunVec3 drawPos;
     if (arg->impl->bonusScore.isShown)
     {
+        drawPos = arg->impl->bonusScore.prevPos.Lerp(arg->impl->bonusScore.pos, g_RenderAlpha);
         g_AsciiManager.color = 0xffffff80;
-        AsciiManager::AddFormatText(&g_AsciiManager, &arg->impl->bonusScore.pos, "BONUS %8d",
+        AsciiManager::AddFormatText(&g_AsciiManager, &drawPos, "BONUS %8d",
                                     arg->impl->bonusScore.fmtArg);
         g_AsciiManager.color = 0xffffffff;
     }
+
+    drawPos = arg->impl->fullPowerMode.prevPos.Lerp(arg->impl->fullPowerMode.pos, g_RenderAlpha);
     switch (arg->impl->fullPowerMode.isShown)
     {
     case 1:
         g_AsciiManager.color = 0xffc0b0ff;
-        AsciiManager::AddFormatText(&g_AsciiManager, &arg->impl->fullPowerMode.pos,
-                                    "Full Power Mode!");
+        AsciiManager::AddFormatText(&g_AsciiManager, &drawPos, "Full Power Mode!");
         g_AsciiManager.color = 0xffffffff;
         break;
     case 2:
@@ -259,8 +266,7 @@ u32 Gui::OnDraw(Gui *arg)
         g_AsciiManager.scale.y = 1.0f;
         g_AsciiManager.fontSpacing = 11;
         g_AsciiManager.color = 0xffe0b0ff;
-        AsciiManager::AddFormatText(&g_AsciiManager, &arg->impl->fullPowerMode.pos,
-                                    "Supernatural Border!!");
+        AsciiManager::AddFormatText(&g_AsciiManager, &drawPos, "Supernatural Border!!");
         g_AsciiManager.color = 0xffffffff;
         g_AsciiManager.scale.x = 1.0f;
         g_AsciiManager.scale.y = 1.0f;
@@ -268,8 +274,7 @@ u32 Gui::OnDraw(Gui *arg)
         break;
     case 3:
         g_AsciiManager.color = 0xffc0b0ff;
-        AsciiManager::AddFormatText(&g_AsciiManager, &arg->impl->fullPowerMode.pos,
-                                    "CherryPoint Max!");
+        AsciiManager::AddFormatText(&g_AsciiManager, &drawPos, "CherryPoint Max!");
         g_AsciiManager.color = 0xffffffff;
         break;
     case 4:
@@ -277,8 +282,8 @@ u32 Gui::OnDraw(Gui *arg)
         g_AsciiManager.scale.y = 1.0f;
         g_AsciiManager.fontSpacing = 11;
         g_AsciiManager.color = 0xffe0b0ff;
-        AsciiManager::AddFormatText(&g_AsciiManager, &arg->impl->fullPowerMode.pos,
-                                    "Border Bonus %7d", arg->impl->fullPowerMode.fmtArg);
+        AsciiManager::AddFormatText(&g_AsciiManager, &drawPos, "Border Bonus %7d",
+                                    arg->impl->fullPowerMode.fmtArg);
         g_AsciiManager.color = 0xffffffff;
         g_AsciiManager.scale.x = 1.0f;
         g_AsciiManager.scale.y = 1.0f;
@@ -428,6 +433,7 @@ ZunResult Gui::ActualAddedCallback()
             this->impl->stageTransitionSnapshotVm.sprite->startPixelInclusive.y,
             this->impl->stageTransitionSnapshotVm.sprite->widthPx,
             this->impl->stageTransitionSnapshotVm.sprite->heightPx);
+        g_AnmManager->TakeScreenshotIfRequested();
         for (i = 0; i < 14; i++)
         {
             for (j = 0; j < 12; j++)
@@ -887,6 +893,7 @@ ZunResult GuiImpl::RunMsg()
                     this->stageTransitionSnapshotVm.sprite->startPixelInclusive.y,
                     this->stageTransitionSnapshotVm.sprite->widthPx,
                     this->stageTransitionSnapshotVm.sprite->heightPx);
+                g_AnmManager->TakeScreenshotIfRequested();
             }
             else
             {
@@ -1021,9 +1028,11 @@ ZunResult GuiImpl::DrawDialogue()
     dialogueBg[0].diffuse.color = dialogueBg[1].diffuse.color = 0xd0000000;
     dialogueBg[2].diffuse.color = dialogueBg[3].diffuse.color = 0x90000000;
     dialogueBg[0].w = dialogueBg[1].w = dialogueBg[2].w = dialogueBg[3].w = 1.0f;
-    g_AnmManager->DrawNoRotation(&this->msg.portraits[0]);
+    g_AnmManager->DrawInterpNoRotation(&this->msg.portraits[0]);
     oldPos = this->msg.portraits[1].pos;
-    this->msg.portraits[1].pos += this->msg.portraits[1].offset;
+    ZunVec3 drawPos =
+        this->msg.portraits[1].prevPos.Lerp(this->msg.portraits[1].pos, g_RenderAlpha);
+    this->msg.portraits[1].pos = drawPos + this->msg.portraits[1].offset;
     g_AnmManager->DrawNoRotation(&this->msg.portraits[1]);
     this->msg.portraits[1].pos = oldPos;
     g_AnmManager->Flush();
@@ -1041,10 +1050,10 @@ ZunResult GuiImpl::DrawDialogue()
     g_AnmManager->SetZWriteDisable(255);
     g_Supervisor.gfxDevice->SetColorOp(COMPONENT_RGB, COLOR_OP_MODULATE);
     g_Supervisor.gfxDevice->SetColorOp(COMPONENT_ALPHA, COLOR_OP_MODULATE);
-    g_AnmManager->DrawNoRotation(&this->msg.dialogueLines[0]);
-    g_AnmManager->DrawNoRotation(&this->msg.dialogueLines[1]);
-    g_AnmManager->DrawNoRotation(&this->msg.introLines[0]);
-    g_AnmManager->DrawNoRotation(&this->msg.introLines[1]);
+    g_AnmManager->DrawInterpNoRotation(&this->msg.dialogueLines[0]);
+    g_AnmManager->DrawInterpNoRotation(&this->msg.dialogueLines[1]);
+    g_AnmManager->DrawInterpNoRotation(&this->msg.introLines[0]);
+    g_AnmManager->DrawInterpNoRotation(&this->msg.introLines[1]);
     return ZUN_SUCCESS;
 }
 
@@ -1078,6 +1087,8 @@ void Gui::UpdateGui()
     i32 scoreBonus;
     i32 i;
     i32 activeTransitionQuads;
+
+    this->UpdatePrev();
 
     if (this->impl->msg.currentMsgIdx < 0)
     {
@@ -1186,6 +1197,7 @@ void Gui::UpdateGui()
     }
     if (this->impl->bonusScore.isShown)
     {
+        this->impl->bonusScore.prevPos = this->impl->bonusScore.pos;
         if (this->impl->bonusScore.timer < 30)
         {
             this->impl->bonusScore.pos.x =
@@ -1203,6 +1215,7 @@ void Gui::UpdateGui()
     }
     if (this->impl->fullPowerMode.isShown)
     {
+        this->impl->fullPowerMode.prevPos = this->impl->fullPowerMode.pos;
         if (this->impl->fullPowerMode.timer < 30)
         {
             this->impl->fullPowerMode.pos.x =
@@ -1273,6 +1286,27 @@ void Gui::UpdateGui()
         g_GameManager.AddScore(scoreBonus * 10);
         this->impl->finishedStage++;
     }
+    this->showLives = 2;
+    this->showBombs = 2;
+    this->showGraze = 2;
+    this->showPoint = 2;
+    this->showPower = 2;
+    if (this->showLives)
+    {
+        this->showLives--;
+    }
+    if (this->showPower)
+    {
+        this->showPower--;
+    }
+    if (this->showBombs)
+    {
+        this->showBombs--;
+    }
+    if (this->showGraze)
+    {
+        this->showGraze--;
+    }
 }
 
 void Gui::DrawGameScene()
@@ -1323,11 +1357,6 @@ void Gui::DrawGameScene()
         g_AnmManager->DrawNoRotation(this->impl->vms0 + 6);
         g_AnmManager->DrawNoRotation(this->impl->vms0 + 7);
         g_AnmManager->DrawNoRotation(this->impl->vms0 + 8);
-        this->showLives = 2;
-        this->showBombs = 2;
-        this->showGraze = 2;
-        this->showPoint = 2;
-        this->showPower = 2;
     }
     if (!g_Supervisor.cfg.disableItemDrawAroundPlayfield)
     {
@@ -1493,22 +1522,6 @@ void Gui::DrawGameScene()
             AsciiManager::AddFormatText(&g_AsciiManager, &pos, "MAX");
         }
     }
-    if (this->showLives)
-    {
-        this->showLives--;
-    }
-    if (this->showPower)
-    {
-        this->showPower--;
-    }
-    if (this->showBombs)
-    {
-        this->showBombs--;
-    }
-    if (this->showGraze)
-    {
-        this->showGraze--;
-    }
 }
 
 void Gui::DrawStageElements()
@@ -1532,34 +1545,37 @@ void Gui::DrawStageElements()
 
     for (i = 0; i < 5; i++)
     {
-        g_AnmManager->Draw(&this->impl->vms1[i]);
+        g_AnmManager->DrawInterp(&this->impl->vms1[i]);
     }
     if (this->impl->bombSpellcardPortrait.visible)
     {
-        g_AnmManager->DrawNoRotation(&this->impl->bombSpellcardPortrait);
-        g_AnmManager->DrawNoRotation(&this->impl->bombSpellcardDecorLeft);
-        g_AnmManager->Draw(&this->impl->bombSpellcardDecorRight);
+        g_AnmManager->DrawInterpNoRotation(&this->impl->bombSpellcardPortrait);
+        g_AnmManager->DrawInterpNoRotation(&this->impl->bombSpellcardDecorLeft);
+        g_AnmManager->DrawInterp(&this->impl->bombSpellcardDecorRight);
     }
     if (this->impl->enemySpellcardPortrait.visible)
     {
         oldPos = this->impl->enemySpellcardPortrait.pos;
-        this->impl->enemySpellcardPortrait.pos += this->impl->enemySpellcardPortrait.offset;
+        ZunVec3 drawPos = this->impl->enemySpellcardPortrait.prevPos.Lerp(
+            this->impl->enemySpellcardPortrait.pos, g_RenderAlpha);
+        this->impl->enemySpellcardPortrait.pos =
+            drawPos + this->impl->enemySpellcardPortrait.offset;
         g_AnmManager->DrawNoRotation(&this->impl->enemySpellcardPortrait);
         this->impl->enemySpellcardPortrait.pos = oldPos;
-        g_AnmManager->DrawNoRotation(&this->impl->enemySpellcardRelated1);
-        g_AnmManager->Draw(&this->impl->enemySpellcardRelated2);
+        g_AnmManager->DrawInterpNoRotation(&this->impl->enemySpellcardRelated1);
+        g_AnmManager->DrawInterp(&this->impl->enemySpellcardRelated2);
     }
     if (this->impl->bombSpellcardName.visible)
     {
         this->impl->bombSpellcardNameBg.pos = this->impl->bombSpellcardName.pos;
-        g_AnmManager->DrawNoRotation(&this->impl->bombSpellcardNameBg);
-        g_AnmManager->Draw(&this->impl->bombSpellcardName);
+        g_AnmManager->DrawInterpNoRotation(&this->impl->bombSpellcardNameBg);
+        g_AnmManager->DrawInterp(&this->impl->bombSpellcardName);
     }
     if (this->impl->enemySpellcardName.visible)
     {
         this->impl->enemySpellcardNameBg.pos = this->impl->enemySpellcardName.pos;
-        g_AnmManager->DrawNoRotation(&this->impl->enemySpellcardNameBg);
-        g_AnmManager->Draw(&this->impl->enemySpellcardName);
+        g_AnmManager->DrawInterpNoRotation(&this->impl->enemySpellcardNameBg);
+        g_AnmManager->DrawInterp(&this->impl->enemySpellcardName);
         g_AnmManager->DrawNoRotation(&this->impl->spellcardBonusIndicator);
         remainingBonus = g_EnemyManager.spellcardInfo.captureScore +
                          g_EnemyManager.spellcardInfo.grazeBonusScore;
@@ -1620,12 +1636,12 @@ void Gui::DrawStageElements()
     }
     if (this->impl->stageClearTextVm.activeSpriteIdx >= 0)
     {
-        g_AnmManager->DrawNoRotation(&this->impl->stageClearTextVm);
-        g_AnmManager->DrawNoRotation(&this->impl->stageTransitionSnapshotVm);
+        g_AnmManager->DrawInterpNoRotation(&this->impl->stageClearTextVm);
+        g_AnmManager->DrawInterpNoRotation(&this->impl->stageTransitionSnapshotVm);
         if (this->impl->stageClearBonusTextVm.activeSpriteIdx >= 0)
         {
             this->impl->stageClearBonusTextVm.pos = ZunVec3(304.0f, 448.0f, 0.0f);
-            g_AnmManager->DrawNoRotation(&this->impl->stageClearBonusTextVm);
+            g_AnmManager->DrawInterpNoRotation(&this->impl->stageClearBonusTextVm);
         }
     }
     if (this->impl->activeTransitionQuads != 0)
@@ -1636,42 +1652,50 @@ void Gui::DrawStageElements()
             g_AnmManager->SetSprite(NULL);
         }
     }
+
+    u32 interpBossHealthBarAlpha =
+        (u32)utils::Lerp(this->prevBossHealthBarAlpha, this->bossHealthBarAlpha, g_RenderAlpha);
+    f32 interpBossHealthBarEased =
+        utils::Lerp(this->prevBossHealthBarEased, this->bossHealthBarEased, g_RenderAlpha);
     if (this->impl->msg.currentMsgIdx < 0 && this->bossPresent + this->impl->bossHealthBarState > 0)
     {
         healthBarRect.left = 64.0f;
         healthBarRect.top = 19.0f;
-        healthBarRect.right = this->bossHealthBarEased * 320.0f + 64.0f;
+        healthBarRect.right = interpBossHealthBarEased * 320.0f + 64.0f;
         healthBarRect.bottom = 23.0f;
-        color1 = this->bossHealthBarAlpha << 24 | 0xffffff;
-        color2 = this->bossHealthBarAlpha << 24 | 0x202060;
+        color1 = interpBossHealthBarAlpha << 24 | 0xffffff;
+        color2 = interpBossHealthBarAlpha << 24 | 0x202060;
         timerPos.x = 48.0f;
         timerPos.y = 16.0f;
         timerPos.z = 0.0f;
         ScreenEffect::DrawColoredQuad(&healthBarRect, color1, color1, color2, color2);
         for (j = 0; j < 8; j++)
         {
+            f32 interpBossHealthEased =
+                utils::Lerp(this->prevBossHealthEased[j], this->bossHealthEased[j], g_RenderAlpha);
             if (this->bossHealth[j] == 0.0f)
             {
                 continue;
             }
-            if (this->bossHealthEased[j] >= this->bossHealthBarEased)
+            if (interpBossHealthEased >= interpBossHealthBarEased)
             {
                 continue;
             }
             segmentEndHealth = this->bossHealth[j];
-            if (this->bossHealthBarEased < segmentEndHealth)
+            if (interpBossHealthBarEased < segmentEndHealth)
             {
-                segmentEndHealth = this->bossHealthBarEased;
+                segmentEndHealth = interpBossHealthBarEased;
             }
-            healthBarRect.left = this->bossHealthEased[j] * 320.0f + 64.0f;
+            healthBarRect.left = interpBossHealthEased * 320.0f + 64.0f;
             healthBarRect.top = 19.0f;
             healthBarRect.right = segmentEndHealth * 320.0f + 64.0f;
             healthBarRect.bottom = 23.0f;
-            color1 = this->bossHealthBarAlpha << 24 | (this->bossColor[j] & 0xffffff);
-            color2 = this->bossHealthBarAlpha << 24 | ((i32)this->bossColor[j] >> 2 & 0x3f3f3fU);
+            color1 = interpBossHealthBarAlpha << 24 | (this->bossColor[j] & 0xffffff);
+            color2 = interpBossHealthBarAlpha << 24 | ((i32)this->bossColor[j] >> 2 & 0x3f3f3fU);
             ScreenEffect::DrawColoredQuad(&healthBarRect, color1, color1, color2, color2);
         }
-        g_AnmManager->DrawNoRotation(&this->impl->vms0[11]); // what is responsible for drawing name
+        g_AnmManager->DrawInterpNoRotation(
+            &this->impl->vms0[11]); // what is responsible for drawing name
         healthBarRect.left = 33.0f;
         healthBarRect.top = 19.0f;
         healthBarRect.right = healthBarRect.left + 3.0f;
@@ -1683,8 +1707,8 @@ void Gui::DrawStageElements()
             healthBarRect.left = (f32)j * 26.0f / (f32)secondsRemaining + 35.0f;
             healthBarRect.right =
                 (f32)(j + 1) * 26.0f / (f32)secondsRemaining + 35.0f - (f32)markerGap;
-            color1 = this->bossHealthBarAlpha << 24 | (0xffffff - j * 255 / 9);
-            color2 = this->bossHealthBarAlpha << 24 | 0x202020;
+            color1 = interpBossHealthBarAlpha << 24 | (0xffffff - j * 255 / 9);
+            color2 = interpBossHealthBarAlpha << 24 | 0x202020;
             ScreenEffect::DrawColoredQuad(&healthBarRect, color1, color1, color2, color2);
         }
         timerPos = ZunVec3(384.0f, 16.0f, 0.0f);
@@ -1704,7 +1728,7 @@ void Gui::DrawStageElements()
         {
             timeColor = g_SpellcardTimeColors[3];
         }
-        g_AsciiManager.SetColor(this->bossHealthBarAlpha << 24 | timeColor);
+        g_AsciiManager.SetColor(interpBossHealthBarAlpha << 24 | timeColor);
         secondsRemaining =
             this->spellcardSecondsRemaining > 99 ? 99 : this->spellcardSecondsRemaining;
         if (secondsRemaining < 10 &&

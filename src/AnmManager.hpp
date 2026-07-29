@@ -5,6 +5,7 @@
 #include <SDL3/SDL.h>
 #include <assert.h>
 
+#include "GameWindow.hpp"
 #include "ZunColor.hpp"
 #include "ZunMath.hpp"
 #include "ZunResult.hpp"
@@ -129,7 +130,7 @@ struct AnmManager
     ZunResult Draw(AnmVm *vm);
     ZunResult DrawBillboard(AnmVm *vm);
     ZunResult Draw3(AnmVm *vm);
-    void DrawEndingRect(i32 surfaceIdx, i32 rectX, i32 rectY, i32 rectLeft, i32 rectTop, i32 width,
+    void DrawEndingRect(i32 surfaceIdx, f32 rectX, f32 rectY, f32 rectLeft, f32 rectTop, i32 width,
                         i32 height);
     ZunResult DrawFacingCamera(AnmVm *vm);
     ZunResult DrawInner(AnmVm *vm, u32 drawFlags);
@@ -165,7 +166,7 @@ struct AnmManager
     void SyncRenderState(AnmVm *vm);
     void TakeScreenshot(i32 textureId, i32 srcLeft, i32 srcTop, i32 srcWidth, i32 srcHeight,
                         i32 dstLeft, i32 dstTop, i32 dstWidth, i32 dstHeight);
-    void TakeScreenshotIfRequested(AnmVm *vm);
+    void TakeScreenshotIfRequested();
     void TranslateRotation(VertexTex1DiffuseXyzrhw *vertex, f32 width, f32 height, f32 sine,
                            f32 cosine, f32 xOffset, f32 yOffset);
 
@@ -223,6 +224,7 @@ struct AnmManager
     {
         vm->Initialize();
         this->SetActiveSprite(vm, spriteIdx);
+        vm->UpdatePrev();
     }
 
     i32 CreateScreenshotTexture(i32 x, i32 y, i32 width, i32 height)
@@ -342,6 +344,30 @@ struct AnmManager
         Flush();
     }
 
+    ZunResult DrawInterpNoRotation(AnmVm *vm)
+    {
+        ZunVec3 savedPos = vm->pos;
+        vm->pos = vm->prevPos.Lerp(vm->pos, g_RenderAlpha);
+        ZunResult result = DrawNoRotation(vm);
+        vm->pos = savedPos;
+        return result;
+    }
+
+    ZunResult DrawInterp(AnmVm *vm)
+    {
+        ZunVec3 savedPos = vm->pos;
+        vm->pos = vm->prevPos.Lerp(vm->pos, g_RenderAlpha);
+        ZunResult result = Draw(vm);
+        vm->pos = savedPos;
+        return result;
+    }
+
+    void DrawInterpAndFlush(AnmVm *vm)
+    {
+        DrawInterp(vm);
+        Flush();
+    }
+
     ZunColor color;
     i32 colorMulEnabled;
     i32 scriptsExecutedThisFrame;
@@ -349,6 +375,8 @@ struct AnmManager
     i32 renderStateChangesThisFrame;
     u32 flushesThisFrame;
     Float2 offset;
+    Float2 shakeOffset;
+    Float2 prevShakeOffset;
     ZunMatrix matrix;
     struct AnmLoadedSprite sprites[2560];
     struct AnmVm vm;
