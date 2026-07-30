@@ -463,19 +463,15 @@ i32 Supervisor::CheckVSync()
 
     if (g_GameWindow.window)
     {
-        SDL_DisplayID displayID = SDL_GetDisplayForWindow(g_GameWindow.window);
-        const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(displayID);
-
         i32 swapInterval = 0;
         SDL_GL_GetSwapInterval(&swapInterval);
 
-        if (mode && mode->refresh_rate > 0.0f && swapInterval != 0)
+        // we have hardware vsync, so we can probably be reasonably sure that the game won't run at
+        // a ridiculously high framerate
+        if (swapInterval != 0)
         {
-            if (mode->refresh_rate >= 57.0f && mode->refresh_rate <= 63.0f)
-            {
-                g_Supervisor.vsyncEnabled = 0;
-                return 0;
-            }
+            g_Supervisor.vsyncEnabled = 0;
+            return 0;
         }
     }
 
