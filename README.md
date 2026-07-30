@@ -36,13 +36,22 @@ Run cmake on this repo, then build with whatever generator you chose.
 
 You will also need to add a copy of `msgothic.ttc` into your game directory if you are not running this on Windows or otherwise don't have the "ＭＳ ゴシック" font installed.
 
-If you are using macOS, you will need to create a directory named "assets", then move `th07.dat`, `thbgm.dat` and `msgothic.ttc` into it at build time, since it's compiled as an app bundle instead of a standalone executable.
+If you are using macOS and NOT building in standalone mode, you will need to create a directory named "assets", then move `th07.dat`, `thbgm.dat` and `msgothic.ttc` into it at build time, since it's compiled as an app bundle instead of a standalone executable.
+
+#### Standalone mode
+
+If you prefer to build the game in standalone mode (for example, you plan to redistribute the executable, or for some reason don't have the assets at build time), pass `-DTH_EXTERNAL_ASSETS=ON` to cmake. This will have different effects depending on the OS.
+
+- Linux and Windows: No effect, since they're already running in standalone mode.
+- macOS: Builds the game as a standalone binary without any prepacked assets. You're expected to have all assets in the same directory as the application at runtime.
+- iOS: Builds the game as a bundle without any prepacked assets. You are expected to have the assets `th07.dat`, `thbgm.dat`, and `msgothic.ttc` available in the Documents directory of the game (the folder available in Files), otherwise the game won't start.
+- Android: Builds the game as a bundle without any prepacked assets. The assets `th07.dat`, `thbgm.dat`, and `msgothic.ttc` should be available in the externally available storage, otherwise the game won't start. This folder is available somewhere like `/storage/sdcard0/Android/data/com.zun.th07/files`.
 
 #### Non-desktop
 
-Usually these will require using the vendored SDL modules and prepacked assets. This is because they require, for example, being ran as part of a bundle instead of desktop platforms that run as standalone binaries.
+Usually these will require using the vendored SDL modules and prepacked assets. This is because they require, for example, being ran as part of a bundle instead of desktop platforms that run as standalone binaries. Clone the repo recursively with submodules.
 
-Clone the repo recursively with submodules. Afterwards, create a directory named "assets" in the root of the repo, and move the files `th07.dat` and `thbgm.dat` from the original game, as well as a copy of `msgothic.ttc` for text rendering.
+Afterwards, create a directory named "assets" in the root of the repo, and move the files `th07.dat` and `thbgm.dat` from the original game, as well as a copy of `msgothic.ttc` for text rendering. This is not required if you are building the game standalone as described earlier.
 
 On mobile platforms specifically, you might want it to have the icon of the original game. In order to do this, you'll need to extract the ico from the original `th07.exe`, and place it into the mipmap icon folders of the android project. You can use `icoextract` to do this.
 

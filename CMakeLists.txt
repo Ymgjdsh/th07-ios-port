@@ -6,6 +6,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+option(TH_EXTERNAL_ASSETS "Do not bundle assets (on platforms that bundle them) and use the user/executable directories instead" OFF)
+
 set(SOURCES
     src/AnmManager.cpp
     src/AnmVm.cpp
@@ -57,6 +59,10 @@ endif()
 
 target_include_directories(${TH_EXEC_NAME} PRIVATE src src/pbg4)
 
+if(TH_EXTERNAL_ASSETS)
+    target_compile_definitions(${TH_EXEC_NAME} PRIVATE TH_EXTERNAL_ASSETS)
+endif()
+
 if(EMSCRIPTEN)
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIGURATION>")
     set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIGURATION>")
@@ -95,17 +101,21 @@ if(APPLE)
         "${CMAKE_SOURCE_DIR}/assets/msgothic.ttc"
     )
 
+if(NOT TH_EXTERNAL_ASSETS)
     target_sources(${TH_EXEC_NAME} PRIVATE ${APP_RESOURCES})
     set_source_files_properties(${APP_RESOURCES} PROPERTIES
         MACOSX_PACKAGE_LOCATION "Resources"
     )
+endif()
 
+if (IOS OR NOT TH_EXTERNAL_ASSETS)
     set_target_properties(${TH_EXEC_NAME} PROPERTIES
         MACOSX_BUNDLE TRUE
         MACOSX_BUNDLE_BUNDLE_NAME "東方妖々夢"
         MACOSX_BUNDLE_GUI_IDENTIFIER "com.zun.th07"
         MACOSX_BUNDLE_SHORT_VERSION_STRING "1.0.0"
     )
+endif()
 
     if(IOS)
         set(BUILD_SHARED_LIBS OFF)

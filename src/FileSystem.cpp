@@ -123,6 +123,18 @@ i32 FileSystem::WriteDataToFile(const char *filename, const void *out, u32 bytes
 
 std::string FileSystem::GetBasePath(const char *filename)
 {
+#if defined(TH_EXTERNAL_ASSETS)
+    const char *path = nullptr;
+#if defined(__ANDROID__)
+    path = SDL_GetAndroidExternalStoragePath();
+#elif defined(__APPLE__) && TARGET_OS_IPHONE
+    path = SDL_GetUserFolder(SDL_FOLDER_DOCUMENTS);
+#endif
+    if (path)
+    {
+        return std::string(path) + filename;
+    }
+#endif
     const char *basePath = SDL_GetBasePath();
     if (basePath)
     {
@@ -135,6 +147,8 @@ std::string FileSystem::GetPrefPath(const char *filename)
 {
 #if defined(__EMSCRIPTEN__)
     return std::string("/savesth07/") + filename;
+#elif defined(TH_EXTERNAL_ASSETS)
+    return GetBasePath(filename);
 #elif defined(__ANDROID__) || defined(__APPLE__)
     static char *prefPath = SDL_GetPrefPath("TeamShanghaiAlice", "th07");
     if (prefPath)

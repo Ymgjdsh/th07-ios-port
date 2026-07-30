@@ -20,7 +20,11 @@ android {
                 abiFilters 'arm64-v8a'
             }
             cmake {
-                arguments "-DANDROID_PLATFORM=android-21", "-DANDROID_STL=c++_static"
+                if (project.hasProperty('TH_EXTERNAL_ASSETS')) {
+                    arguments "-DANDROID_PLATFORM=android-21", "-DANDROID_STL=c++_static", "-DTH_EXTERNAL_ASSETS=ON"
+                } else {
+                    arguments "-DANDROID_PLATFORM=android-21", "-DANDROID_STL=c++_static"
+                }
                 abiFilters 'armeabi-v7a', 'arm64-v8a', 'x86', 'x86_64'
             }
         }
@@ -38,7 +42,9 @@ android {
     if (!project.hasProperty('EXCLUDE_NATIVE_LIBS')) {
         sourceSets.main {
             jniLibs.srcDir 'libs'
-            assets.srcDirs = ['../../assets']
+            if (!project.hasProperty('TH_EXTERNAL_ASSETS')) {
+                assets.srcDirs = ['../../assets']
+            }
         }
         externalNativeBuild {
             if (buildWithCMake) {
