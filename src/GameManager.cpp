@@ -159,7 +159,7 @@ void GameManager::Pause()
     g_Player.prevOptionsPosition[0] = g_Player.optionsPosition[0];
     g_Player.prevOptionsPosition[1] = g_Player.optionsPosition[1];
     g_Stage.prevCam = g_Stage.cam;
-    g_Stage.prevPosition = g_Stage.position;
+    g_Stage.prevPos = g_Stage.pos;
     if (g_GameManager.currentStage != 6 || g_Gui.frameCounter >= 300)
     {
         g_SoundPlayer.PushCommand(AUDIO_PAUSE, 0, "Pause");
@@ -907,7 +907,7 @@ void GameManager::AddCherryPlus(i32 amount)
     }
     if (this->cherry >= this->cherryMax && oldCherry != this->cherry)
     {
-        g_Gui.ShowFullPowerMode(this->cherry - this->globals->cherryStart, 3);
+        g_Gui.ShowStatusPopup(this->cherry - this->globals->cherryStart, 3);
     }
 }
 
@@ -921,7 +921,7 @@ void GameManager::AddCherry(i32 amount)
     }
     if (this->cherry >= this->cherryMax && oldCherry != this->cherry)
     {
-        g_Gui.ShowFullPowerMode(this->cherry - this->globals->cherryStart, 3);
+        g_Gui.ShowStatusPopup(this->cherry - this->globals->cherryStart, 3);
     }
 }
 

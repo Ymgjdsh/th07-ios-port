@@ -72,8 +72,8 @@ u32 AsciiManager::OnUpdate(AsciiManager *arg)
                 continue;
             }
 
-            curPopup->prevPosition = curPopup->position;
-            curPopup->position.y -= 0.5f * g_Supervisor.effectiveFramerateMultiplier;
+            curPopup->prevPos = curPopup->pos;
+            curPopup->pos.y -= 0.5f * g_Supervisor.effectiveFramerateMultiplier;
             curPopup->timer++;
             if (curPopup->timer > 60)
             {
@@ -226,7 +226,7 @@ void AsciiManager::CutChain()
     g_Chain.Cut(&g_AsciiManagerOnDrawPopupsChain);
 }
 
-void AsciiManager::AddString(ZunVec3 *position, const char *text)
+void AsciiManager::AddString(ZunVec3 *pos, const char *text)
 {
     if (this->numStrings >= 256)
     {
@@ -242,7 +242,7 @@ void AsciiManager::AddString(ZunVec3 *position, const char *text)
     this->numStrings++;
 
     strcpy(curString->text, text);
-    curString->position = *position;
+    curString->pos = *pos;
     curString->color = this->color;
     curString->scale.x = this->scale.x;
     curString->scale.y = this->scale.y;
@@ -258,14 +258,14 @@ void AsciiManager::AddString(ZunVec3 *position, const char *text)
     }
 }
 
-void AsciiManager::AddFormatText(AsciiManager *manager, ZunVec3 *position, const char *fmt, ...)
+void AsciiManager::AddFormatText(AsciiManager *manager, ZunVec3 *pos, const char *fmt, ...)
 {
     char str[508];
     va_list args;
 
     va_start(args, fmt);
     vsprintf(str, fmt, args);
-    manager->AddString(position, str);
+    manager->AddString(pos, str);
 
     va_end(args);
 }
@@ -287,7 +287,7 @@ void AsciiManager::DrawStrings()
     this->vm0.anchor = 3;
     for (i = 0; i < this->numStrings; i++, string++)
     {
-        this->vm0.pos = string->position;
+        this->vm0.pos = string->pos;
         text = string->text;
         this->vm0.scale.x = string->scale.x;
         this->vm0.scale.y = string->scale.y;
@@ -319,7 +319,7 @@ void AsciiManager::DrawStrings()
             if (*(u8 *)text == '\n')
             {
                 this->vm0.pos.y += 16.0f * string->scale.y;
-                this->vm0.pos.x = string->position.x;
+                this->vm0.pos.x = string->pos.x;
             }
             else if (*(u8 *)text == ' ')
             {
@@ -358,7 +358,7 @@ void AsciiManager::DrawStrings()
         Enemy *boss = g_EnemyManager.bosses[i];
         if (boss && !boss->hasNoCollision)
         {
-            f32 interpBossX = utils::Lerp(boss->prevPosition.x, boss->position.x, g_RenderAlpha);
+            f32 interpBossX = utils::Lerp(boss->prevPos.x, boss->pos.x, g_RenderAlpha);
             this->bossMarkers[i].pos.x = interpBossX + 32.0f;
             this->bossMarkers[i].pos.y = 472.0f;
             this->bossMarkers[i].pos.z = 0.0f;
@@ -398,7 +398,7 @@ void AsciiManager::DrawStrings()
     }
 }
 
-void AsciiManager::CreatePopup1(ZunVec3 *position, i32 value, u32 color)
+void AsciiManager::CreatePopup1(ZunVec3 *pos, i32 value, u32 color)
 {
     i32 characterCount;
     AsciiManagerPopup *popup;
@@ -429,14 +429,14 @@ void AsciiManager::CreatePopup1(ZunVec3 *position, i32 value, u32 color)
     popup->characterCount = (u8)characterCount;
     popup->color = color;
     popup->timer = 0;
-    popup->position = *position;
-    popup->position.x += g_GameManager.arcadeRegionTopLeftPos.x;
-    popup->position.y += g_GameManager.arcadeRegionTopLeftPos.y;
-    popup->prevPosition = popup->position;
+    popup->pos = *pos;
+    popup->pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
+    popup->pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
+    popup->prevPos = popup->pos;
     this->nextPopupIndex1++;
 }
 
-void AsciiManager::CreatePopup2(ZunVec3 *position, i32 value, u32 color)
+void AsciiManager::CreatePopup2(ZunVec3 *pos, i32 value, u32 color)
 {
     i32 characterCount;
     AsciiManagerPopup *popup;
@@ -467,10 +467,10 @@ void AsciiManager::CreatePopup2(ZunVec3 *position, i32 value, u32 color)
     popup->characterCount = (u8)characterCount;
     popup->color = color;
     popup->timer = 0;
-    popup->position = *position;
-    popup->position.x += g_GameManager.arcadeRegionTopLeftPos.x;
-    popup->position.y += g_GameManager.arcadeRegionTopLeftPos.y;
-    popup->prevPosition = popup->position;
+    popup->pos = *pos;
+    popup->pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
+    popup->pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
+    popup->prevPos = popup->pos;
     this->nextPopupIndex2++;
 }
 
@@ -1104,14 +1104,14 @@ void AsciiManager::DrawPopups()
             continue;
         }
 
-        ZunVec3 drawPos = popup->prevPosition.Lerp(popup->position, g_RenderAlpha);
+        ZunVec3 drawPos = popup->prevPos.Lerp(popup->pos, g_RenderAlpha);
         this->vm1.pos.x = drawPos.x - (f32)(popup->characterCount << 2);
         this->vm1.pos.y = drawPos.y;
         this->vm1.color.color = popup->color;
         this->vm1.prevColor = this->vm1.color;
 
-        dx = g_Player.positionCenter.x - popup->position.x;
-        dy = g_Player.positionCenter.y - popup->position.y;
+        dx = g_Player.positionCenter.x - popup->pos.x;
+        dy = g_Player.positionCenter.y - popup->pos.y;
         alpha = (i32)(dx * dx + dy * dy);
 
         if (alpha > 4096)
