@@ -133,7 +133,7 @@ void GameManager::ExtendFromPoints()
         AddLivesRemaining(1);
         g_SoundPlayer.PlaySoundByIdx(SOUND_EXTEND, 0);
         IncreaseSubrank(200);
-        g_Gui.showLives = 2;
+        g_Gui.lifeDisplayUpdateFrames = 2;
     }
     else
     {
@@ -142,7 +142,7 @@ void GameManager::ExtendFromPoints()
             AddBombsRemaining(1);
             g_SoundPlayer.PlaySoundByIdx(SOUND_EXTEND, 0);
             IncreaseSubrank(200);
-            g_Gui.showBombs = 2;
+            g_Gui.bombDisplayUpdateFrames = 2;
         }
     }
 }
