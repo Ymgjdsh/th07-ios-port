@@ -17,6 +17,14 @@ int main()
     assert(!OnlineIsImmediatelyPreviousEpoch(40, 42));
     assert(!OnlineIsImmediatelyPreviousEpoch(0xffffffffu, 0));
 
+    // Lockstep begins only after MENU_COMMIT and only packets from the exact
+    // committed epoch may touch frame history or authoritative state.
+    assert(!OnlineAcceptsLockstepEpoch(false, 0, 0));
+    assert(!OnlineAcceptsLockstepEpoch(false, 1, 1));
+    assert(OnlineAcceptsLockstepEpoch(true, 1, 1));
+    assert(!OnlineAcceptsLockstepEpoch(true, 0, 1));
+    assert(!OnlineAcceptsLockstepEpoch(true, 2, 1));
+
     OnlineFrameHistory<TestInput, 8> history;
     history.Store(2, {22});
     history.Store(0, {10});

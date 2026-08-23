@@ -8,7 +8,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(TH_EXTERNAL_ASSETS "Do not bundle assets (on platforms that bundle them) and use the user/executable directories instead" OFF)
 set(TH07_IOS_VERSION "0.4.0" CACHE STRING "iOS marketing version")
-set(TH07_IOS_BUILD "28" CACHE STRING "iOS build number")
+set(TH07_IOS_BUILD "29" CACHE STRING "iOS build number")
 set(TH07_IOS_BUNDLE_ID "com.th07.sdl3.ios" CACHE STRING "iOS bundle identifier")
 
 set(SOURCES

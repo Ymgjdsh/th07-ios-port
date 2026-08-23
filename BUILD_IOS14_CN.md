@@ -46,10 +46,10 @@ SSH 密钥和 `mac_build.local.psd1` 必须从你自己的备份恢复，或在�
 源码预检和 Xcode 构建，再把 IPA 下载到：
 
 ```text
-dist/mac-build/th07-ios-0.4.0-28.ipa
+dist/mac-build/th07-ios-0.4.0-29.ipa
 ```
 
-远程构建失败时，日志会自动尝试下载到 `dist/mac-build/logs-build28`。
+远程构建失败时，日志会自动尝试下载到 `dist/mac-build/logs-build29`。
 
 如果 Mac 上安装了多个 Xcode，显式指定 Xcode 14：
 
@@ -61,14 +61,14 @@ XCODE_APP=/Applications/Xcode.app ./ios/build_ios.sh
 打包源码（包含 `assets`、iOS 脚本和全部修复，不包含临时构建目录）：
 
 ```sh
-python3 ios/package_source.py --root . --output ../th07-ios14-port-build28-source.zip
-shasum -a 256 ../th07-ios14-port-build28-source.zip
+python3 ios/package_source.py --root . --output ../th07-ios14-port-build29-source.zip
+shasum -a 256 ../th07-ios14-port-build29-source.zip
 ```
 
-成功后的文件（Build 28）：
+成功后的文件（Build 29）：
 
 ```text
-build-ios/th07-ios-0.4.0-28.ipa
+build-ios/th07-ios-0.4.0-29.ipa
 ```
 
 构建失败时请发送：
@@ -78,7 +78,7 @@ build-ios/logs/build-ios.log
 build-ios/logs/last-120-lines.txt
 ```
 
-## Build 28 Online 联机与标题菜单
+## Build 29 Online 联机与标题菜单
 
 - Online 已成为原标题菜单第九项，位于 Quit 下方并跟随原菜单光标/触摸，不再使用左上角悬浮按钮。
 - 点击 Online 后使用 iOS UIKit 系统 Sheet，不再绘制 OpenGL 矩形面板；提供附近局域网、直接 IPv4/域名、中转房间和蓝牙附近设备四种方式，Direct 固定使用 UDP 37707 端口。
@@ -94,7 +94,7 @@ build-ios/logs/last-120-lines.txt
 - 网络输入按逻辑帧锁步交换，并带累计 ACK、选择 ACK、历史补发、乱序去重和周期状态校验。
 - 联机协议 v9 为每次重开分配独立局次编号；旧局的握手包和输入包不能进入第二局的帧历史。
 - 输入延迟的中性前缀在主机和客机两侧同时初始化，避免第 0 帧等待远端输入超时；附近设备短暂断链时先进入重连宽限，不立即结束锁步。
-- Build 28 已加入两人锁步输入、独立 P1/P2 玩家实体、角色与机体 ANM/SHT、
+- Build 29 已加入两人锁步输入、独立 P1/P2 玩家实体、角色与机体 ANM/SHT、
   敌人/子弹/激光碰撞、道具拾取和独立生命/炸弹/Power 旁路。
 - 共享暂停、续命、重开和退出使用两阶段 P1/P2 投票；退出/重开会先进入 Yes/No 确认，
   只有双方选择相同结果才关闭菜单。菜单、加载和战斗之间的多点触摸脉冲会被场景戳隔离，

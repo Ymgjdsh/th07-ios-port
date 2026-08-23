@@ -49,10 +49,11 @@ constexpr socket_t kInvalidSocket = -1;
 namespace
 {
 constexpr u32 kMagic = 0x374f4e54; // TNO7
-// Build 28 changes startup barrier recovery and authoritative correction
-// semantics. Keep mixed builds out of the same session.
-constexpr u16 kVersion = 9;
-constexpr u32 kBuildIdentity = 0x07060006u;
+// Build 29 makes startup barriers a real transport boundary: no lockstep
+// frame is sent or consumed until both peers have entered the committed menu
+// epoch. Keep mixed builds out of the same session.
+constexpr u16 kVersion = 10;
+constexpr u32 kBuildIdentity = 0x07060007u;
 // XOR of the first SHA-256 words for th07.dat, thbgm.dat and msgothic.ttc.
 constexpr u32 kResourceIdentity = 0xf09a7ea3u;
 constexpr u16 kPort = 37707;
@@ -663,10 +664,11 @@ void ActivateMultiplayerSession(bool local)
     g_MultiplayerSession = true;
     g_LocalSession = local;
     g_BarrierEpoch = 0;
-    // Menu navigation is already carried by the same authoritative P1/P2
-    // lanes as gameplay. Enabling it before the menu barrier lets the guest
-    // follow the host into the difficulty page instead of remaining behind.
-    g_InputSynchronizationActive = true;
+    // Startup menus are not a lockstep epoch. Both devices must first reach
+    // the same difficulty page and the host must publish MENU_COMMIT; enabling
+    // input here creates frame history before that boundary and lets a later
+    // reset strand one peer waiting for an epoch-0 frame that was discarded.
+    g_InputSynchronizationActive = local;
     g_StartupPhase = local ? STARTUP_GAME_COMMITTED : STARTUP_PREPARING;
     g_StartupStartedAt = SDL_GetTicks();
     g_LastStartupSend = 0;
@@ -705,7 +707,8 @@ void ActivateMultiplayerSession(bool local)
 void StoreLocalAcknowledgement(const Packet &packet)
 {
     if (!g_MultiplayerSession || packet.session != g_LaunchNonce ||
-        packet.barrierEpoch != g_BarrierEpoch) return;
+        !OnlineAcceptsLockstepEpoch(g_InputSynchronizationActive,
+                                    packet.barrierEpoch, g_BarrierEpoch)) return;
     if (packet.ackFrame == 0xffffffffu && packet.ackMask == 0) return;
     g_LocalInputHistory.Acknowledge(packet.ackFrame, packet.ackMask);
     g_RemoteAckFrame = packet.ackFrame;
@@ -715,7 +718,8 @@ void StoreLocalAcknowledgement(const Packet &packet)
 void StoreRemoteInput(const Packet &packet)
 {
     if (!g_MultiplayerSession || packet.session != g_LaunchNonce ||
-        packet.barrierEpoch != g_BarrierEpoch) return;
+        !OnlineAcceptsLockstepEpoch(g_InputSynchronizationActive,
+                                    packet.barrierEpoch, g_BarrierEpoch)) return;
     if (g_Host && g_ShellCommit != Online::SHARED_COMMIT_NONE && packet.role == 2 &&
         packet.shellCommit == (u8)g_ShellCommit &&
          packet.shellRevision == g_ShellCommitRevision &&
@@ -965,6 +969,16 @@ static void ApplyPlayerStatePacket(const PlayerStatePacket &state, u8 playerId)
 
 static void StoreRemoteAuthoritativeState(const Packet &packet)
 {
+    // Validate the lockstep epoch before applying any field. Previously an
+    // old authoritative packet was rejected only after its shared-shell state
+    // had already mutated the new epoch.
+    if (g_Host || !g_MultiplayerSession || packet.role != 1 ||
+        packet.session != g_LaunchNonce ||
+        !OnlineAcceptsLockstepEpoch(g_InputSynchronizationActive,
+                                    packet.barrierEpoch, g_BarrierEpoch))
+    {
+        return;
+    }
     ApplyRemoteSharedShellState(packet);
     // Authoritative state is only meaningful after the shared shell has
     // reached its terminal NONE state.  A retry/title commit is carried on
@@ -980,9 +994,7 @@ static void StoreRemoteAuthoritativeState(const Packet &packet)
         g_RemoteAuthoritativeShellRevision = 0;
         return;
     }
-    if (g_Host || !g_MultiplayerSession || packet.role != 1 ||
-        packet.session != g_LaunchNonce || packet.barrierEpoch != g_BarrierEpoch ||
-        packet.authoritativeFrame < g_LastAuthoritativeFrame ||
+    if (packet.authoritativeFrame < g_LastAuthoritativeFrame ||
         packet.shellRevision < g_ShellRevision)
     {
         return;
@@ -1274,6 +1286,8 @@ bool CommitMenuBarrier(u32 epoch)
     // one-shot cursor over a barrier reset: replaying it on the next page can
     // consume a stale confirm on the peer.
     g_LocalMenuCursor = g_RemoteMenuCursor = g_MenuCursorTarget = -1;
+    MobileDiagnostics::Log("online/barrier", "menu commit role=%s epoch=%u frame=%u",
+                           g_Host ? "host" : "guest", g_BarrierEpoch, g_InputFrame);
     return true;
 }
 
@@ -1287,6 +1301,8 @@ bool CommitGameplayBarrier(u32 epoch)
     g_StartupStartedAt = SDL_GetTicks();
     ResetSyncState();
     g_LocalMenuCursor = g_RemoteMenuCursor = g_MenuCursorTarget = -1;
+    MobileDiagnostics::Log("online/barrier", "game commit role=%s epoch=%u frame=%u",
+                           g_Host ? "host" : "guest", g_BarrierEpoch, g_InputFrame);
     return true;
 }
 

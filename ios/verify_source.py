@@ -63,7 +63,7 @@ with open(cmake_path, "r", encoding="utf-8") as stream:
     cmake_source = stream.read()
 
 for marker in (
-    'set(TH07_IOS_BUILD "28"',
+    'set(TH07_IOS_BUILD "29"',
     'XCODE_ATTRIBUTE_LLVM_LTO "YES_THIN"',
     'set(SDL_GPU OFF CACHE BOOL "" FORCE)',
     'set(SDL_RENDER ON CACHE BOOL "" FORCE)',
@@ -119,9 +119,10 @@ for marker in (
     if marker not in github_publish_source:
         print("error: safe GitHub publishing marker missing:", marker)
         failed = True
-if "CMake.app/Contents/bin" not in ios_build_source:
-    print("error: non-interactive CMake PATH marker missing")
-    failed = True
+for marker in ("CMake.app/Contents/bin", "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY"):
+    if marker not in ios_build_source:
+        print("error: iOS build script marker missing:", marker)
+        failed = True
 if failed:
     sys.exit(2)
 print("ok: incremental SSH Mac build automation")
@@ -275,7 +276,7 @@ for relative, markers in mobile_markers.items():
 if failed:
     sys.exit(2)
 
-print("ok: build 27 controller focus, dialogue input and touch replay markers")
+print("ok: build 29 controller focus, dialogue input and touch replay markers")
 
 online_markers = {
     os.path.join("src", "Online.cpp"): (
@@ -354,7 +355,7 @@ online_markers = {
     os.path.join("ios", "BluetoothPeerTransport.mm"): (
         "MultipeerConnectivity",
         'kServiceType = @"th07-peer"',
-        '@"protocol": @"9"',
+        '@"protocol": @"10"',
     ),
     os.path.join("ios", "OnlineLauncher.mm"): (
         "UITableViewStyleInsetGrouped",
@@ -388,14 +389,14 @@ for relative, markers in online_markers.items():
         source = stream.read()
     for marker in markers:
         if marker not in source:
-            print("error: build 28 Online marker missing:", relative, marker)
+            print("error: build 29 Online marker missing:", relative, marker)
             failed = True
 if "demoFramesCount++" in open(os.path.join(root, "src", "MainMenu.cpp"), encoding="utf-8").read():
     print("error: title idle demo trigger is still enabled")
     failed = True
 if failed:
     sys.exit(2)
-print("ok: Build 28 startup recovery, discrete state correction and stable shared pause")
+print("ok: Build 29 barrier isolation, discrete state correction and stable shared pause")
 
 with open(os.path.join(root, "src", "ResultScreen.cpp"), "r", encoding="utf-8") as stream:
     result_source = stream.read()

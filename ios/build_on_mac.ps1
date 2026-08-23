@@ -6,7 +6,7 @@ param(
     [string]$RemoteFolder = "th07-build",
     [string]$XcodeApp = "/Applications/Xcode.app",
     [string]$IosVersion = "0.4.0",
-    [int]$IosBuild = 28,
+    [int]$IosBuild = 29,
     [string]$GitHubRepo = "https://github.com/Ymgjdsh/th07-ios-port.git",
     [switch]$SkipGitHubBackup
 )
@@ -21,6 +21,9 @@ if (Test-Path -LiteralPath $localConfigPath) {
 }
 if ([string]::IsNullOrWhiteSpace($MacHost) -or [string]::IsNullOrWhiteSpace($MacUser)) {
     throw "Set MacHost and MacUser in ios\mac_build.local.psd1 before building."
+}
+if ($IosVersion -notmatch '^\d+\.\d+\.\d+$' -or $IosBuild -lt 1) {
+    throw "IosVersion must be numeric x.y.z and IosBuild must be positive."
 }
 $target = "${MacUser}@${MacHost}"
 $remoteBase = "`$HOME/$RemoteFolder"
@@ -124,7 +127,9 @@ Write-Host "Preparing remote project ..."
 & ssh @sshOptions $target $remotePrepare
 if ($LASTEXITCODE -ne 0) { throw "Remote project preparation failed." }
 
-$remoteBuild = "export PATH='/usr/local/bin:/opt/homebrew/bin:/Applications/CMake.app/Contents/bin':`$PATH; cd $remoteProject && XCODE_APP='$XcodeApp' IOS_VERSION='$IosVersion' IOS_BUILD='$IosBuild' ./ios/build_ios.sh"
+$remoteIpaName = "th07-ios-${IosVersion}-${IosBuild}.ipa"
+$remoteBuild = "export PATH='/usr/local/bin:/opt/homebrew/bin:/Applications/CMake.app/Contents/bin':`$PATH; cd $remoteProject && XCODE_APP='$XcodeApp' IOS_VERSION='$IosVersion' IOS_BUILD='$IosBuild' ./ios/build_ios.sh" +
+    (' && desktop_ipa="$HOME/Desktop/' + $remoteIpaName + '" && if [ -e "$desktop_ipa" ] && [ ! -f "$desktop_ipa" ]; then echo "Desktop target exists and is not a file: $desktop_ipa" >&2; exit 1; fi && cp -f "build-ios/' + $remoteIpaName + '" "$desktop_ipa"')
 Write-Host "Building on the Mac ..."
 & ssh @sshOptions $target $remoteBuild
 $buildExit = $LASTEXITCODE
@@ -142,7 +147,19 @@ Write-Host "Downloading IPA ..."
     $localIpa
 if ($LASTEXITCODE -ne 0) { throw "IPA download failed." }
 
+Write-Host "Checking IPA copied to Mac Desktop ..."
+$desktopCommand = 'shasum -a 256 "$HOME/Desktop/' + $remoteIpaName + '" | cut -d '' '' -f 1'
+$desktopHashOutput = & ssh @sshOptions $target `
+    $desktopCommand
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace(($desktopHashOutput | Out-String).Trim())) {
+    throw "IPA was built and downloaded, but the Mac Desktop copy could not be verified."
+}
+
 $ipaHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $localIpa).Hash
+$desktopHash = (($desktopHashOutput | Out-String).Trim()).ToLowerInvariant()
+if ($desktopHash -ne $ipaHash.ToLowerInvariant()) {
+    throw "Mac Desktop IPA hash differs from downloaded IPA."
+}
 if (-not $SkipGitHubBackup) {
     $publishScript = Join-Path $root "tools\publish_github.ps1"
     if (-not (Test-Path -LiteralPath $publishScript)) {
@@ -157,3 +174,4 @@ if (-not $SkipGitHubBackup) {
 Write-Host ""
 Write-Host "SUCCESS: $localIpa"
 Write-Host "SHA256: $ipaHash"
+Write-Host "Mac Desktop: $remoteIpaName (SHA256 $desktopHash)"

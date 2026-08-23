@@ -83,7 +83,7 @@ In the build directory, run `emcmake` and build as usual. You'll find the built 
 
 ## iOS Online
 
-Build 28 presents `Online` as an iOS UIKit sheet. It keeps nearby LAN, direct
+Build 29 presents `Online` as an iOS UIKit sheet. It keeps nearby LAN, direct
 IPv4 or domain name, THR1 relay rooms, iOS nearby transport, host/guest actions, input delay,
 RTT/status, local two-player and start/leave controls without drawing a custom
 OpenGL launcher over the title screen.
