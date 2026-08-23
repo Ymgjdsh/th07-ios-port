@@ -223,8 +223,8 @@ struct Gui
     i32 MsgWait();
 
     void EndEnemySpellcard();
-    void EndPlayerSpellcard();
-    void ShowBombNamePortrait(i32 sprite, const char *name);
+    void EndPlayerSpellcard(u8 ownerId = 0);
+    void ShowBombNamePortrait(u8 ownerId, i32 sprite, const char *name);
     void ShowBonusScore(i32 score);
     void ShowStatusPopup(i32 fmtArg, i32 popupType);
     void ShowSpellcard(i32 spellcardSprite, const char *spellcardName);
@@ -277,6 +277,8 @@ struct Gui
     };
     GuiImpl *impl;
     f32 bombNameBarLength;
+    u8 bombPortraitOwner;
+    // pad 3
     f32 spellcardBarLength;
     u32 bossHealthBarAlpha;
     u32 prevBossHealthBarAlpha;

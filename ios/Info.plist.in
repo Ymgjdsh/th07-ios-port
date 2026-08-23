@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key><string>ja</string>
+    <key>CFBundleDisplayName</key><string>Touhou 07</string>
+    <key>NSLocalNetworkUsageDescription</key>
+    <string>妖々夢联机需要访问同一局域网中的设备。</string>
+    <key>NSBonjourServices</key>
+    <array><string>_th07-online._udp</string></array>
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>妖々夢使用附近设备联机来发现并连接另一台 iOS 设备。</string>
+    <key>CFBundleExecutable</key><string>th07</string>
+    <key>CFBundleIdentifier</key><string>@TH07_IOS_BUNDLE_ID@</string>
+    <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+    <key>CFBundleName</key><string>th07</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>@TH07_IOS_VERSION@</string>
+    <key>CFBundleVersion</key><string>@TH07_IOS_BUILD@</string>
+    <key>CFBundleIcons</key>
+    <dict>
+        <key>CFBundlePrimaryIcon</key>
+        <dict>
+            <key>CFBundleIconName</key><string>AppIcon</string>
+            <key>CFBundleIconFiles</key>
+            <array><string>AppIcon60x60</string></array>
+        </dict>
+    </dict>
+    <key>CFBundleIcons~ipad</key>
+    <dict>
+        <key>CFBundlePrimaryIcon</key>
+        <dict>
+            <key>CFBundleIconName</key><string>AppIcon</string>
+            <key>CFBundleIconFiles</key>
+            <array><string>AppIcon76x76</string><string>AppIcon83.5x83.5</string></array>
+        </dict>
+    </dict>
+    <key>LSRequiresIPhoneOS</key><true/>
+    <key>MinimumOSVersion</key><string>14.0</string>
+    <key>UIApplicationSupportsIndirectInputEvents</key><true/>
+    <key>UIFileSharingEnabled</key><true/>
+    <key>LSSupportsOpeningDocumentsInPlace</key><true/>
+    <key>UILaunchStoryboardName</key><string>LaunchScreen</string>
+    <key>UIRequiresFullScreen</key><true/>
+    <key>UIStatusBarHidden</key><true/>
+    <key>UIViewControllerBasedStatusBarAppearance</key><false/>
+    <key>UIRequiredDeviceCapabilities</key>
+    <array><string>arm64</string><string>opengles-2</string></array>
+    <key>UISupportedInterfaceOrientations</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <key>UISupportedInterfaceOrientations~ipad</key>
+    <array>
+        <string>UIInterfaceOrientationPortrait</string>
+        <string>UIInterfaceOrientationPortraitUpsideDown</string>
+        <string>UIInterfaceOrientationLandscapeLeft</string>
+        <string>UIInterfaceOrientationLandscapeRight</string>
+    </array>
+    <key>NSHumanReadableCopyright</key><string>(C) 2002-03 Team Shanghai Alice</string>
+</dict>
+</plist>

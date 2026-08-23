@@ -81,6 +81,29 @@ In the build directory, run `emcmake` and build as usual. You'll find the built 
 
 ## Controls
 
+## iOS Online
+
+Build 28 presents `Online` as an iOS UIKit sheet. It keeps nearby LAN, direct
+IPv4 or domain name, THR1 relay rooms, iOS nearby transport, host/guest actions, input delay,
+RTT/status, local two-player and start/leave controls without drawing a custom
+OpenGL launcher over the title screen.
+
+Protocol v9 separates connection, preparation, menu readiness, final game
+configuration and gameplay commit. Menu navigation already uses the same
+authoritative P1/P2 lanes as gameplay, so the guest follows the host while the
+menu is loading. Input packets carry an exact session, round epoch and frame,
+cumulative and selective acknowledgements, periodic state hashes, and use a
+bounded, paced retransmission history. UDP sessions use a larger jitter buffer,
+and the host keeps retransmitting barrier commits until the guest enters the new
+epoch. Host snapshots correct discrete lifecycle/resources without overwriting
+ordinary lockstep movement or resetting render interpolation. The delayed neutral prefix is
+initialized on both peers. Heartbeat ACKs also retire sent frames when no gameplay
+packet is available, and nearby transport recovery has a grace period before
+synchronized play is stopped. Shared pause/retry/title/reset actions use a two-stage P1/P2
+vote with visible markers, and touch pulses are invalidated when the scene
+changes. A shared pause always resets the native menu animation before it is
+shown. Build and packaged resource identities must match before a session is accepted.
+
 Controls are identical to the original game for non-touch users.
 
 For touch users, there are two sets of touch controls. Those used on the menu and the one used during gameplay.
@@ -89,7 +112,8 @@ On the menu, swipe in any direction in order to move the select cursor around, t
 
 During gameplay, move the player around with your finger (the player moves relative to your finger). To focus, hold down another finger while moving your character around. To bomb, tap the black bars on the side of the screen or the bottom left corner of the screen. To pause the game, have four fingers on the screen inside the playarea (touches in the bomb zone do not count). To skip dialogue, have a finger held on screen for more than 0.5 seconds.
 
-Note that you cannot save replays when using touch controls. It shows the "you cannot save a replay if you've used a continue," but this shows up regardless if you've used a continue or not if you've used touch controls at any point during gameplay.
+Touch runs that finish without a continue can be saved as replays. Touch
+movement and virtual-button pulses are recorded in the replay input stream.
 
 ## Todo
 

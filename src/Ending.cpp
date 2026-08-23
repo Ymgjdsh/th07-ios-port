@@ -8,6 +8,7 @@
 #include "GameErrorContext.hpp"
 #include "GameManager.hpp"
 #include "GameWindow.hpp"
+#include "MobileDiagnostics.hpp"
 #include "ScreenEffect.hpp"
 #include "Supervisor.hpp"
 
@@ -446,6 +447,10 @@ ZunResult Ending::AddedCallback(Ending *arg)
             arg->hasSeenEnding = 1;
         }
         g_GameManager.clrd[shotType].difficultyClearedWithRetries[g_GameManager.difficulty] = 99;
+        MobileDiagnostics::Log("progress/extra",
+                               "no-continue clear recorded shot=%u difficulty=%d extraUnlocked=%d",
+                               shotType, g_GameManager.difficulty,
+                               g_GameManager.HasUnlockedExtra());
     }
     else if (g_GameManager.clrd[shotType]
                  .difficultyClearedWithoutRetries[g_GameManager.difficulty] == 99)

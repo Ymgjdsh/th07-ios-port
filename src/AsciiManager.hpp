@@ -4,13 +4,15 @@
 #include "ZunResult.hpp"
 #include "ZunTimer.hpp"
 #include "inttypes.hpp"
+#include "MobileUi.hpp"
 
 struct PauseMenu
 {
     PauseMenu();
 
     void OnDraw();
-    i32 OnUpdate();
+    i32 OnUpdate(bool suppressInput = false);
+    void HandleMobileTouch(MobileUi::OverlayTouchAction action, f32 gameX, f32 gameY);
 
     void UpdatePrev()
     {
@@ -31,8 +33,9 @@ struct RetryMenu
 {
     RetryMenu();
 
-    i32 OnUpdate();
+    i32 OnUpdate(bool suppressInput = false);
     void OnDraw();
+    void HandleMobileTouch(MobileUi::OverlayTouchAction action, f32 gameX, f32 gameY);
 
     void UpdatePrev()
     {

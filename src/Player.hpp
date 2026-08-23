@@ -188,6 +188,7 @@ struct Player
     static u32 OnDrawLowPrio(Player *arg);
 
     void UpdateBombProjectiles();
+    bool TryActivateBomb(bool automatic);
     void UpdateBorderAndBombState();
     i32 UpdateDeath();
     void UpdateState();
@@ -351,7 +352,22 @@ struct Player
     struct ShtData *shooterDataFocus;
 };
 
-extern Player g_Player;
+extern Player g_Players[2];
+extern bool g_PlayerActive[2];
+#define g_Player (g_Players[0])
+#define g_Player2 (g_Players[1])
+
+Player *GetPlayerById(u8 playerId);
+bool IsPlayerSlotActive(u8 playerId);
+// Restore a registered player after a synchronized retry commit. The stock
+// retry path only resets P1's globals, so P2 needs an explicit state reset.
+void ResetPlayerForSharedRetry(u8 playerId);
+Player *GetPrimaryActivePlayer();
+Player *GetClosestActivePlayer(const ZunVec3 *position);
+i32 GetPlayerAnmScript(const Player *player, i32 script);
+i32 GetPlayerEffectSlot(const Player *player, i32 p1Slot);
+i32 GetPlayerCharacter(const Player *player);
+i32 GetPlayerShot(const Player *player);
 
 typedef i32 (*ShtFunc1)(Player *, PlayerBullet *, i32, struct ShtEntry *);
 extern ShtFunc1 g_ShtFireFuncs[6];

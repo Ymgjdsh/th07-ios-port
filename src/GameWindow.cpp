@@ -9,11 +9,15 @@
 #include <filesystem>
 
 #include "AnmManager.hpp"
+#include "BulletManager.hpp"
 #include "Chain.hpp"
 #include "Controller.hpp"
 #include "FileSystem.hpp"
 #include "GameErrorContext.hpp"
 #include "GameManager.hpp"
+#include "EffectManager.hpp"
+#include "MobileDiagnostics.hpp"
+#include "MobileUi.hpp"
 #include "ScreenEffect.hpp"
 #include "SoundPlayer.hpp"
 #include "Stage.hpp"
@@ -27,6 +31,105 @@ f64 g_LastFrameTime;
 u64 g_LastPerfCounter;
 f32 g_RenderAlpha = 1.0f;
 bool g_SuppressAnmAdvance;
+
+namespace
+{
+struct PerformanceAccumulator
+{
+    u64 windowStart = 0;
+    u64 calcNs = 0;
+    u64 drawNs = 0;
+    u64 presentNs = 0;
+    u64 frameNs = 0;
+    u64 uploadBytes = 0;
+    u32 frames = 0;
+    u32 updates = 0;
+    u32 drawCalls = 0;
+    u32 uploads = 0;
+    u32 textureBinds = 0;
+    u32 stateChanges = 0;
+    u32 redundantStateCalls = 0;
+    u64 anmFlushes = 0;
+    u64 anmStateChanges = 0;
+    u64 scriptsExecuted = 0;
+    u64 scriptTicks = 0;
+};
+
+PerformanceAccumulator g_Performance;
+
+f64 NsToAverageMs(u64 nanoseconds, u32 count)
+{
+    return count ? (f64)nanoseconds / 1000000.0 / (f64)count : 0.0;
+}
+
+void RecordPerformance(u64 calcNs, u64 drawNs, u64 presentNs, u64 frameNs, u32 updates,
+                       u32 scriptsExecuted, u32 scriptTicks)
+{
+    const u64 now = SDL_GetTicksNS();
+    if (!g_Performance.windowStart) g_Performance.windowStart = now;
+    g_Performance.calcNs += calcNs;
+    g_Performance.drawNs += drawNs;
+    g_Performance.presentNs += presentNs;
+    g_Performance.frameNs += frameNs;
+    g_Performance.updates += updates;
+    g_Performance.frames++;
+    g_Performance.scriptsExecuted += scriptsExecuted;
+    g_Performance.scriptTicks += scriptTicks;
+    if (g_AnmManager)
+    {
+        g_Performance.anmFlushes += g_AnmManager->flushesThisFrame;
+        g_Performance.anmStateChanges += g_AnmManager->renderStateChangesThisFrame;
+    }
+
+    GlesGraphics *gles = g_Supervisor.gfxDevice &&
+                                 g_Supervisor.gfxDevice->GetType() == RENDERER_OPENGLES
+                             ? static_cast<GlesGraphics *>(g_Supervisor.gfxDevice)
+                             : nullptr;
+    if (gles)
+    {
+        const GlesFrameStats &stats = gles->GetFrameStats();
+        g_Performance.drawCalls += stats.drawCalls;
+        g_Performance.uploads += stats.bufferUploads;
+        g_Performance.uploadBytes += stats.bufferUploadBytes;
+        g_Performance.textureBinds += stats.textureBinds;
+        g_Performance.stateChanges += stats.blendChanges + stats.viewportChanges +
+                                      stats.depthChanges;
+        g_Performance.redundantStateCalls += stats.redundantStateCalls;
+    }
+
+    if (now - g_Performance.windowStart < 2000000000ull) return;
+    const f64 seconds = (f64)(now - g_Performance.windowStart) / 1000000000.0;
+    const f64 fps = g_Performance.frames / seconds;
+    const f64 ups = g_Performance.updates / seconds;
+    const GlesFrameStats empty = {};
+    const GlesFrameStats &stats = gles ? gles->GetFrameStats() : empty;
+    MobileDiagnostics::Log(
+        "perf/frame",
+        "fps=%.1f ups=%.1f cpu_ms(frame=%.2f calc=%.2f draw=%.2f present=%.2f) "
+        "gl/frame(draw=%.1f upload=%.1f kb=%.1f tex=%.1f state=%.1f skipped=%.1f) "
+        "anm/frame(flush=%.1f state=%.1f scripts=%.1f ticks=%.1f) "
+        "world(bullets=%d effects=%d slow=%d) "
+        "drawable=%dx%d",
+        fps, ups, NsToAverageMs(g_Performance.frameNs, g_Performance.frames),
+        NsToAverageMs(g_Performance.calcNs, g_Performance.frames),
+        NsToAverageMs(g_Performance.drawNs, g_Performance.frames),
+        NsToAverageMs(g_Performance.presentNs, g_Performance.frames),
+        (f64)g_Performance.drawCalls / g_Performance.frames,
+        (f64)g_Performance.uploads / g_Performance.frames,
+        (f64)g_Performance.uploadBytes / g_Performance.frames / 1024.0,
+        (f64)g_Performance.textureBinds / g_Performance.frames,
+        (f64)g_Performance.stateChanges / g_Performance.frames,
+        (f64)g_Performance.redundantStateCalls / g_Performance.frames,
+        (f64)g_Performance.anmFlushes / g_Performance.frames,
+        (f64)g_Performance.anmStateChanges / g_Performance.frames,
+        (f64)g_Performance.scriptsExecuted / g_Performance.frames,
+        (f64)g_Performance.scriptTicks / g_Performance.frames,
+        g_BulletManager.bulletCount, g_EffectManager.activeEffectsCount,
+        g_GameManager.slowModeSlowActive, stats.drawableWidth, stats.drawableHeight);
+    g_Performance = {};
+    g_Performance.windowStart = now;
+}
+} // namespace
 
 static GfxInit g_RenderingBackends[] = {
     GlesGraphics::Init,
@@ -89,6 +192,9 @@ RenderResult GameWindow::Render()
 
     this->accumulator += elapsed;
 
+    const bool telemetry = MobileUi::IsPerformanceTelemetryEnabled();
+    u64 calcNs = 0;
+    i32 updateCount = 0;
     i32 chainRes = CHAIN_CALLBACK_RESULT_CONTINUE;
     bool updated = false;
 
@@ -96,8 +202,11 @@ RenderResult GameWindow::Render()
 
     while (this->accumulator >= targetDt)
     {
+        const u64 calcStartNs = telemetry ? SDL_GetTicksNS() : 0;
         chainRes = g_Chain.RunCalcChain();
         g_SoundPlayer.ProcessQueues();
+        if (telemetry) calcNs += SDL_GetTicksNS() - calcStartNs;
+        updateCount++;
 
         if (chainRes == 0)
         {
@@ -117,7 +226,12 @@ RenderResult GameWindow::Render()
     {
         g_RenderAlpha = 1.0f;
     }
+    const u32 scriptsExecuted = telemetry && g_AnmManager
+                                    ? (u32)g_AnmManager->scriptsExecutedThisFrame
+                                    : 0;
+    const u32 scriptTicks = telemetry && g_AnmManager ? (u32)g_AnmManager->scriptTicksThisFrame : 0;
 
+    const u64 drawStartNs = telemetry ? SDL_GetTicksNS() : 0;
     g_Supervisor.gfxDevice->BeginFrame();
     g_AnmManager->ResetVertexBuffer();
     g_Supervisor.fogEnabled = 255;
@@ -135,8 +249,11 @@ RenderResult GameWindow::Render()
     g_AnmManager->Flush();
     g_Supervisor.gfxDevice->BindTexture({0});
     g_Supervisor.gfxDevice->EndFrame();
+    const u64 drawNs = telemetry ? SDL_GetTicksNS() - drawStartNs : 0;
 
+    const u64 presentStartNs = telemetry ? SDL_GetTicksNS() : 0;
     Present();
+    const u64 presentNs = telemetry ? SDL_GetTicksNS() - presentStartNs : 0;
 
     if (updated)
     {
@@ -150,6 +267,12 @@ RenderResult GameWindow::Render()
     {
         // should have gotten ACTUAL vsync then
         SDL_DelayNS(nsPerFrame - timeToRender);
+    }
+
+    if (telemetry)
+    {
+        RecordPerformance(calcNs, drawNs, presentNs, timeToRender, (u32)updateCount,
+                          scriptsExecuted, scriptTicks);
     }
 
     return RENDER_RESULT_KEEP_RUNNING;
@@ -195,7 +318,9 @@ ZunResult GameWindow::CreateGameWindow()
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_OPENGL_BOOLEAN, true);
 #if defined(__APPLE__) && TARGET_OS_IPHONE
     SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_FULLSCREEN_BOOLEAN, true);
-    SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_HIGH_PIXEL_DENSITY_BOOLEAN, true);
+    // The game is rendered at its native 640x480 resolution. A Retina drawable only
+    // multiplies the final full-screen composition cost and can stall effect-heavy scenes.
+    SDL_SetBooleanProperty(props, SDL_PROP_WINDOW_CREATE_HIGH_PIXEL_DENSITY_BOOLEAN, false);
 #elif !defined(__EMSCRIPTEN__)
     if (!g_Supervisor.cfg.windowed)
     {

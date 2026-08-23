@@ -55,6 +55,18 @@ EclManager g_EclManager;
 
 EclGlobalVars g_GlobalEclVars;
 
+static bool IsAnyActivePlayerBombing()
+{
+    for (i32 playerId = 0; playerId < 2; ++playerId)
+    {
+        if (IsPlayerSlotActive((u8)playerId) && g_Players[playerId].bombInfo.isInUse)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 ZunResult EclManager::Load(const char *path)
 {
     i32 i;
@@ -193,11 +205,11 @@ i32 EclManager::GetVarValue(Enemy *enemy, i32 eclVar)
     case ECL_VAR_POS_Z:
         return enemy->pos.z;
     case ECL_VAR_PLAYER_POS_X:
-        return g_Player.positionCenter.x;
+        return GetClosestActivePlayer(&enemy->pos)->positionCenter.x;
     case ECL_VAR_PLAYER_POS_Y:
-        return g_Player.positionCenter.y;
+        return GetClosestActivePlayer(&enemy->pos)->positionCenter.y;
     case ECL_VAR_PLAYER_POS_Z:
-        return g_Player.positionCenter.z;
+        return GetClosestActivePlayer(&enemy->pos)->positionCenter.z;
     case ECL_VAR_MOVE_INTERP_ORIGIN_X:
         return enemy->moveInterpStartPos.x;
     case ECL_VAR_MOVE_INTERP_ORIGIN_Y:
@@ -247,9 +259,9 @@ i32 EclManager::GetVarValue(Enemy *enemy, i32 eclVar)
     case ECL_VAR_SCORE:
         return enemy->score;
     case ECL_VAR_ANGLE_TO_PLAYER:
-        return g_Player.AngleToPlayer(&enemy->pos);
+        return GetClosestActivePlayer(&enemy->pos)->AngleToPlayer(&enemy->pos);
     case ECL_VAR_DISTANCE_FROM_PLAYER:
-        return (g_Player.positionCenter - enemy->pos).Length();
+        return (GetClosestActivePlayer(&enemy->pos)->positionCenter - enemy->pos).Length();
     default:
         return eclVar;
     }
@@ -402,11 +414,11 @@ f32 EclManager::GetFloatVarValue(Enemy *enemy, f32 eclVar)
     case ECL_VAR_POS_Z:
         return enemy->pos.z;
     case ECL_VAR_PLAYER_POS_X:
-        return g_Player.positionCenter.x;
+        return GetClosestActivePlayer(&enemy->pos)->positionCenter.x;
     case ECL_VAR_PLAYER_POS_Y:
-        return g_Player.positionCenter.y;
+        return GetClosestActivePlayer(&enemy->pos)->positionCenter.y;
     case ECL_VAR_PLAYER_POS_Z:
-        return g_Player.positionCenter.z;
+        return GetClosestActivePlayer(&enemy->pos)->positionCenter.z;
     case ECL_VAR_LOCAL_FLOAT2_1:
         return enemy->currentContext.eclContextArgs.floatVars2[0];
     case ECL_VAR_LOCAL_FLOAT2_2:
@@ -438,7 +450,7 @@ f32 EclManager::GetFloatVarValue(Enemy *enemy, f32 eclVar)
     case ECL_VAR_BOSS_LIFE_THRESHOLD4:
         return (f32)enemy->lifeCallbackThreshold[3];
     case ECL_VAR_ANGLE_TO_PLAYER:
-        return g_Player.AngleToPlayer(&enemy->pos);
+        return GetClosestActivePlayer(&enemy->pos)->AngleToPlayer(&enemy->pos);
     case ECL_VAR_ANGLE:
         return enemy->angle;
     case ECL_VAR_ANGULAR_VELOCITY:
@@ -465,7 +477,7 @@ f32 EclManager::GetFloatVarValue(Enemy *enemy, f32 eclVar)
     case ECL_VAR_LAST_DAMAGE:
         return (f32)enemy->lastDamage;
     case ECL_VAR_DISTANCE_FROM_PLAYER:
-        return (g_Player.positionCenter - enemy->pos).Length();
+        return (GetClosestActivePlayer(&enemy->pos)->positionCenter - enemy->pos).Length();
     default:
         return eclVar;
     }
@@ -511,11 +523,11 @@ f32 *EclManager::GetFloatVar(Enemy *enemy, f32 *eclVar, u16 paramMask, i32 idx)
     case ECL_VAR_POS_Z:
         return &enemy->pos.z;
     case ECL_VAR_PLAYER_POS_X:
-        return &g_Player.positionCenter.x;
+        return &GetClosestActivePlayer(&enemy->pos)->positionCenter.x;
     case ECL_VAR_PLAYER_POS_Y:
-        return &g_Player.positionCenter.y;
+        return &GetClosestActivePlayer(&enemy->pos)->positionCenter.y;
     case ECL_VAR_PLAYER_POS_Z:
-        return &g_Player.positionCenter.z;
+        return &GetClosestActivePlayer(&enemy->pos)->positionCenter.z;
     case ECL_VAR_LOCAL_FLOAT2_1:
         return &enemy->currentContext.eclContextArgs.floatVars2[0];
     case ECL_VAR_LOCAL_FLOAT2_2:
@@ -1179,7 +1191,7 @@ restart:
                 enemy->moveMode = 1;
                 break;
             case ECL_MOVE_AT_PLAYER:
-                enemy->angle = g_Player.AngleToPlayer(&enemy->pos) +
+                enemy->angle = GetClosestActivePlayer(&enemy->pos)->AngleToPlayer(&enemy->pos) +
                                GET_FLOAT_VALUE(enemy, 0);
                 enemy->moveSpeed = GET_FLOAT_VALUE(enemy, 1);
                 enemy->moveMode = 1;
@@ -1370,7 +1382,8 @@ restart:
                 if (enemy->lasers[arg])
                 {
                     enemy->lasers[arg]->angle =
-                        g_Player.AngleToPlayer(&enemy->lasers[arg]->pos) +
+                        GetClosestActivePlayer(&enemy->lasers[arg]->pos)
+                                ->AngleToPlayer(&enemy->lasers[arg]->pos) +
                         GET_FLOAT_VALUE(enemy, 1);
                 }
                 break;
@@ -1528,7 +1541,7 @@ restart:
                     GET_FLOAT_VALUE(enemy, 1);
                 break;
             case ECL_GET_EXIT_ANGLE:
-                if (g_Player.positionCenter.x < enemy->pos.x)
+                if (GetClosestActivePlayer(&enemy->pos)->positionCenter.x < enemy->pos.x)
                 {
                     exitAngle = utils::AddNormalizeAngle(
                         g_Rng.GetRandomFloatInRange(1.5707964f) + 2.3561945f, 0.0f);
@@ -1890,7 +1903,7 @@ restart:
                     cosf(GET_FLOAT_VALUE(enemy, 2)) * GET_FLOAT_VALUE(enemy, 3);
                 break;
             case ECL_RAND_EXIT_ANGLE:
-                if ((g_Player.positionCenter.x < enemy->pos.x &&
+                if ((GetClosestActivePlayer(&enemy->pos)->positionCenter.x < enemy->pos.x &&
                      enemy->pos.x > 96.0f) ||
                     enemy->pos.x > 288.0f)
                 {
@@ -2174,7 +2187,7 @@ restart:
             }
             if (enemy->isBoss && g_GameManager.currentStage >= 7)
             {
-                if (g_Player.bombInfo.isInUse && g_EnemyManager.spellcardInfo.isActive &&
+                if (IsAnyActivePlayerBombing() && g_EnemyManager.spellcardInfo.isActive &&
                     g_EnemyManager.spellcardInfo.spellcardIdx >= 118)
                 {
                     enemy->invisibleOnBomb = 1;

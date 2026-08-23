@@ -4,6 +4,12 @@
 <dict>
 	<key>CFBundleName</key>
 	<string>東方妖々夢</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>妖々夢联机需要访问同一局域网中的设备。</string>
+	<key>NSBonjourServices</key>
+	<array><string>_th07-online._udp</string></array>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>妖々夢使用附近设备联机来发现并连接另一台 iOS 设备。</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.zun.th07</string>
 	<key>CFBundleInfoDictionaryVersion</key>

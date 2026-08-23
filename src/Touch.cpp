@@ -7,6 +7,9 @@
 #include "GameManager.hpp"
 #include "GameWindow.hpp"
 #include "Gui.hpp"
+#include "MobileDiagnostics.hpp"
+#include "MobileUi.hpp"
+#include "Supervisor.hpp"
 
 struct FingerSlot
 {
@@ -28,6 +31,8 @@ struct MenuGestureTracker
     f32 currentY;
     i32 maxFingers;
     u16 pendingButton;
+    u64 startTime;
+    f32 maxDistanceSq;
 };
 
 FingerSlot g_MoveFinger;
@@ -47,11 +52,108 @@ i32 g_NumActiveGameplayFingers = 0;
 bool g_BombPending = false;
 bool g_PausePending = false;
 bool g_BombedWithTouch = false;
+bool g_DialogueAdvancePending = false;
+bool g_DialogueReleaseSent = false;
+bool g_RecordedDeltaPending = false;
+f32 g_RecordedDeltaX = 0.0f;
+f32 g_RecordedDeltaY = 0.0f;
+bool g_ReplayDeltaPending = false;
+f32 g_ReplayDeltaX = 0.0f;
+f32 g_ReplayDeltaY = 0.0f;
+
+// Touch events can outlive the scene that received them (especially on iOS,
+// where a queued FINGER_UP may arrive after a chain transition).  Keep a
+// compact scene key so that a menu gesture or pause edge cannot leak into the
+// next scene.
+u64 g_LastTouchSceneKey = 0;
+bool g_TouchSceneKeyInitialized = false;
+
+constexpr u64 DIALOGUE_SKIP_HOLD_MS = 500;
+
+void ReleaseFinger(FingerSlot *slot);
+void ClearGameplayFingers();
+
+static u64 BuildTouchSceneKey()
+{
+    u64 key = 0;
+    key |= (u64)(g_Supervisor.curState & 0xff);
+    key |= (u64)(g_GameManager.currentStage & 0xff) << 8;
+    if (g_GameManager.notInMenu) key |= 1ull << 16;
+    if (g_GameManager.globals) key |= 1ull << 17;
+    if (g_GameManager.isInPauseMenu) key |= 1ull << 18;
+    if (g_GameManager.isInRetryMenu) key |= 1ull << 19;
+    if (g_GameManager.demo) key |= 1ull << 20;
+    if (g_GameManager.replay) key |= 1ull << 21;
+    if (g_GameManager.finished) key |= 1ull << 22;
+    // framesThisStage is intentionally reduced to a ready/not-ready bit;
+    // including the exact counter would invalidate every touch each frame.
+    if (g_GameManager.framesThisStage > 0) key |= 1ull << 23;
+    return key;
+}
+
+static void ClearTouchStateForSceneChange()
+{
+    ReleaseFinger(&g_MoveFinger);
+    ReleaseFinger(&g_FocusFinger);
+    ReleaseFinger(&g_DialogueHoldFinger);
+    g_AccumDx = 0.0f;
+    g_AccumDy = 0.0f;
+    ClearGameplayFingers();
+    g_PausePending = false;
+    g_BombPending = false;
+    g_BombedWithTouch = false;
+    g_DialogueAdvancePending = false;
+    g_DialogueReleaseSent = false;
+    g_RecordedDeltaPending = false;
+    g_ReplayDeltaPending = false;
+    g_MenuGesture = {};
+    // MobileUi owns its own touch owners and pulse queue.  Calling its
+    // non-recursive clear here is what removes a pending virtual MENU pulse.
+    MobileUi::CancelTouches();
+}
+
+static void ObserveTouchScene()
+{
+    const u64 key = BuildTouchSceneKey();
+    if (!g_TouchSceneKeyInitialized)
+    {
+        g_LastTouchSceneKey = key;
+        g_TouchSceneKeyInitialized = true;
+        return;
+    }
+    if (key == g_LastTouchSceneKey)
+    {
+        return;
+    }
+
+    const u64 oldKey = g_LastTouchSceneKey;
+    g_LastTouchSceneKey = key;
+    ClearTouchStateForSceneChange();
+    MobileDiagnostics::Log("touch/scene", "cleared stale touch state old=0x%llx new=0x%llx",
+                           (unsigned long long)oldKey, (unsigned long long)key);
+}
+
+bool Touch::IsGameplayActive()
+{
+    // The engine can report notInMenu while a stage is being constructed. Do
+    // not treat that transient viewport as a live playfield: a two-finger
+    // gesture there must not become a pause edge.
+    return g_GameManager.notInMenu && g_GameManager.globals &&
+           g_GameManager.currentStage >= 1 && g_GameManager.currentStage <= 6 &&
+           g_GameManager.framesThisStage > 0 && g_Supervisor.curState == 2 &&
+           !g_GameManager.isInPauseMenu && !g_GameManager.isInRetryMenu &&
+           !g_GameManager.replay && !g_GameManager.finished;
+}
 
 bool IsGameplayTouchMode()
 {
-    return g_GameManager.notInMenu && !g_GameManager.isInPauseMenu &&
-           !g_GameManager.isInRetryMenu && !g_GameManager.replay;
+    return Touch::IsGameplayActive();
+}
+
+static bool IsGameplayPauseGestureAllowed()
+{
+    return IsGameplayTouchMode() && !g_GameManager.demo &&
+           !g_GameManager.finished && !g_Gui.HasCurrentMsgIdx();
 }
 
 void GetWindowSize(i32 *w, i32 *h)
@@ -77,6 +179,10 @@ void GetContainedRenderRect(f32 *outX, f32 *outY, f32 *outW, f32 *outH, f32 *out
     f32 rh = 480.0f * scale;
     f32 rx = ((f32)winW - rw) * 0.5f;
     f32 ry = ((f32)winH - rh) * 0.5f;
+    if (winH > winW)
+    {
+        ry = 0.0f;
+    }
 
     *outX = rx;
     *outY = ry;
@@ -188,6 +294,12 @@ void Touch::ResetRunUsage()
 {
     g_UsedThisRun = false;
     g_BombedWithTouch = false;
+    g_DialogueAdvancePending = false;
+    g_DialogueReleaseSent = false;
+    g_RecordedDeltaPending = false;
+    g_ReplayDeltaPending = false;
+    g_MenuGesture = {};
+    g_TouchSceneKeyInitialized = false;
 }
 
 bool Touch::WasUsedThisRun()
@@ -213,13 +325,42 @@ void Touch::CancelTouches()
     g_PausePending = false;
     g_BombPending = false;
     g_BombedWithTouch = false;
+    g_DialogueAdvancePending = false;
+    g_DialogueReleaseSent = false;
+    g_RecordedDeltaPending = false;
+    g_ReplayDeltaPending = false;
+    // A scene transition can occur while a menu finger is still down.  Do
+    // not let that gesture's eventual FINGER_UP produce a stale select/back
+    // edge in the newly-created stage (which can be interpreted as pause).
+    g_MenuGesture = {};
+    MobileUi::CancelTouches();
+    g_LastTouchSceneKey = BuildTouchSceneKey();
+    g_TouchSceneKeyInitialized = true;
 }
 
 void Touch::FingerDown(const SDL_TouchFingerEvent &f)
 {
+    ObserveTouchScene();
     f32 px, py;
     FingerToWindowPx(f, &px, &py);
 
+    // Dialogue input owns the full screen. Handle it before MobileUi so taps
+    // still advance when controls are hidden or land inside a virtual button.
+    if (IsGameplayTouchMode() && g_Gui.HasCurrentMsgIdx())
+    {
+        if (!g_DialogueHoldFinger.active)
+        {
+            AssignFinger(&g_DialogueHoldFinger, f.fingerID, px, py);
+            g_UsedThisRun = true;
+        }
+        return;
+    }
+
+    if (MobileUi::FingerDown(f))
+    {
+        g_UsedThisRun = true;
+        return;
+    }
     if (!IsGameplayTouchMode())
     {
         if (!g_MenuGesture.active)
@@ -231,10 +372,16 @@ void Touch::FingerDown(const SDL_TouchFingerEvent &f)
             g_MenuGesture.currentX = px;
             g_MenuGesture.currentY = py;
             g_MenuGesture.maxFingers = 1;
+            g_MenuGesture.startTime = SDL_GetTicks();
+            g_MenuGesture.maxDistanceSq = 0.0f;
         }
         else
         {
-            g_MenuGesture.maxFingers++;
+            // Duplicate DOWN events for the same SDL finger are seen on some
+            // iOS versions after an input-dispatch stall.  They must not turn
+            // a normal tap into a two-finger back gesture.
+            if (f.fingerID != g_MenuGesture.primaryId)
+                g_MenuGesture.maxFingers++;
         }
     }
     else
@@ -252,16 +399,9 @@ void Touch::FingerDown(const SDL_TouchFingerEvent &f)
         }
 
         AddGameplayFinger(f.fingerID);
-        if (g_NumActiveGameplayFingers >= 4)
+        if (g_NumActiveGameplayFingers >= 4 && IsGameplayPauseGestureAllowed())
         {
             g_PausePending = true;
-        }
-
-        if (g_Gui.HasCurrentMsgIdx() && !g_DialogueHoldFinger.active)
-        {
-            AssignFinger(&g_DialogueHoldFinger, f.fingerID, px, py);
-            g_UsedThisRun = true;
-            return;
         }
 
         if (!g_MoveFinger.active)
@@ -287,6 +427,25 @@ void Touch::FingerDown(const SDL_TouchFingerEvent &f)
 
 void Touch::FingerUp(const SDL_TouchFingerEvent &f)
 {
+    ObserveTouchScene();
+    if (IsFinger(g_DialogueHoldFinger, f.fingerID))
+    {
+        const u64 held = SDL_GetTicks() - g_DialogueHoldFinger.start;
+        if (held < DIALOGUE_SKIP_HOLD_MS && g_Gui.HasCurrentMsgIdx())
+        {
+            g_DialogueAdvancePending = true;
+            g_DialogueReleaseSent = false;
+            MobileDiagnostics::Log("mobile/dialogue", "tap queued");
+        }
+        ReleaseFinger(&g_DialogueHoldFinger);
+        g_UsedThisRun = true;
+        return;
+    }
+
+    if (MobileUi::FingerUp(f))
+    {
+        return;
+    }
     f32 px, py;
     FingerToWindowPx(f, &px, &py);
 
@@ -297,7 +456,10 @@ void Touch::FingerUp(const SDL_TouchFingerEvent &f)
             f32 dx = g_MenuGesture.currentX - g_MenuGesture.startX;
             f32 dy = g_MenuGesture.currentY - g_MenuGesture.startY;
 
-            if (std::abs(dx) <= GetSwipeThreshold() && std::abs(dy) <= GetSwipeThreshold())
+            const f32 threshold = GetSwipeThreshold();
+            const u64 elapsed = SDL_GetTicks() - g_MenuGesture.startTime;
+            if (elapsed <= 500 && std::abs(dx) <= threshold && std::abs(dy) <= threshold &&
+                g_MenuGesture.maxDistanceSq <= threshold * threshold)
             {
                 if (g_MenuGesture.maxFingers >= 2)
                 {
@@ -315,10 +477,6 @@ void Touch::FingerUp(const SDL_TouchFingerEvent &f)
     else
     {
         RemoveGameplayFinger(f.fingerID);
-        if (IsFinger(g_DialogueHoldFinger, f.fingerID))
-        {
-            ReleaseFinger(&g_DialogueHoldFinger);
-        }
         if (IsFinger(g_MoveFinger, f.fingerID))
         {
             ReleaseFinger(&g_MoveFinger);
@@ -334,6 +492,20 @@ void Touch::FingerUp(const SDL_TouchFingerEvent &f)
 
 void Touch::FingerMotion(const SDL_TouchFingerEvent &f)
 {
+    ObserveTouchScene();
+    if (IsFinger(g_DialogueHoldFinger, f.fingerID))
+    {
+        f32 px, py;
+        FingerToWindowPx(f, &px, &py);
+        g_DialogueHoldFinger.lastPxX = px;
+        g_DialogueHoldFinger.lastPxY = py;
+        return;
+    }
+
+    if (MobileUi::FingerMotion(f))
+    {
+        return;
+    }
     f32 px, py;
     FingerToWindowPx(f, &px, &py);
 
@@ -343,28 +515,42 @@ void Touch::FingerMotion(const SDL_TouchFingerEvent &f)
         {
             g_MenuGesture.currentX = px;
             g_MenuGesture.currentY = py;
+            const f32 dx = px - g_MenuGesture.startX;
+            const f32 dy = py - g_MenuGesture.startY;
+            const f32 distanceSq = dx * dx + dy * dy;
+            if (distanceSq > g_MenuGesture.maxDistanceSq)
+                g_MenuGesture.maxDistanceSq = distanceSq;
         }
     }
     else
     {
-        if (IsFinger(g_DialogueHoldFinger, f.fingerID))
-        {
-            g_DialogueHoldFinger.lastPxX = px;
-            g_DialogueHoldFinger.lastPxY = py;
-        }
-
         if (IsFinger(g_MoveFinger, f.fingerID))
         {
-            f32 rx, ry, rw, rh, scale;
-            GetContainedRenderRect(&rx, &ry, &rw, &rh, &scale);
-
             f32 dxPx = px - g_MoveFinger.lastPxX;
             f32 dyPx = py - g_MoveFinger.lastPxY;
-
-            if (scale > 0.0f)
+            const f32 sensitivity = MobileUi::GetDragSensitivity();
+            i32 winW, winH;
+            GetWindowSize(&winW, &winH);
+            if (MobileUi::IsPortraitGameplayLayout())
             {
-                g_AccumDx += dxPx / scale;
-                g_AccumDy += dyPx / scale;
+                const MobileUi::PortraitLayout layout =
+                    MobileUi::GetPortraitLayout(winW, winH);
+                const f32 scale = (f32)layout.gameWidth / 384.0f;
+                if (scale > 0.0f)
+                {
+                    g_AccumDx += dxPx / scale * sensitivity;
+                    g_AccumDy += dyPx / scale * sensitivity;
+                }
+            }
+            else
+            {
+                f32 rx, ry, rw, rh, scale;
+                GetContainedRenderRect(&rx, &ry, &rw, &rh, &scale);
+                if (scale > 0.0f)
+                {
+                    g_AccumDx += dxPx / scale * sensitivity;
+                    g_AccumDy += dyPx / scale * sensitivity;
+                }
             }
             g_MoveFinger.lastPxX = px;
             g_MoveFinger.lastPxY = py;
@@ -380,6 +566,7 @@ void Touch::FingerMotion(const SDL_TouchFingerEvent &f)
 
 u16 Touch::GetButtonBits()
 {
+    ObserveTouchScene();
     u16 buttons = 0;
 
     g_BombedWithTouch = false;
@@ -425,7 +612,7 @@ u16 Touch::GetButtonBits()
     {
         u64 held = SDL_GetTicks() - g_DialogueHoldFinger.start;
 
-        if (held >= 500)
+        if (held >= DIALOGUE_SKIP_HOLD_MS)
         {
             buttons |= TH_BUTTON_SKIP;
         }
@@ -449,13 +636,49 @@ u16 Touch::GetButtonBits()
         g_BombedWithTouch = true;
     }
 
-    if (g_PausePending)
+    if (g_PausePending && IsGameplayPauseGestureAllowed())
     {
         buttons |= TH_BUTTON_MENU;
         Touch::CancelTouches();
     }
+    else if (g_PausePending)
+    {
+        // A finger sequence can straddle a scene transition. Never carry its
+        // pause edge into the difficulty/loadout menu.
+        g_PausePending = false;
+    }
 
     return buttons;
+}
+
+u16 Touch::ApplyDialogueButtonPolicy(u16 buttons)
+{
+    if (!g_Gui.HasCurrentMsgIdx())
+    {
+        g_DialogueAdvancePending = false;
+        g_DialogueReleaseSent = false;
+        return buttons;
+    }
+
+    if (!g_DialogueAdvancePending)
+    {
+        return buttons;
+    }
+
+    // A latched virtual Z or a held controller Shoot button can otherwise hide
+    // the edge generated by a dialogue tap. Record one released frame followed
+    // by one pressed frame so gameplay and Replay observe the same input stream.
+    if (!g_DialogueReleaseSent)
+    {
+        g_DialogueReleaseSent = true;
+        MobileDiagnostics::Log("mobile/dialogue", "forced Z release frame");
+        return buttons & ~TH_BUTTON_SHOOT;
+    }
+
+    g_DialogueAdvancePending = false;
+    g_DialogueReleaseSent = false;
+    MobileDiagnostics::Log("mobile/dialogue", "sent Z press frame");
+    return (buttons & ~TH_BUTTON_SHOOT) | TH_BUTTON_SHOOT;
 }
 
 bool Touch::IsFocus()
@@ -465,6 +688,14 @@ bool Touch::IsFocus()
 
 bool Touch::GetPlayerDelta(f32 *dx, f32 *dy)
 {
+    if (g_ReplayDeltaPending)
+    {
+        *dx = g_ReplayDeltaX;
+        *dy = g_ReplayDeltaY;
+        g_ReplayDeltaPending = false;
+        return true;
+    }
+
     if (!g_MoveFinger.active)
     {
         *dx = 0.0f;
@@ -488,4 +719,34 @@ void Touch::ConsumePlayerDelta(f32 dx, f32 dy)
 {
     g_AccumDx -= dx;
     g_AccumDy -= dy;
+}
+
+void Touch::RecordAppliedPlayerDelta(f32 dx, f32 dy)
+{
+    if (dx == 0.0f && dy == 0.0f) return;
+    g_RecordedDeltaX = dx;
+    g_RecordedDeltaY = dy;
+    g_RecordedDeltaPending = true;
+}
+
+bool Touch::ConsumeRecordedPlayerDelta(f32 *dx, f32 *dy)
+{
+    if (!g_RecordedDeltaPending || !dx || !dy) return false;
+    *dx = g_RecordedDeltaX;
+    *dy = g_RecordedDeltaY;
+    g_RecordedDeltaPending = false;
+    return true;
+}
+
+void Touch::InjectReplayPlayerDelta(f32 dx, f32 dy)
+{
+    g_UsedThisRun = true;
+    g_ReplayDeltaX = dx;
+    g_ReplayDeltaY = dy;
+    g_ReplayDeltaPending = true;
+}
+
+void Touch::MarkReplayUsesTouch()
+{
+    g_UsedThisRun = true;
 }

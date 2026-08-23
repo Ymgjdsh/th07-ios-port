@@ -17,13 +17,17 @@
 #include "GameErrorContext.hpp"
 #include "GameManager.hpp"
 #include "GameWindow.hpp"
+#include "Gui.hpp"
 #include "MainMenu.hpp"
 #include "MidiOutput.hpp"
+#include "MobileDiagnostics.hpp"
+#include "Online.hpp"
 #include "MusicRoom.hpp"
 #include "ResultScreen.hpp"
 #include "Rng.hpp"
 #include "SoundPlayer.hpp"
 #include "TextHelper.hpp"
+#include "Touch.hpp"
 #include "ZunResult.hpp"
 #include "dxutil.hpp"
 #include "graphics/ZunGraphics.hpp"
@@ -35,6 +39,12 @@ u16 g_CurFrameRawInput;
 u16 g_CurFrameGameInput;
 u16 g_LastFrameRawInput;
 u16 g_LastFrameGameInput;
+u16 g_CurFrameRawInputs[2];
+u16 g_CurFrameGameInputs[2];
+u16 g_LastFrameRawInputs[2];
+u16 g_LastFrameGameInputs[2];
+f32 g_CurFrameTouchDx[2];
+f32 g_CurFrameTouchDy[2];
 u16 g_IsEighthFrameOfHeldInput;
 u16 g_NumOfFramesInputsWereHeld;
 Supervisor g_Supervisor;
@@ -50,6 +60,12 @@ void Supervisor::DebugPrint(const char *fmt, ...)
     va_start(args, fmt);
     SDL_LogMessageV(SDL_LOG_CATEGORY_APPLICATION, SDL_LOG_PRIORITY_INFO, fmt, args);
     va_end(args);
+
+    char message[1024];
+    va_start(args, fmt);
+    vsnprintf(message, sizeof(message), fmt, args);
+    va_end(args);
+    MobileDiagnostics::Log("game", "%s", message);
 }
 
 void Supervisor::CheckTiming()
@@ -116,6 +132,19 @@ void AnmManager::ReleaseVertexBuffer()
 
 u32 Supervisor::OnUpdate(Supervisor *arg)
 {
+    Online::Update();
+    const u16 sampledInput = Controller::GetInput();
+    u16 synchronizedP1 = sampledInput;
+    u16 synchronizedP2 = 0;
+    f32 localTouchDx = 0.0f, localTouchDy = 0.0f;
+    f32 p1TouchDx = 0.0f, p1TouchDy = 0.0f, p2TouchDx = 0.0f, p2TouchDy = 0.0f;
+    Touch::GetPlayerDelta(&localTouchDx, &localTouchDy);
+    if (!Online::SynchronizeInputs(sampledInput, localTouchDx, localTouchDy,
+                                   &synchronizedP1, &synchronizedP2,
+                                   &p1TouchDx, &p1TouchDy, &p2TouchDx, &p2TouchDy))
+    {
+        return CHAIN_CALLBACK_RESULT_BREAK;
+    }
     g_AnmManager->SetVertexShader(255);
     g_AnmManager->SetSprite(NULL);
     g_AnmManager->SetTexture(0);
@@ -130,8 +159,27 @@ u32 Supervisor::OnUpdate(Supervisor *arg)
     g_Supervisor.fogEnabled = 255;
     if (!g_GameManager.slowModeSlowActive)
     {
+        g_LastFrameRawInputs[0] = g_CurFrameRawInputs[0];
+        g_LastFrameRawInputs[1] = g_CurFrameRawInputs[1];
+        g_CurFrameRawInputs[0] = synchronizedP1;
+        g_CurFrameRawInputs[1] = synchronizedP2;
+        g_CurFrameTouchDx[0] = p1TouchDx;
+        g_CurFrameTouchDy[0] = p1TouchDy;
+        g_CurFrameTouchDx[1] = p2TouchDx;
+        g_CurFrameTouchDy[1] = p2TouchDy;
+        Touch::SetPlayerDelta(0.0f, 0.0f);
         g_LastFrameRawInput = g_CurFrameRawInput;
-        g_CurFrameRawInput = Controller::GetInput();
+        // The public menu is one state machine, so give it one authoritative
+        // lane: the host configures P1, then the guest configures P2. Both
+        // devices still simulate the exact same resulting menu input.
+        const bool hostOnlyDialogue = Online::IsNetworkSession() && g_Gui.HasCurrentMsgIdx();
+        if (hostOnlyDialogue)
+            g_CurFrameRawInput = synchronizedP1;
+        else if (Online::IsNetworkSession() && arg->curState == 1)
+            g_CurFrameRawInput = Online::IsSelectingPlayer2Loadout()
+                                     ? synchronizedP2 : synchronizedP1;
+        else
+            g_CurFrameRawInput = synchronizedP1 | synchronizedP2;
         g_IsEighthFrameOfHeldInput = 0;
         if (g_LastFrameRawInput == g_CurFrameRawInput)
         {
@@ -155,7 +203,15 @@ u32 Supervisor::OnUpdate(Supervisor *arg)
     }
     else
     {
-        g_CurFrameRawInput |= Controller::GetInput();
+        g_CurFrameRawInputs[0] |= synchronizedP1;
+        g_CurFrameRawInputs[1] |= synchronizedP2;
+        if (Online::IsNetworkSession() && g_Gui.HasCurrentMsgIdx())
+            g_CurFrameRawInput |= synchronizedP1;
+        else if (Online::IsNetworkSession() && arg->curState == 1)
+            g_CurFrameRawInput |= Online::IsSelectingPlayer2Loadout()
+                                      ? synchronizedP2 : synchronizedP1;
+        else
+            g_CurFrameRawInput |= synchronizedP1 | synchronizedP2;
     }
     if (arg->wantedState != arg->curState)
     {
@@ -342,6 +398,12 @@ u32 Supervisor::OnUpdate(Supervisor *arg)
             break;
         }
         g_CurFrameRawInput = g_LastFrameRawInput = g_IsEighthFrameOfHeldInput = 0;
+        memset(g_CurFrameRawInputs, 0, sizeof(g_CurFrameRawInputs));
+        memset(g_LastFrameRawInputs, 0, sizeof(g_LastFrameRawInputs));
+        // Network frame numbers stay monotonic across ordinary scene changes.
+        // Startup barriers own their resets, so delayed packets from an older
+        // scene cannot collide with a reused frame number in the same session.
+        if (!Online::IsNetworkSession()) Online::ResetInputSynchronization();
     }
     arg->wantedState = arg->curState;
     arg->calcCount = arg->calcCount + 1;
@@ -369,15 +431,20 @@ ZunResult Supervisor::SetupInput()
         return ZUN_ERROR;
     }
 
-    if (SDL_Init(SDL_INIT_GAMEPAD))
+    if (SDL_InitSubSystem(SDL_INIT_GAMEPAD))
     {
-        i32 numGamepads;
+        i32 numGamepads = 0;
         SDL_JoystickID *gamepads = SDL_GetGamepads(&numGamepads);
         if (gamepads)
         {
             if (numGamepads > 0)
             {
                 g_Supervisor.controller = SDL_OpenGamepad(gamepads[0]);
+                if (!g_Supervisor.controller)
+                {
+                    MobileDiagnostics::Log("input/gamepad", "initial open failed id=%u error=%s",
+                                           (u32)gamepads[0], SDL_GetError());
+                }
             }
             SDL_free(gamepads);
         }
@@ -385,6 +452,10 @@ ZunResult Supervisor::SetupInput()
         {
             g_GameErrorContext.Log("有効なパッドを発見しました\n");
         }
+    }
+    else
+    {
+        MobileDiagnostics::Log("input/gamepad", "subsystem init failed: %s", SDL_GetError());
     }
 
     return ZUN_SUCCESS;
@@ -573,17 +644,25 @@ ZunResult Supervisor::AddedCallback(Supervisor *arg)
                     sizeof(g_SoundPlayer.bgmArchivePath));
     }
     scoreDat = ResultScreen::OpenScore(FileSystem::GetPrefPath("score.dat").c_str());
+    if (!scoreDat)
+    {
+        Supervisor::DebugPrint("error : supervisor could not create score state\n");
+        return ZUN_ERROR;
+    }
+    Supervisor::DebugPrint("info : supervisor score opened\n");
     memset(&g_GameManager.plst, 0, sizeof(g_GameManager.plst));
     g_GameManager.plst.base.th7kLen2 = g_GameManager.plst.base.th7kLen = sizeof(Plst);
     g_GameManager.plst.base.magic = PLST_MAGIC;
     g_GameManager.plst.base.version = 1;
     ResultScreen::ParsePlst(scoreDat, &g_GameManager.plst);
     ResultScreen::ReleaseScoreDat(scoreDat);
+    Supervisor::DebugPrint("info : supervisor score parsed\n");
     g_Supervisor.midiTimer = new DummyMidiTimer;
     if (g_Supervisor.midiTimer)
     {
         g_Supervisor.midiTimer->StartTimerDefault();
     }
+    Supervisor::DebugPrint("info : supervisor ready\n");
     return ZUN_SUCCESS;
 }
 

@@ -1,5 +1,6 @@
 #include "Gui.hpp"
 
+#include <algorithm>
 #include <cstdio>
 
 #include "AnmIdx.hpp"
@@ -15,6 +16,7 @@
 #include "GameWindow.hpp"
 #include "ItemManager.hpp"
 #include "Player.hpp"
+#include "Online.hpp"
 #include "SoundPlayer.hpp"
 #include "Stage.hpp"
 #include "Supervisor.hpp"
@@ -40,8 +42,10 @@ i32 Gui::IsStageFinished()
            this->impl->stageClearTextVm.isStopped;
 }
 
-void Gui::EndPlayerSpellcard()
+void Gui::EndPlayerSpellcard(u8 ownerId)
 {
+    if (Online::IsNetworkSession() && ownerId != (u8)Online::GetLocalPlayerSlot())
+        return;
     this->impl->bombSpellcardName.pendingInterrupt = 1;
     this->impl->bombSpellcardNameBg.SetInterrupt(2);
 }
@@ -312,14 +316,38 @@ u32 Gui::OnDraw(Gui *arg)
     return CHAIN_CALLBACK_RESULT_CONTINUE;
 }
 
-void Gui::ShowBombNamePortrait(i32 sprite, const char *name)
+void Gui::ShowBombNamePortrait(u8 ownerId, i32 sprite, const char *name)
 {
-    g_AnmManager->SetAnmIdxAndExecuteScript(&this->impl->bombSpellcardPortrait, 1185);
-    g_AnmManager->SetActiveSprite(&this->impl->bombSpellcardPortrait, sprite);
-    g_AnmManager->SetAnmIdxAndExecuteScript(&this->impl->bombSpellcardDecorLeft, 1188);
-    g_AnmManager->SetActiveSprite(&this->impl->bombSpellcardDecorLeft, 1196);
-    g_AnmManager->SetAnmIdxAndExecuteScript(&this->impl->bombSpellcardDecorRight, 1190);
-    g_AnmManager->SetActiveSprite(&this->impl->bombSpellcardDecorRight, 1196);
+    if (Online::IsNetworkSession() && ownerId != (u8)Online::GetLocalPlayerSlot())
+        return;
+    this->bombPortraitOwner = ownerId;
+    // The portrait script lives in the owner's face animation bank.  P2's
+    // bank is loaded at ANM_OFFSET_FACE2, so use the same owner offset as the
+    // BombData sprite index instead of reusing P1's script state.
+    const Player *owner = ownerId < 2 ? &g_Players[ownerId] : nullptr;
+    const i32 portraitScript = GetPlayerAnmScript(owner, 1185);
+    const i32 decorLeftScript = GetPlayerAnmScript(owner, 1188);
+    const i32 decorRightScript = GetPlayerAnmScript(owner, 1190);
+    const i32 decorSprite = GetPlayerAnmScript(owner, 1196);
+    g_AnmManager->SetAnmIdxAndExecuteScript(&this->impl->bombSpellcardPortrait,
+                                            portraitScript);
+    if (g_AnmManager->SetActiveSprite(&this->impl->bombSpellcardPortrait, sprite) !=
+        ZUN_SUCCESS)
+    {
+        // Do not leave a stale portrait visible if a malformed/old resource
+        // package is installed.  The caller can still render the Bomb effect.
+        this->impl->bombSpellcardPortrait.SetInvisible();
+        this->impl->bombSpellcardDecorLeft.SetInvisible();
+        this->impl->bombSpellcardDecorRight.SetInvisible();
+        this->impl->bombSpellcardName.SetInvisible();
+        return;
+    }
+    g_AnmManager->SetAnmIdxAndExecuteScript(&this->impl->bombSpellcardDecorLeft,
+                                            decorLeftScript);
+    g_AnmManager->SetActiveSprite(&this->impl->bombSpellcardDecorLeft, decorSprite);
+    g_AnmManager->SetAnmIdxAndExecuteScript(&this->impl->bombSpellcardDecorRight,
+                                            decorRightScript);
+    g_AnmManager->SetActiveSprite(&this->impl->bombSpellcardDecorRight, decorSprite);
     g_AnmManager->SetAnmIdxAndExecuteScript(&this->impl->bombSpellcardName, 1796);
     AnmManager::DrawVmTextFmt(g_AnmManager, &this->impl->bombSpellcardName, 0xf0f0ff, 0, name);
     this->bombNameBarLength = (f32)(u32)(strlen(name) * 15) / 2.0f + 16.0f;
@@ -420,6 +448,26 @@ ZunResult Gui::ActualAddedCallback()
                 return ZUN_ERROR;
             }
             break;
+        }
+
+        // Netplay has a second player animation bank.  The original menu
+        // only loaded the local player's face file, which left the P2 portrait
+        // scripts/sprites unresolved when a guest used Bomb.  Load the same
+        // character face bank at the P2 offset so owner-specific Bomb
+        // portraits can resolve independently on both devices.
+        if (Online::IsMultiplayerSession())
+        {
+            const i32 player2Character = std::clamp(Online::GetPlayerCharacter(1), 0, 2);
+            const char *player2FacePath = player2Character == CHAR_MARISA
+                                               ? "data/face_mr00.anm"
+                                               : player2Character == CHAR_SAKUYA
+                                                     ? "data/face_sk00.anm"
+                                                     : "data/face_rm00.anm";
+            if (g_AnmManager->LoadAnms(ANM_FILE_FACE2, player2FacePath, ANM_OFFSET_FACE2) !=
+                ZUN_SUCCESS)
+            {
+                return ZUN_ERROR;
+            }
         }
     }
     else
@@ -751,11 +799,24 @@ ZunResult GuiImpl::RunMsg()
     {
         this->msg.timer = (u32)this->msg.curInstr->time;
     }
-    if (g_Player.hasBorder != BORDER_NONE)
+    bool anyPlayerNotDead = false;
+    for (i32 playerId = 0; playerId < 2; ++playerId)
     {
-        g_Player.BreakBorderNaturally();
+        if (!IsPlayerSlotActive((u8)playerId))
+        {
+            continue;
+        }
+        Player &player = g_Players[playerId];
+        if (player.hasBorder != BORDER_NONE)
+        {
+            player.BreakBorderNaturally();
+        }
+        if (player.playerState != PLAYER_STATE_DEAD)
+        {
+            anyPlayerNotDead = true;
+        }
     }
-    if (g_Player.playerState != PLAYER_STATE_DEAD)
+    if (anyPlayerNotDead)
     {
         g_ItemManager.RemoveAllItems();
     }
@@ -1249,8 +1310,16 @@ void Gui::UpdateGui()
             (g_GameManager.currentStage == 6 && !g_GameManager.practice &&
              (!g_GameManager.replay || g_ReplayManager->data->stageReplayData[4])))
         {
-            scoreBonus += (i32)g_GameManager.globals->livesRemaining * 2000000;
-            scoreBonus += (i32)g_GameManager.globals->bombsRemaining * 400000;
+            const i32 playerCount = IsPlayerSlotActive(1) ? 2 : 1;
+            i32 totalLives = 0;
+            i32 totalBombs = 0;
+            for (i32 playerId = 0; playerId < playerCount; ++playerId)
+            {
+                totalLives += GetPlayerLives((u8)playerId);
+                totalBombs += GetPlayerBombs((u8)playerId);
+            }
+            scoreBonus += totalLives * 2000000;
+            scoreBonus += totalBombs * 400000;
         }
         switch (g_GameManager.difficulty)
         {
@@ -1396,19 +1465,35 @@ void Gui::DrawGameScene()
     if (this->lifeDisplayUpdateFrames)
     {
         vm = &this->impl->vms0[9];
-        for (i = 0, x = 496.0f; i < (i32)g_GameManager.globals->livesRemaining; i++, x += 16.0f)
+        for (i = 0, x = 496.0f; i < GetPlayerLives(0); i++, x += 16.0f)
         {
             vm->pos = ZunVec3(x, 96.0f, 0.46f);
             g_AnmManager->DrawNoRotation(vm);
+        }
+        if (IsPlayerSlotActive(1))
+        {
+            for (i = 0, x = 496.0f; i < GetPlayerLives(1); i++, x += 16.0f)
+            {
+                vm->pos = ZunVec3(x, 128.0f, 0.46f);
+                g_AnmManager->DrawNoRotation(vm);
+            }
         }
     }
     if (this->bombDisplayUpdateFrames)
     {
         vm = &this->impl->vms0[10];
-        for (i = 0, x = 496.0f; i < (i32)g_GameManager.globals->bombsRemaining; i++, x += 16.0f)
+        for (i = 0, x = 496.0f; i < GetPlayerBombs(0); i++, x += 16.0f)
         {
             vm->pos = ZunVec3(x, 112.0f, 0.46f);
             g_AnmManager->DrawNoRotation(vm);
+        }
+        if (IsPlayerSlotActive(1))
+        {
+            for (i = 0, x = 496.0f; i < GetPlayerBombs(1); i++, x += 16.0f)
+            {
+                vm->pos = ZunVec3(x, 144.0f, 0.46f);
+                g_AnmManager->DrawNoRotation(vm);
+            }
         }
     }
     vm = &this->impl->vms0[13];
@@ -1473,6 +1558,25 @@ void Gui::DrawGameScene()
         AsciiManager::AddFormatText(&g_AsciiManager, &textDrawPos, "%d/%d",
                                     g_GameManager.globals->pointItemsCollectedForExtend,
                                     g_GameManager.globals->nextNeededPointItemsForExtend);
+    }
+    if (IsPlayerSlotActive(1))
+    {
+        static const char *characterNames[3] = {"REIMU", "MARISA", "SAKUYA"};
+        const i32 character = std::clamp(GetPlayerCharacter(&g_Player2), 0, 2);
+        const char shot = GetPlayerShot(&g_Player2) == 0 ? 'A' : 'B';
+        const u32 previousColor = g_AsciiManager.color;
+        g_AsciiManager.color = 0xffffc0e0;
+        textDrawPos = ZunVec3(496.0f, 208.0f, 0.0f);
+        AsciiManager::AddFormatText(&g_AsciiManager, &textDrawPos, "2P %s-%c",
+                                    characterNames[character], shot);
+        g_AsciiManager.color = 0xffffffff;
+        textDrawPos = ZunVec3(496.0f, 224.0f, 0.0f);
+        AsciiManager::AddFormatText(&g_AsciiManager, &textDrawPos, "LIFE %d  BOMB %d",
+                                    GetPlayerLives(1), GetPlayerBombs(1));
+        textDrawPos = ZunVec3(496.0f, 240.0f, 0.0f);
+        AsciiManager::AddFormatText(&g_AsciiManager, &textDrawPos, "POWER %d/128",
+                                    GetPlayerPower(1));
+        g_AsciiManager.color = previousColor;
     }
     g_AnmManager->Flush();
     if (this->powerDisplayUpdateFrames != 0 || g_Supervisor.cfg.disableItemDrawAroundPlayfield)
@@ -1546,7 +1650,9 @@ void Gui::DrawStageElements()
     {
         g_AnmManager->DrawInterp(&this->impl->vms1[i]);
     }
-    if (this->impl->bombSpellcardPortrait.visible)
+    const bool drawBombPortrait = this->impl->bombSpellcardPortrait.visible &&
+        (!Online::IsNetworkSession() || this->bombPortraitOwner == (u8)Online::GetLocalPlayerSlot());
+    if (drawBombPortrait)
     {
         g_AnmManager->DrawInterpNoRotation(&this->impl->bombSpellcardPortrait);
         g_AnmManager->DrawInterpNoRotation(&this->impl->bombSpellcardDecorLeft);
@@ -1564,7 +1670,7 @@ void Gui::DrawStageElements()
         g_AnmManager->DrawInterpNoRotation(&this->impl->enemySpellcardRelated1);
         g_AnmManager->DrawInterp(&this->impl->enemySpellcardRelated2);
     }
-    if (this->impl->bombSpellcardName.visible)
+    if (drawBombPortrait && this->impl->bombSpellcardName.visible)
     {
         this->impl->bombSpellcardNameBg.pos = this->impl->bombSpellcardName.pos;
         g_AnmManager->DrawInterpNoRotation(&this->impl->bombSpellcardNameBg);
@@ -1763,6 +1869,7 @@ ZunResult Gui::DeletedCallback(Gui *arg)
         g_AnmManager->ReleaseAnm(21);
         g_AnmManager->ReleaseAnm(23);
         g_AnmManager->ReleaseAnm(25);
+        g_AnmManager->ReleaseAnm(48);
         g_AnmManager->ReleaseAnm(26);
         g_AnmManager->ReleaseAnm(27);
         g_AnmManager->ReleaseAnm(22);

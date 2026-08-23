@@ -11,6 +11,9 @@
 #include "GameManager.hpp"
 #include "GameWindow.hpp"
 #include "Gui.hpp"
+#include "MobileDiagnostics.hpp"
+#include "MobileUi.hpp"
+#include "Online.hpp"
 #include "Player.hpp"
 #include "SoundPlayer.hpp"
 #include "Supervisor.hpp"
@@ -55,6 +58,12 @@ void IncrementCapped(u32 *param, u32 cap)
     }
 }
 
+static void ApplySharedShellCommit(PauseMenu &pauseMenu, RetryMenu &retryMenu,
+                                   Online::SharedShellCommit commit);
+static void SynchronizeSharedPausePage(PauseMenu &pauseMenu);
+static void UpdateSharedShellVisuals(PauseMenu &pauseMenu, RetryMenu &retryMenu);
+static bool g_SharedRetryTitlePending = false;
+
 u32 AsciiManager::OnUpdate(AsciiManager *arg)
 {
     i32 i;
@@ -83,11 +92,74 @@ u32 AsciiManager::OnUpdate(AsciiManager *arg)
     }
     else if (g_GameManager.isInPauseMenu)
     {
-        arg->pauseMenu.OnUpdate();
+        if (Online::IsSharedShellActive(Online::SHARED_SHELL_PAUSE))
+        {
+            f32 gameX = 0.0f;
+            f32 gameY = 0.0f;
+            const MobileUi::OverlayTouchAction touchAction =
+                MobileUi::ConsumeOverlayTouch(gameX, gameY);
+            // Run the native menu state machine once before applying the
+            // synchronized selection.  A freshly opened shared shell starts
+            // in state 0; jumping straight to state 1/2 skips sprite setup and
+            // leaves every option invisible on both devices.
+            g_LastFrameRawInput = g_CurFrameRawInput = 0;
+            arg->pauseMenu.OnUpdate(true);
+            if (touchAction != MobileUi::OVERLAY_TOUCH_NONE)
+                arg->pauseMenu.HandleMobileTouch(touchAction, gameX, gameY);
+            Online::SharedShellCommit commit = Online::SHARED_COMMIT_NONE;
+            if (Online::ConsumeSharedShellCommit(&commit))
+                ApplySharedShellCommit(arg->pauseMenu, arg->retryMenu, commit);
+            SynchronizeSharedPausePage(arg->pauseMenu);
+            UpdateSharedShellVisuals(arg->pauseMenu, arg->retryMenu);
+        }
+        else
+        {
+            f32 gameX = 0.0f;
+            f32 gameY = 0.0f;
+            const MobileUi::OverlayTouchAction action =
+                MobileUi::ConsumeOverlayTouch(gameX, gameY);
+            if (action != MobileUi::OVERLAY_TOUCH_NONE)
+                arg->pauseMenu.HandleMobileTouch(action, gameX, gameY);
+            arg->pauseMenu.OnUpdate();
+        }
     }
     if (g_GameManager.isInRetryMenu)
     {
-        arg->retryMenu.OnUpdate();
+        if (Online::IsSharedShellActive(Online::SHARED_SHELL_RETRY))
+        {
+            f32 gameX = 0.0f;
+            f32 gameY = 0.0f;
+            const MobileUi::OverlayTouchAction touchAction =
+                MobileUi::ConsumeOverlayTouch(gameX, gameY);
+            // See the pause shell above: state 0 performs the VM/sprite
+            // initialization and must run before the synchronized cursor is
+            // projected into the visual state.
+            g_LastFrameRawInput = g_CurFrameRawInput = 0;
+            arg->retryMenu.OnUpdate(true);
+            if (touchAction != MobileUi::OVERLAY_TOUCH_NONE)
+                arg->retryMenu.HandleMobileTouch(touchAction, gameX, gameY);
+            Online::SharedShellCommit commit = Online::SHARED_COMMIT_NONE;
+            if (Online::ConsumeSharedShellCommit(&commit))
+                ApplySharedShellCommit(arg->pauseMenu, arg->retryMenu, commit);
+            UpdateSharedShellVisuals(arg->pauseMenu, arg->retryMenu);
+        }
+        else
+        {
+            f32 gameX = 0.0f;
+            f32 gameY = 0.0f;
+            const MobileUi::OverlayTouchAction action =
+                MobileUi::ConsumeOverlayTouch(gameX, gameY);
+            if (action != MobileUi::OVERLAY_TOUCH_NONE)
+                arg->retryMenu.HandleMobileTouch(action, gameX, gameY);
+            arg->retryMenu.OnUpdate();
+        }
+    }
+    if (g_SharedRetryTitlePending && !g_GameManager.isInRetryMenu)
+    {
+        g_SharedRetryTitlePending = false;
+        g_Supervisor.curState = 1;
+        g_Supervisor.currentTime = SDL_GetTicks();
+        MobileDiagnostics::Log("online/shell", "shared retry title transition");
     }
     arg->UpdateScripts();
     if (g_GameManager.demo)
@@ -105,12 +177,363 @@ u32 AsciiManager::OnUpdate(AsciiManager *arg)
     return CHAIN_CALLBACK_RESULT_CONTINUE;
 }
 
+static void ApplySharedShellCommit(PauseMenu &pauseMenu, RetryMenu &retryMenu,
+                                   Online::SharedShellCommit commit)
+{
+    g_LastFrameRawInput = g_CurFrameRawInput = 0;
+    g_SharedRetryTitlePending = false;
+    if (commit == Online::SHARED_COMMIT_RESUME)
+    {
+        for (i32 i = 0; i < 4; ++i)
+            pauseMenu.menuSprites[i].pendingInterrupt = 2;
+        pauseMenu.menuBackground.pendingInterrupt = 1;
+        pauseMenu.curState = 4;
+        pauseMenu.numFrames = 0;
+        pauseMenu.OnUpdate(false);
+    }
+    else if (commit == Online::SHARED_COMMIT_RESET)
+    {
+        for (i32 i = 0; i < 4; ++i)
+            pauseMenu.menuSprites[i].pendingInterrupt = 2;
+        pauseMenu.menuBackground.pendingInterrupt = 1;
+        pauseMenu.curState = 10;
+        pauseMenu.numFrames = 0;
+        pauseMenu.OnUpdate(false);
+    }
+    else if (commit == Online::SHARED_COMMIT_TITLE)
+    {
+        if (g_GameManager.isInPauseMenu)
+        {
+            for (i32 i = 0; i < 4; ++i)
+                pauseMenu.menuSprites[i].pendingInterrupt = 2;
+            pauseMenu.menuBackground.pendingInterrupt = 1;
+            pauseMenu.curState = 9;
+            pauseMenu.numFrames = 0;
+            pauseMenu.OnUpdate(false);
+        }
+        else
+        {
+            for (i32 i = 0; i < 5; ++i)
+                retryMenu.menuSprites[i].pendingInterrupt = 2;
+            retryMenu.menuBackground.pendingInterrupt = 1;
+            retryMenu.curState = 4;
+            retryMenu.numFrames = 0;
+            retryMenu.OnUpdate(false);
+            g_SharedRetryTitlePending = true;
+        }
+    }
+    else if (commit == Online::SHARED_COMMIT_RETRY)
+    {
+        for (i32 i = 0; i < 5; ++i)
+            retryMenu.menuSprites[i].pendingInterrupt = 2;
+        retryMenu.menuBackground.pendingInterrupt = 1;
+        retryMenu.curState = 3;
+        retryMenu.numFrames = 0;
+        retryMenu.OnUpdate(false);
+        // The stock retry animation resets only TH07's single P1 resource
+        // block.  Netplay keeps P2 in a registered chain, so restore both
+        // player objects now while the shared menu is covering the playfield.
+        // This makes the first post-menu frame identical on host and guest.
+        for (u8 playerId = 0; playerId < 2; ++playerId)
+        {
+            ResetPlayerForSharedRetry(playerId);
+            ResetMultiplayerPlayerResources(playerId);
+        }
+        g_Gui.lifeDisplayUpdateFrames = 2;
+        g_Gui.bombDisplayUpdateFrames = 2;
+        g_Gui.powerDisplayUpdateFrames = 2;
+    }
+}
+
+static void SynchronizeSharedPausePage(PauseMenu &pauseMenu)
+{
+    if (Online::GetSharedShellKind() != Online::SHARED_SHELL_PAUSE)
+        return;
+
+    const Online::SharedShellConfirmAction action = Online::GetSharedShellConfirmAction();
+    if (action != Online::SHARED_CONFIRM_NONE &&
+        pauseMenu.curState >= 1 && pauseMenu.curState <= 3)
+    {
+        for (i32 i = 0; i < 4; ++i)
+            pauseMenu.menuSprites[i].pendingInterrupt = 2;
+        for (i32 i = 4; i < 7; ++i)
+            pauseMenu.menuSprites[i].pendingInterrupt = 1;
+        // Native states 5/7 are the affirmative cursor for the title/reset
+        // confirmation pages; states 6/8 are the negative cursor.
+        pauseMenu.curState = action == Online::SHARED_CONFIRM_TITLE ? 5 : 7;
+        pauseMenu.numFrames = 0;
+    }
+    else if (action == Online::SHARED_CONFIRM_NONE &&
+             pauseMenu.curState >= 5 && pauseMenu.curState <= 8)
+    {
+        for (i32 i = 0; i < 4; ++i)
+            pauseMenu.menuSprites[i].pendingInterrupt = 1;
+        for (i32 i = 4; i < 7; ++i)
+            pauseMenu.menuSprites[i].pendingInterrupt = 2;
+        const u8 primary = std::clamp(Online::GetSharedShellSelection(0), (u8)1, (u8)2);
+        pauseMenu.curState = primary + 1;
+        pauseMenu.numFrames = 0;
+    }
+}
+
+static void UpdateSharedShellVisuals(PauseMenu &pauseMenu, RetryMenu &retryMenu)
+{
+    const Online::SharedShellKind kind = Online::GetSharedShellKind();
+    if (kind == Online::SHARED_SHELL_PAUSE)
+    {
+        const bool confirming = Online::GetSharedShellConfirmAction() !=
+                                Online::SHARED_CONFIRM_NONE;
+        const u8 maxSelection = confirming ? 1 : 2;
+        const u8 p1Selection = std::clamp(Online::GetSharedShellSelection(0),
+                                          (u8)0, maxSelection);
+        const u8 p2Selection = std::clamp(Online::GetSharedShellSelection(1),
+                                          (u8)0, maxSelection);
+        AnmVm *items = confirming ? pauseMenu.menuSprites + 5
+                                  : pauseMenu.menuSprites + 1;
+        for (u8 option = 0; option <= maxSelection; ++option)
+        {
+            AnmVm &vm = items[option];
+            const bool selected = p1Selection == option || p2Selection == option;
+            vm.color.color = selected ? 0xffffffffu : 0x80303030u;
+            vm.prevColor = vm.color;
+            vm.offset = selected ? ZunVec3(-4.0f, -4.0f, 0.0f)
+                                 : ZunVec3(0.0f, 0.0f, 0.0f);
+        }
+    }
+    else if (kind == Online::SHARED_SHELL_RETRY)
+    {
+        const u8 p1Selection = std::clamp(Online::GetSharedShellSelection(0), (u8)0, (u8)1);
+        const u8 p2Selection = std::clamp(Online::GetSharedShellSelection(1), (u8)0, (u8)1);
+        for (u8 option = 0; option < 2; ++option)
+        {
+            AnmVm &vm = retryMenu.menuSprites[option + 2];
+            const bool selected = p1Selection == option || p2Selection == option;
+            vm.color.color = selected ? 0xffff8080u : 0x80808080u;
+            vm.prevColor = vm.color;
+            vm.offset = selected ? ZunVec3(-4.0f, -4.0f, 0.0f)
+                                 : ZunVec3(0.0f, 0.0f, 0.0f);
+        }
+    }
+}
+
+static void DrawSharedShellMarkerText(AsciiManager &manager, const char *text,
+                                      const ZunVec3 &position, u32 color)
+{
+    if (!text || !text[0]) return;
+    AnmVm vm = manager.vm0;
+    vm.visible = 1;
+    vm.active = 1;
+    vm.anchor = 3;
+    vm.zWriteDisable = 1;
+    vm.blendMode = 0;
+    vm.scale.x = 0.65f;
+    vm.scale.y = 0.65f;
+    vm.prevScale = vm.scale;
+    vm.pos = position;
+    vm.prevPos = position;
+    vm.offset = ZunVec3(0.0f, 0.0f, 0.0f);
+    vm.useColor2 = 0;
+    vm.prevUseColor2 = 0;
+    for (const unsigned char *cursor = (const unsigned char *)text; *cursor; ++cursor)
+    {
+        if (*cursor < 1) continue;
+        vm.sprite = &g_AnmManager->sprites[*cursor - 1];
+        vm.color.color = color;
+        vm.prevColor = vm.color;
+        g_AnmManager->DrawNoRotation(&vm);
+        vm.pos.x += 14.0f * vm.scale.x;
+    }
+}
+
+static void DrawSharedShellMarkers(AsciiManager &manager)
+{
+    const Online::SharedShellKind kind = Online::GetSharedShellKind();
+    if (kind == Online::SHARED_SHELL_NONE ||
+        (!g_GameManager.isInPauseMenu && !g_GameManager.isInRetryMenu))
+        return;
+    const bool retry = kind == Online::SHARED_SHELL_RETRY;
+    const bool confirmingPause = kind == Online::SHARED_SHELL_PAUSE &&
+        Online::GetSharedShellConfirmAction() != Online::SHARED_CONFIRM_NONE;
+    const i32 count = retry || confirmingPause ? 2 : 3;
+    const AnmVm *items = retry ? manager.retryMenu.menuSprites + 2
+        : (confirmingPause ? manager.pauseMenu.menuSprites + 5
+                           : manager.pauseMenu.menuSprites + 1);
+    for (i32 option = 0; option < count; ++option)
+    {
+        const bool p1 = Online::GetSharedShellVote(0) != 0 &&
+                        Online::GetSharedShellSelection(0) == (u8)option;
+        const bool p2 = Online::GetSharedShellVote(1) != 0 &&
+                        Online::GetSharedShellSelection(1) == (u8)option;
+        if (!p1 && !p2) continue;
+
+        char label[8] = {};
+        if (p1 && p2)
+            SDL_strlcpy(label, "P1 P2", sizeof(label));
+        else if (p1)
+            SDL_strlcpy(label, "P1", sizeof(label));
+        else
+            SDL_strlcpy(label, "P2", sizeof(label));
+
+        const AnmVm &item = items[option];
+        const f32 scale = std::max(0.5f, std::abs(item.scale.x));
+        const f32 width = item.sprite ? item.sprite->widthPx * scale : 64.0f;
+        const ZunVec3 position(item.pos.x + item.offset.x + width * 0.5f + 12.0f,
+                               item.pos.y + item.offset.y - 6.0f, 0.02f);
+        DrawSharedShellMarkerText(manager, label, position,
+                                  p1 && p2 ? 0xffd8f0ffu : (p1 ? 0xffb8d8ffu : 0xffb8ffd0u));
+    }
+}
+
+static bool MobileMenuVmContainsPoint(const AnmVm &vm, f32 x, f32 y)
+{
+    if (!vm.active || !vm.visible || !vm.sprite) return false;
+    const f32 scaleX = std::max(0.001f, std::abs(vm.scale.x));
+    const f32 scaleY = std::max(0.001f, std::abs(vm.scale.y));
+    const f32 halfW = std::max(36.0f, vm.sprite->widthPx * scaleX * 0.5f);
+    const f32 halfH = std::max(14.0f, vm.sprite->heightPx * scaleY * 0.5f);
+    const f32 posX = vm.pos.x + vm.offset.x;
+    const f32 posY = vm.pos.y + vm.offset.y;
+    f32 left = posX - halfW;
+    f32 right = posX + halfW;
+    f32 top = posY - halfH;
+    f32 bottom = posY + halfH;
+    if (vm.anchor & 1)
+    {
+        left = posX;
+        right = posX + halfW * 2.0f;
+    }
+    if (vm.anchor & 2)
+    {
+        top = posY;
+        bottom = posY + halfH * 2.0f;
+    }
+    return x >= left - 18.0f && x <= right + 18.0f &&
+           y >= top - 10.0f && y <= bottom + 10.0f;
+}
+
+static i32 MobileHitMenuVms(AnmVm *items, i32 count, f32 x, f32 y)
+{
+    for (i32 i = 0; i < count; ++i)
+    {
+        if (MobileMenuVmContainsPoint(items[i], x, y)) return i;
+    }
+    return -1;
+}
+
+static void InjectMobileMenuButton(u16 button)
+{
+    if (Online::IsNetworkSession())
+    {
+        Online::QueueSharedShellButton(button);
+        return;
+    }
+    g_LastFrameRawInput &= ~button;
+    g_CurFrameRawInput |= button;
+}
+
+void PauseMenu::HandleMobileTouch(MobileUi::OverlayTouchAction action, f32 gameX, f32 gameY)
+{
+    if (action == MobileUi::OVERLAY_TOUCH_BACK)
+    {
+        if (Online::IsNetworkSession())
+        {
+            Online::QueueSharedShellButton(TH_BUTTON_MENU);
+            MobileDiagnostics::Log("mobile/pause", "two-finger withdraw shared vote");
+            return;
+        }
+        if (this->curState >= 5 && this->curState <= 8)
+        {
+            this->curState = this->curState <= 6 ? 6 : 8;
+            this->numFrames = std::max(this->numFrames, 4);
+            InjectMobileMenuButton(TH_BUTTON_SELECTMENU);
+            MobileDiagnostics::Log("mobile/pause", "two-finger cancel-confirm state=%d",
+                                   this->curState);
+        }
+        else if (this->curState >= 1 && this->curState <= 3)
+        {
+            InjectMobileMenuButton(TH_BUTTON_MENU);
+            MobileDiagnostics::Log("mobile/pause", "two-finger resume state=%d",
+                                   this->curState);
+        }
+        return;
+    }
+    if (action != MobileUi::OVERLAY_TOUCH_TAP) return;
+
+    i32 hit = -1;
+    if (this->curState >= 1 && this->curState <= 3)
+    {
+        hit = MobileHitMenuVms(&this->menuSprites[1], 3, gameX, gameY);
+        if (hit >= 0)
+        {
+            if (Online::IsNetworkSession())
+                Online::QueueSharedShellSelection((u8)hit);
+            else
+                this->curState = hit + 1;
+            InjectMobileMenuButton(TH_BUTTON_SELECTMENU);
+        }
+    }
+    else if (this->curState == 5 || this->curState == 6 ||
+             this->curState == 7 || this->curState == 8)
+    {
+        hit = MobileHitMenuVms(&this->menuSprites[5], 2, gameX, gameY);
+        if (hit >= 0)
+        {
+            const i32 base = this->curState <= 6 ? 5 : 7;
+            if (!Online::IsNetworkSession()) this->curState = base + hit;
+            InjectMobileMenuButton(TH_BUTTON_SELECTMENU);
+        }
+    }
+    MobileDiagnostics::Log("mobile/pause", "tap state=%d hit=%d at=(%.1f,%.1f)",
+                           this->curState, hit, gameX, gameY);
+}
+
+void RetryMenu::HandleMobileTouch(MobileUi::OverlayTouchAction action, f32 gameX, f32 gameY)
+{
+    i32 hit = -1;
+    if (action == MobileUi::OVERLAY_TOUCH_BACK)
+    {
+        // Retry has no native cancel button; choose the safe "No" branch.
+        if (Online::IsNetworkSession())
+        {
+            // Shared retry uses the primary list as the vote surface. A back
+            // gesture only withdraws this player's vote; it must not mutate
+            // the native animation state on one device.
+            Online::QueueSharedShellButton(TH_BUTTON_MENU);
+        }
+        else
+        {
+            this->curState = 2;
+            this->numFrames = std::max(this->numFrames, 30);
+            InjectMobileMenuButton(TH_BUTTON_SELECTMENU);
+        }
+        MobileDiagnostics::Log("mobile/retry", "two-finger choose-no");
+        return;
+    }
+    if (action == MobileUi::OVERLAY_TOUCH_TAP &&
+        (this->curState == 1 || this->curState == 2))
+    {
+        hit = MobileHitMenuVms(&this->menuSprites[2], 2, gameX, gameY);
+        if (hit >= 0)
+        {
+            if (Online::IsNetworkSession())
+                Online::QueueSharedShellSelection((u8)hit);
+            else
+                this->curState = hit + 1;
+            if (this->curState == 2) this->numFrames = std::max(this->numFrames, 30);
+            InjectMobileMenuButton(TH_BUTTON_SELECTMENU);
+        }
+    }
+    MobileDiagnostics::Log("mobile/retry", "tap state=%d hit=%d at=(%.1f,%.1f)",
+                           this->curState, hit, gameX, gameY);
+}
+
 u32 AsciiManager::OnDrawMenus(AsciiManager *arg)
 {
     arg->DrawStrings();
     arg->numStrings = 0;
     arg->pauseMenu.OnDraw();
     arg->retryMenu.OnDraw();
+    DrawSharedShellMarkers(*arg);
     if (arg->vm.anmFileIdx != 0)
     {
         g_AnmManager->DrawNoRotation(&arg->vm);
@@ -351,8 +774,9 @@ void AsciiManager::DrawStrings()
     g_Supervisor.viewport.width = 640;
     g_Supervisor.viewport.height = 480;
     g_Supervisor.gfxDevice->SetViewport(g_Supervisor.viewport);
-    f32 interpPlayerX =
-        utils::Lerp(g_Player.prevPositionCenter.x, g_Player.positionCenter.x, g_RenderAlpha);
+    Player *markerPlayer = GetPrimaryActivePlayer();
+    f32 interpPlayerX = utils::Lerp(markerPlayer->prevPositionCenter.x,
+                                    markerPlayer->positionCenter.x, g_RenderAlpha);
     for (i = 0; i < 4; i++)
     {
         Enemy *boss = g_EnemyManager.bosses[i];
@@ -474,13 +898,13 @@ void AsciiManager::CreatePopup2(ZunVec3 *pos, i32 value, u32 color)
     this->nextPopupIndex2++;
 }
 
-i32 PauseMenu::OnUpdate()
+i32 PauseMenu::OnUpdate(bool suppressInput)
 {
     u32 i;
 
     this->UpdatePrev();
 
-    if (WAS_PRESSED_RAW(TH_BUTTON_MENU) && this->curState != 4)
+    if (!suppressInput && WAS_PRESSED_RAW(TH_BUTTON_MENU) && this->curState != 4)
     {
         g_SoundPlayer.PlaySoundByIdx(SOUND_SELECT, 0);
         this->curState = 4;
@@ -494,7 +918,7 @@ i32 PauseMenu::OnUpdate()
         this->numFrames = 0;
         this->menuBackground.pendingInterrupt = 1;
     }
-    if (WAS_PRESSED_RAW(TH_BUTTON_Q) && this->curState != 9)
+    if (!suppressInput && WAS_PRESSED_RAW(TH_BUTTON_Q) && this->curState != 9)
     {
         g_SoundPlayer.PlaySoundByIdx(SOUND_SELECT, 0);
         this->curState = 9;
@@ -507,7 +931,7 @@ i32 PauseMenu::OnUpdate()
         }
         this->numFrames = 0;
     }
-    if (!g_GameManager.replay && WAS_PRESSED_RAW(TH_BUTTON_RESET) && this->curState != 9)
+    if (!suppressInput && !g_GameManager.replay && WAS_PRESSED_RAW(TH_BUTTON_RESET) && this->curState != 9)
     {
         g_SoundPlayer.PlaySoundByIdx(SOUND_SELECT, 0);
         this->curState = 10;
@@ -849,28 +1273,34 @@ void PauseMenu::OnDraw()
     }
 }
 
-i32 RetryMenu::OnUpdate()
+i32 RetryMenu::OnUpdate(bool suppressInput)
 {
     i32 i;
+    const bool sharedShell =
+        Online::IsSharedShellActive(Online::SHARED_SHELL_RETRY);
 
     this->UpdatePrev();
 
-    if (g_GameManager.practice)
+    // In a network game the host owns the retry/title decision.  Local
+    // practice/replay/maximum-retry shortcuts would otherwise close the
+    // shared menu before its two options have been drawn or voted on.
+    if (!sharedShell && g_GameManager.practice)
     {
         g_GameManager.isInRetryMenu = 0;
         g_GameManager.globals->guiScore = g_GameManager.globals->score;
         g_Supervisor.curState = 6;
         return 1;
     }
-    if (g_GameManager.replay)
+    if (!sharedShell && g_GameManager.replay)
     {
         g_GameManager.isInRetryMenu = 0;
         g_Supervisor.curState = 7;
         g_GameManager.globals->guiScore = g_GameManager.globals->score;
         return 1;
     }
-    if ((i32)(u32)g_GameManager.globals->numRetries >= g_GameManager.maxRetries ||
-        g_GameManager.difficulty >= 4)
+    if (!sharedShell &&
+        ((i32)(u32)g_GameManager.globals->numRetries >= g_GameManager.maxRetries ||
+         g_GameManager.difficulty >= 4))
     {
         g_GameManager.isInRetryMenu = 0;
         g_Supervisor.curState = 6;
@@ -1005,6 +1435,15 @@ i32 RetryMenu::OnUpdate()
             g_GameManager.globals->pointItemsCollectedForExtend = 0;
             g_GameManager.globals->currentPower = 0.0f;
             g_GameManager.RegenerateGameIntegrityCsum();
+            // The stock retry branch only restores the global P1 counters.
+            // Netplay keeps P2 in a separate resource/state lane, so restore
+            // both registered players at the same shared commit frame.
+            ResetPlayerForSharedRetry(0);
+            if (Online::IsMultiplayerSession())
+            {
+                ResetPlayerForSharedRetry(1);
+                ResetMultiplayerPlayerResources(1);
+            }
             g_GameManager.globals->extendsFromPointItems = 0;
             g_GameManager.globals->nextNeededPointItemsForExtend = 50;
             g_GameManager.cherry = g_GameManager.globals->cherryStart;
@@ -1110,8 +1549,9 @@ void AsciiManager::DrawPopups()
         this->vm1.color.color = popup->color;
         this->vm1.prevColor = this->vm1.color;
 
-        dx = g_Player.positionCenter.x - popup->pos.x;
-        dy = g_Player.positionCenter.y - popup->pos.y;
+        Player *popupPlayer = GetClosestActivePlayer(&popup->pos);
+        dx = popupPlayer->positionCenter.x - popup->pos.x;
+        dy = popupPlayer->positionCenter.y - popup->pos.y;
         alpha = (i32)(dx * dx + dy * dy);
 
         if (alpha > 4096)
@@ -1260,7 +1700,8 @@ void AsciiManager::DrawPopups()
 
         cherry = g_GameManager.cherryPlus - g_GameManager.globals->cherryStart;
 
-        if (g_Player.hasBorder)
+        Player *borderPlayer = GetPrimaryActivePlayer();
+        if (borderPlayer->hasBorder)
         {
             this->cherryDigit.color.bytes.r = 255;
             divisor = cherry % 4000;
@@ -1306,7 +1747,7 @@ void AsciiManager::DrawPopups()
         this->cherryDigit.scale.y = 1.0f;
         this->cherryDigit.prevScale = this->cherryDigit.scale;
 
-        if (g_Player.hasBorder == BORDER_ACTIVE)
+        if (borderPlayer->hasBorder == BORDER_ACTIVE)
         {
             this->cherryBorderActive.pos = this->cherryGauge.pos;
             this->cherryBorderActive.pos.x += 24.0f;

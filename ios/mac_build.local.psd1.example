@@ -1,0 +1,4 @@
+@{
+    MacHost = "YOUR_MAC_IP"
+    MacUser = "YOUR_MAC_USERNAME"
+}

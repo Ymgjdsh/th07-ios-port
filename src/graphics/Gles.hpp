@@ -45,6 +45,20 @@ struct CachedState
     GLuint currentVao = 0xFFFFFFFF;
 };
 
+struct GlesFrameStats
+{
+    u32 drawCalls = 0;
+    u32 bufferUploads = 0;
+    u64 bufferUploadBytes = 0;
+    u32 textureBinds = 0;
+    u32 blendChanges = 0;
+    u32 viewportChanges = 0;
+    u32 depthChanges = 0;
+    u32 redundantStateCalls = 0;
+    i32 drawableWidth = 0;
+    i32 drawableHeight = 0;
+};
+
 class GlesGraphics : public ZunGraphics
 {
   public:
@@ -103,6 +117,11 @@ class GlesGraphics : public ZunGraphics
 
     void SwapBuffers() override;
 
+    const GlesFrameStats &GetFrameStats() const
+    {
+        return frameStats;
+    }
+
   private:
     SDL_GLContext ctx;
     u32 shaderProgram;
@@ -129,7 +148,7 @@ class GlesGraphics : public ZunGraphics
     GLuint unitQuadVbo = 0;
 
     ZunMatrix transforms[4];
-    ZunViewport viewport;
+    ZunViewport viewport = {};
     bool fogEnabled = false;
     f32 fogNear = 0.0f;
     f32 fogFar = 1.0f;
@@ -139,6 +158,13 @@ class GlesGraphics : public ZunGraphics
     bool depthTestEnabled = false;
     bool alphaTestEnabled = false;
     bool depthMaskEnabled = true;
+    DepthFunc depthFunc = (DepthFunc)-1;
+    GLenum blendSrc = 0xFFFFFFFFu;
+    GLenum blendDst = 0xFFFFFFFFu;
+    GLuint boundTexture = 0xFFFFFFFFu;
+    f32 clearDepth = -1.0f;
+    GlesFrameStats frameStats;
+    bool telemetryEnabled = false;
 
     GLint u_Model, u_View, u_Proj, u_TextureMatrix;
     GLint u_ScreenSpace, u_Viewport;
@@ -147,6 +173,7 @@ class GlesGraphics : public ZunGraphics
     GLint u_AlphaTest, u_AlphaRef;
     GLint u_FogEnabled, u_FogColor, u_FogNear, u_FogFar;
     GLint u_BlitTexture = -1;
+    GLint u_BlitSrcRect = -1;
 
     CachedState stateCache;
 

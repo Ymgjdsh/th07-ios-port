@@ -28,7 +28,10 @@ struct Effect
     u8 isFadingOut;
     i8 fadeOutTime;
     i8 is2D;
-    // pad 3
+    // Player slot used by effects that follow a player (for example the
+    // focus-mode center marker). -1 keeps the legacy primary-player behavior.
+    i8 attachedPlayerId;
+    // alignment padding
     Effect *next;
 };
 
@@ -79,6 +82,8 @@ struct EffectManager
 
     Effect *SpawnParticles(i32 effectId, ZunVec3 *pos, i32 numParticles, u32 color);
     Effect *SpawnEffect(i32 effectId, ZunVec3 *pos, i32 param_3, i32 param_4, u32 color);
+    Effect *SpawnEffectForPlayer(i32 effectId, ZunVec3 *pos, u8 playerId, i32 param_3,
+                                 i32 param_4, u32 color);
     Effect *SpawnMovingParticles(i32 effectId, ZunVec3 *pos, ZunVec3 *velocity, i32 numParticles,
                                  u32 color);
     i32 UpdateSpecialEffect();

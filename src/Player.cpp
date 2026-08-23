@@ -1,5 +1,8 @@
 #include "Player.hpp"
 
+#include <algorithm>
+#include <cmath>
+
 #include "AnmIdx.hpp"
 #include "AnmManager.hpp"
 #include "AsciiManager.hpp"
@@ -12,6 +15,9 @@
 #include "GameManager.hpp"
 #include "GameWindow.hpp"
 #include "Gui.hpp"
+#include "MobileDiagnostics.hpp"
+#include "MobileUi.hpp"
+#include "Online.hpp"
 #include "Rng.hpp"
 #include "SoundPlayer.hpp"
 #include "Stage.hpp"
@@ -60,7 +66,227 @@ const char *g_ShooterTableFocus[6] = {
     "data/ply01bs.sht", "data/ply02as.sht", "data/ply02bs.sht",
 };
 
-Player g_Player;
+Player g_Players[2];
+bool g_PlayerActive[2] = {true, false};
+
+Player *GetPlayerById(u8 playerId)
+{
+    return playerId < 2 ? &g_Players[playerId] : nullptr;
+}
+
+bool IsPlayerSlotActive(u8 playerId)
+{
+    return playerId < 2 && g_PlayerActive[playerId];
+}
+
+Player *GetPrimaryActivePlayer()
+{
+    for (i32 playerId = 0; playerId < 2; ++playerId)
+    {
+        if (g_PlayerActive[playerId])
+        {
+            return &g_Players[playerId];
+        }
+    }
+    return &g_Players[0];
+}
+
+Player *GetClosestActivePlayer(const ZunVec3 *position)
+{
+    Player *closest = GetPrimaryActivePlayer();
+    if (!position)
+    {
+        return closest;
+    }
+    f32 closestDistanceSq = 1.0e30f;
+    for (i32 playerId = 0; playerId < 2; ++playerId)
+    {
+        if (!g_PlayerActive[playerId])
+        {
+            continue;
+        }
+        const f32 distanceSq = (g_Players[playerId].positionCenter - *position).LengthSq();
+        if (distanceSq < closestDistanceSq)
+        {
+            closest = &g_Players[playerId];
+            closestDistanceSq = distanceSq;
+        }
+    }
+    return closest;
+}
+
+void ResetPlayerForSharedRetry(u8 playerId)
+{
+    if (playerId >= 2)
+    {
+        return;
+    }
+
+    Player &player = g_Players[playerId];
+    if (!player.shooterData)
+    {
+        // A retry commit is only valid while the stage chain is alive.  Keep
+        // this guard so a delayed network packet cannot dereference a player
+        // that has already been torn down during a title transition.
+        return;
+    }
+
+    g_PlayerActive[playerId] = true;
+    if (player.focusEffect)
+    {
+        player.focusEffect->inUseFlag = 0;
+        player.focusEffect = nullptr;
+    }
+    if (player.effect)
+    {
+        player.effect->inUseFlag = 0;
+        player.effect = nullptr;
+    }
+    if (player.borderEffect)
+    {
+        player.borderEffect->inUseFlag = 0;
+        player.borderEffect = nullptr;
+    }
+
+    player.playerState = PLAYER_STATE_SPAWNING;
+    player.isFocus = 0;
+    player.isBombing = 0;
+    player.hasBorder = BORDER_NONE;
+    player.borderInvulnerabilityTime = 0;
+    player.bulletGracePeriod = 0;
+    player.invulnerabilityTimer = 120;
+    player.respawnTimer = player.shooterData->initialRespawnTimer;
+    player.positionCenter.x = g_GameManager.arcadeRegionSize.x * 0.5f +
+                              (Online::IsMultiplayerSession()
+                                   ? (playerId == 0 ? -32.0f : 32.0f)
+                                   : 0.0f);
+    player.positionCenter.y = g_GameManager.arcadeRegionSize.y - 64.0f;
+    player.positionCenter.z = 0.49f;
+    player.prevPositionCenter = player.positionCenter;
+    player.prevFramePos = player.positionCenter;
+    player.optionsPosition[0] = player.positionCenter;
+    player.optionsPosition[1] = player.positionCenter;
+    player.prevOptionsPosition[0] = player.positionCenter;
+    player.prevOptionsPosition[1] = player.positionCenter;
+    player.optionState = OPTION_UNFOCUSED;
+    player.optionAngle = -1.5707964f;
+    player.focusMovementTimer = 0;
+    player.fireBulletTimer = -1;
+    player.horizontalMovementSpeedMultiplierDuringBomb = 1.0f;
+    player.verticalMovementSpeedMultiplierDuringBomb = 1.0f;
+
+    player.bombInfo.isInUse = 0;
+    player.bombInfo.isFocus = 0;
+    player.bombInfo.bombDuration = 0;
+    player.bombInfo.cherryDrain = 0;
+    player.bombInfo.bombTimer = 0;
+    memset(player.bombInfo.subInfo, 0, sizeof(player.bombInfo.subInfo));
+    for (PlayerBombSubInfo &subInfo : player.bombInfo.subInfo)
+    {
+        subInfo.timer = 0;
+        for (AnmVm &vm : subInfo.vms)
+        {
+            vm.active = 0;
+            vm.visible = 0;
+        }
+    }
+    memset(player.bombDamageBoxes, 0, sizeof(player.bombDamageBoxes));
+    memset(player.bombClearBoxes, 0, sizeof(player.bombClearBoxes));
+    memset(player.activeBombClearBoxesCache, 0, sizeof(player.activeBombClearBoxesCache));
+    player.numActiveBombClearBoxes = 0;
+    player.dirtyBombBoxes = true;
+
+    for (PlayerBullet &bullet : player.bullets)
+    {
+        bullet.bulletState = 0;
+        bullet.bulletState2 = 0;
+        bullet.timer = 0;
+        bullet.updateCallback = nullptr;
+        bullet.drawCallback = nullptr;
+        bullet.hitCallback = nullptr;
+        bullet.shtEntry = nullptr;
+    }
+    for (PlayerBulletTimer &timer : player.timers)
+    {
+        timer.timer = 0;
+        timer.bullet = nullptr;
+    }
+
+    g_AnmManager->SetAnmIdxAndExecuteScript(&player.playerSprite,
+                                            GetPlayerAnmScript(&player, 1024));
+    g_AnmManager->SetAnmIdxAndExecuteScript(&player.optionsSprite[0],
+                                            GetPlayerAnmScript(&player, 1152));
+    g_AnmManager->SetAnmIdxAndExecuteScript(&player.optionsSprite[1],
+                                            GetPlayerAnmScript(&player, 1153));
+    player.playerSprite.color.color = 0xffffffff;
+    player.playerSprite.prevColor = player.playerSprite.color;
+    player.playerSprite.scale.x = 3.0f;
+    player.playerSprite.scale.y = 3.0f;
+    player.playerSprite.prevScale = player.playerSprite.scale;
+    player.playerSprite.pos = player.positionCenter;
+    player.playerSprite.prevPos = player.positionCenter;
+    player.optionsSprite[0].prevColor = player.optionsSprite[0].color;
+    player.optionsSprite[1].prevColor = player.optionsSprite[1].color;
+
+    MobileDiagnostics::Log("online/player", "P%d reset for shared retry", playerId + 1);
+}
+
+i32 GetPlayerAnmScript(const Player *player, i32 script)
+{
+    return player && player->initParam == 1
+               ? script + ANM_OFFSET_PLAYER2 - ANM_OFFSET_PLAYER
+               : script;
+}
+
+i32 GetPlayerEffectSlot(const Player *player, i32 p1Slot)
+{
+    if (!player || player->initParam == 0)
+    {
+        return p1Slot;
+    }
+    switch (p1Slot)
+    {
+    case 2:
+        return 6;
+    case 3:
+        return 7;
+    default:
+        return 5;
+    }
+}
+
+i32 GetPlayerCharacter(const Player *player)
+{
+    return Online::IsMultiplayerSession() && player
+               ? Online::GetPlayerCharacter(player->initParam)
+               : g_GameManager.character;
+}
+
+i32 GetPlayerShot(const Player *player)
+{
+    return Online::IsMultiplayerSession() && player
+               ? Online::GetPlayerShot(player->initParam)
+               : g_GameManager.shotType;
+}
+
+static i32 GetPlayerLoadoutIndex(const Player *player)
+{
+    return std::clamp(GetPlayerCharacter(player), 0, 2) * 2 +
+           std::clamp(GetPlayerShot(player), 0, 1);
+}
+
+static const char *GetPlayerAnmPath(i32 character)
+{
+    switch (character)
+    {
+    case CHAR_MARISA:
+        return "data/player01.anm";
+    case CHAR_SAKUYA:
+        return "data/player02.anm";
+    default:
+        return "data/player00.anm";
+    }
+}
 
 void DefaultFireBulletCallback(Player *player, PlayerBullet *bullet, ShtEntry *shtEntry)
 {
@@ -90,7 +316,8 @@ void DefaultFireBulletCallback(Player *player, PlayerBullet *bullet, ShtEntry *s
     {
         g_SoundPlayer.PlaySoundByIdx(shtEntry->soundIdx, 0);
     }
-    g_AnmManager->SetAnmIdxAndExecuteScript(&bullet->vm, shtEntry->anmFileIdx);
+    g_AnmManager->SetAnmIdxAndExecuteScript(
+        &bullet->vm, GetPlayerAnmScript(player, shtEntry->anmFileIdx));
 }
 
 i32 ShtData::FireBulletDefault(Player *player, PlayerBullet *bullet, i32 fireTime,
@@ -555,7 +782,7 @@ void Player::SpawnBullets(Player *player, u32 timer)
 
     level = !player->isFocus ? player->shooterData->levels : player->shooterDataFocus->levels;
 
-    while ((i32)g_GameManager.globals->currentPower >= level->requiredPower)
+    while (GetPlayerPower(player->initParam) >= level->requiredPower)
     {
         level++;
     }
@@ -755,8 +982,8 @@ i32 Player::UpdateFireBulletTimer()
         return 0;
     }
     if (this->fireBulletTimer.HasTicked() &&
-        (!g_Player.bombInfo.isInUse || g_GameManager.character != CHAR_MARISA ||
-         g_GameManager.shotType != 1))
+        (!this->bombInfo.isInUse || GetPlayerCharacter(this) != CHAR_MARISA ||
+         GetPlayerShot(this) != 1))
     {
         SpawnBullets(this, this->fireBulletTimer.GetCurrent());
     }
@@ -997,12 +1224,17 @@ i32 Player::CalcKillboxCollision(ZunVec3 *center, ZunVec3 *size)
     g_ReplayManager->replayEventFlags = g_ReplayManager->replayEventFlags | 2;
     if (this->playerState == PLAYER_STATE_BORDER)
     {
-        g_Player.BreakBorder();
+        this->BreakBorder();
         return 1;
     }
     if (this->playerState != PLAYER_STATE_ALIVE)
     {
         return 1;
+    }
+
+    if (MobileUi::IsAutoBombEnabled() && !g_GameManager.replay && TryActivateBomb(true))
+    {
+        return 2;
     }
 
     g_GameManager.RerollRng();
@@ -1121,12 +1353,17 @@ LASER_COLLISION:
     if (this->playerState == PLAYER_STATE_BORDER)
     {
         // this is already a member function of Player though
-        g_Player.BreakBorder();
+        this->BreakBorder();
         return 1;
     }
     if (this->playerState != PLAYER_STATE_ALIVE)
     {
         return 0;
+    }
+
+    if (MobileUi::IsAutoBombEnabled() && !g_GameManager.replay && TryActivateBomb(true))
+    {
+        return 2;
     }
 
     g_GameManager.RerollRng();
@@ -1138,7 +1375,7 @@ void Player::ScoreGraze(ZunVec3 *param_1)
 {
     ZunVec3 grazePos;
 
-    if (!g_Player.bombInfo.isInUse)
+    if (!this->bombInfo.isInUse)
     {
         if (g_GameManager.globals->grazeInStage < 9999)
         {
@@ -1200,7 +1437,7 @@ void Player::Die()
     // that you can physically actuate the moment you need to deathbomb, so because im just such
     // a nice person there's a 5 frame leniency for touch users (ONLY FOR IF YOU BOMBED WITH
     // TOUCH!!!!!)
-    this->respawnTimer = g_Player.shooterData->initialRespawnTimer +
+    this->respawnTimer = this->shooterData->initialRespawnTimer +
                          (Touch::WasUsedThisRun() ? Touch::DEATHBOMB_TOLERANCE : 0);
 }
 
@@ -1219,47 +1456,56 @@ i32 Player::HandlePlayerInputs()
     f32 touchDy;
     bool touchFocus;
 
+    if (g_Gui.HasCurrentMsgIdx())
+    {
+        // Dialogue is driven by the host lane in netplay; neither player can
+        // move or toggle focus while the message stream is active.
+        this->playerDirection = MOVEMENT_NONE;
+        this->isFocus = 0;
+        return 0;
+    }
+
     horizontalSpeed = 0.0f;
     verticalSpeed = 0.0f;
     this->playerDirection = MOVEMENT_NONE;
 
-    if (IS_PRESSED_GAME(TH_BUTTON_UP))
+    if (IS_PRESSED_PLAYER(this, TH_BUTTON_UP))
     {
         this->playerDirection = MOVEMENT_UP;
-        if (IS_PRESSED_GAME(TH_BUTTON_LEFT))
+        if (IS_PRESSED_PLAYER(this, TH_BUTTON_LEFT))
         {
             this->playerDirection = MOVEMENT_UP_LEFT;
         }
-        if (IS_PRESSED_GAME(TH_BUTTON_RIGHT))
+        if (IS_PRESSED_PLAYER(this, TH_BUTTON_RIGHT))
         {
             this->playerDirection = MOVEMENT_UP_RIGHT;
         }
     }
-    else if (IS_PRESSED_GAME(TH_BUTTON_DOWN))
+    else if (IS_PRESSED_PLAYER(this, TH_BUTTON_DOWN))
     {
         this->playerDirection = MOVEMENT_DOWN;
-        if (IS_PRESSED_GAME(TH_BUTTON_LEFT))
+        if (IS_PRESSED_PLAYER(this, TH_BUTTON_LEFT))
         {
             this->playerDirection = MOVEMENT_DOWN_LEFT;
         }
-        if (IS_PRESSED_GAME(TH_BUTTON_RIGHT))
+        if (IS_PRESSED_PLAYER(this, TH_BUTTON_RIGHT))
         {
             this->playerDirection = MOVEMENT_DOWN_RIGHT;
         }
     }
     else
     {
-        if (IS_PRESSED_GAME(TH_BUTTON_LEFT))
+        if (IS_PRESSED_PLAYER(this, TH_BUTTON_LEFT))
         {
             this->playerDirection = MOVEMENT_LEFT;
         }
-        if (IS_PRESSED_GAME(TH_BUTTON_RIGHT))
+        if (IS_PRESSED_PLAYER(this, TH_BUTTON_RIGHT))
         {
             this->playerDirection = MOVEMENT_RIGHT;
         }
     }
 
-    if (IS_PRESSED_GAME(TH_BUTTON_FOCUS))
+    if (IS_PRESSED_PLAYER(this, TH_BUTTON_FOCUS))
     {
         this->isFocus = 1;
         switch (this->playerDirection)
@@ -1334,16 +1580,12 @@ i32 Player::HandlePlayerInputs()
         }
     }
 
-    if (Touch::GetPlayerDelta(&touchDx, &touchDy))
+    touchDx = g_CurFrameTouchDx[this->initParam];
+    touchDy = g_CurFrameTouchDy[this->initParam];
+    if (touchDx != 0.0f || touchDy != 0.0f)
     {
-        f32 focusRatio = 1.0f;
-        if (this->isFocus && this->shooterData && this->shooterData->speed != 0.0f)
-        {
-            focusRatio = this->shooterData->speedFocus / this->shooterData->speed;
-        }
-
-        f32 reqGameDx = touchDx * focusRatio;
-        f32 reqGameDy = touchDy * focusRatio;
+        f32 reqGameDx = touchDx;
+        f32 reqGameDy = touchDy;
 
         f32 minX = g_GameManager.playerMovementAreaTopLeftPos.x;
         f32 maxX =
@@ -1373,61 +1615,22 @@ i32 Player::HandlePlayerInputs()
             reqGameDy = maxY - this->positionCenter.y;
         }
 
-        if (focusRatio != 0.0f)
-        {
-            Touch::SetPlayerDelta(reqGameDx / focusRatio, reqGameDy / focusRatio);
-        }
-
         f32 hx = this->horizontalMovementSpeedMultiplierDuringBomb *
                  g_Supervisor.effectiveFramerateMultiplier;
         f32 vy = this->verticalMovementSpeedMultiplierDuringBomb *
                  g_Supervisor.effectiveFramerateMultiplier;
 
-        f32 requestedHorizontalSpeed = hx != 0.0f ? reqGameDx / hx : 0.0f;
-        f32 requestedVerticalSpeed = vy != 0.0f ? reqGameDy / vy : 0.0f;
-
-        f32 currentSpeedSq = requestedHorizontalSpeed * requestedHorizontalSpeed +
-                             requestedVerticalSpeed * requestedVerticalSpeed;
-
-        f32 maxSpeed = this->isFocus ? this->shooterData->speedFocus : this->shooterData->speed;
-
-        if (currentSpeedSq > maxSpeed * maxSpeed && currentSpeedSq > 0.0f)
+        // Touch drag is displacement input, not a direction held at the original
+        // character speed. Convert the exact finger delta into this frame's velocity;
+        // the common movement code below then applies it once without catch-up lag.
+        horizontalSpeed = hx != 0.0f ? reqGameDx / hx : 0.0f;
+        verticalSpeed = vy != 0.0f ? reqGameDy / vy : 0.0f;
+        if (!g_GameManager.replay && this->initParam == Online::GetLocalPlayerSlot())
         {
-            f32 currentSpeed = sqrtf(currentSpeedSq);
-            horizontalSpeed = (requestedHorizontalSpeed / currentSpeed) * maxSpeed;
-            verticalSpeed = (requestedVerticalSpeed / currentSpeed) * maxSpeed;
+            Touch::RecordAppliedPlayerDelta(reqGameDx, reqGameDy);
         }
-        else
-        {
-            horizontalSpeed = requestedHorizontalSpeed;
-            verticalSpeed = requestedVerticalSpeed;
-        }
-
-        f32 consumedGameDx = 0.0f;
-        f32 consumedGameDy = 0.0f;
-
-        if (hx != 0.0f)
-        {
-            consumedGameDx = horizontalSpeed * hx;
-        }
-        if (vy != 0.0f)
-        {
-            consumedGameDy = verticalSpeed * vy;
-        }
-
-        if (focusRatio != 0.0f)
-        {
-            if (currentSpeedSq > maxSpeed * maxSpeed && currentSpeedSq > 0.0f)
-            {
-                f32 consumeX = (hx != 0.0f) ? consumedGameDx / focusRatio : touchDx;
-                f32 consumeY = (vy != 0.0f) ? consumedGameDy / focusRatio : touchDy;
-                Touch::ConsumePlayerDelta(consumeX, consumeY);
-            }
-            else
-            {
-                Touch::SetPlayerDelta(0.0f, 0.0f);
-            }
-        }
+        g_CurFrameTouchDx[this->initParam] = 0.0f;
+        g_CurFrameTouchDy[this->initParam] = 0.0f;
 
         this->playerDirection = MOVEMENT_NONE;
 
@@ -1476,20 +1679,24 @@ i32 Player::HandlePlayerInputs()
 
     if (horizontalSpeed < 0.0f && this->previousHorizontalSpeed >= 0.0f)
     {
-        g_AnmManager->SetAnmIdxAndExecuteScript(&this->playerSprite, 1025);
+        g_AnmManager->SetAnmIdxAndExecuteScript(&this->playerSprite,
+                                                GetPlayerAnmScript(this, 1025));
     }
     else if (horizontalSpeed == 0.0f && this->previousHorizontalSpeed < 0.0f)
     {
-        g_AnmManager->SetAnmIdxAndExecuteScript(&this->playerSprite, 1026);
+        g_AnmManager->SetAnmIdxAndExecuteScript(&this->playerSprite,
+                                                GetPlayerAnmScript(this, 1026));
     }
 
     if (horizontalSpeed > 0.0f && this->previousHorizontalSpeed <= 0.0f)
     {
-        g_AnmManager->SetAnmIdxAndExecuteScript(&this->playerSprite, 1027);
+        g_AnmManager->SetAnmIdxAndExecuteScript(&this->playerSprite,
+                                                GetPlayerAnmScript(this, 1027));
     }
     else if (horizontalSpeed == 0.0f && this->previousHorizontalSpeed > 0.0f)
     {
-        g_AnmManager->SetAnmIdxAndExecuteScript(&this->playerSprite, 1028);
+        g_AnmManager->SetAnmIdxAndExecuteScript(&this->playerSprite,
+                                                GetPlayerAnmScript(this, 1028));
     }
 
     this->previousHorizontalSpeed = horizontalSpeed;
@@ -1533,7 +1740,7 @@ i32 Player::HandlePlayerInputs()
     this->optionsPosition[1] = this->positionCenter;
     optionOffsetX = optionOffsetY = 0.0f;
 
-    if (g_GameManager.character != CHAR_SAKUYA || g_GameManager.shotType != 1)
+    if (GetPlayerCharacter(this) != CHAR_SAKUYA || GetPlayerShot(this) != 1)
     {
         switch (this->optionState)
         {
@@ -1546,8 +1753,9 @@ i32 Player::HandlePlayerInputs()
             if (this->isFocus)
             {
                 this->optionState = OPTION_FOCUSING;
-                this->focusEffect =
-                    g_EffectManager.SpawnEffect(24, &this->positionCenter, 2, 1, 0xffffffff);
+                this->focusEffect = g_EffectManager.SpawnEffectForPlayer(
+                    24, &this->positionCenter, this->initParam, GetPlayerEffectSlot(this, 2), 1,
+                    0xffffffff);
             }
             else
             {
@@ -1605,8 +1813,9 @@ i32 Player::HandlePlayerInputs()
             {
                 this->optionState = OPTION_FOCUSING;
                 this->focusMovementTimer = 8 - this->focusMovementTimer.GetCurrent();
-                this->focusEffect =
-                    g_EffectManager.SpawnEffect(24, &this->positionCenter, 2, 1, 0xffffffff);
+                this->focusEffect = g_EffectManager.SpawnEffectForPlayer(
+                    24, &this->positionCenter, this->initParam, GetPlayerEffectSlot(this, 2), 1,
+                    0xffffffff);
                 goto CASE_OPTION_FOCUSING;
             }
         }
@@ -1629,8 +1838,9 @@ i32 Player::HandlePlayerInputs()
             if (this->isFocus)
             {
                 this->optionState = OPTION_FOCUSING;
-                this->focusEffect =
-                    g_EffectManager.SpawnEffect(24, &this->positionCenter, 2, 1, 0xffffffff);
+                this->focusEffect = g_EffectManager.SpawnEffectForPlayer(
+                    24, &this->positionCenter, this->initParam, GetPlayerEffectSlot(this, 2), 1,
+                    0xffffffff);
                 goto CASE_OPTION_FOCUSING_2;
             }
             this->optionsPosition[0].x -= optionOffsetX;
@@ -1697,8 +1907,9 @@ i32 Player::HandlePlayerInputs()
             {
                 this->optionState = OPTION_FOCUSING;
                 this->focusMovementTimer = 8 - this->focusMovementTimer.GetCurrent();
-                this->focusEffect =
-                    g_EffectManager.SpawnEffect(24, &this->positionCenter, 2, 1, 0xffffffff);
+                this->focusEffect = g_EffectManager.SpawnEffectForPlayer(
+                    24, &this->positionCenter, this->initParam, GetPlayerEffectSlot(this, 2), 1,
+                    0xffffffff);
                 goto CASE_OPTION_FOCUSING_2;
             }
             this->focusMovementTimer++;
@@ -1724,13 +1935,13 @@ i32 Player::HandlePlayerInputs()
             break;
         }
     }
-    if (IS_PRESSED_GAME(TH_BUTTON_SHOOT) && !g_Gui.HasCurrentMsgIdx())
+    if (IS_PRESSED_PLAYER(this, TH_BUTTON_SHOOT) && !g_Gui.HasCurrentMsgIdx())
     {
         if (!g_GameManager.CheckGameIntegrity())
         {
             StartFireBulletTimer();
         }
-        if (!IS_PRESSED_GAME(TH_BUTTON_FOCUS))
+        if (!IS_PRESSED_PLAYER(this, TH_BUTTON_FOCUS))
         {
             if (this->velocity.x != 0.0f)
             {
@@ -1790,10 +2001,77 @@ void Player::UpdateBombProjectiles()
     this->dirtyBombBoxes = true;
 }
 
+bool Player::TryActivateBomb(bool automatic)
+{
+    if (this->bombInfo.isInUse || g_GameManager.CheckGameIntegrity() ||
+        g_Gui.HasCurrentMsgIdx() || this->respawnTimer == 0 ||
+        GetPlayerBombs(this->initParam) <= 0 ||
+        this->borderInvulnerabilityTime != 0)
+    {
+        return false;
+    }
+
+    if (this->playerState == PLAYER_STATE_DEAD)
+    {
+        i32 minRequiredTimer = (Touch::WasUsedThisRun() && !Touch::UsedTouchToBomb())
+                                   ? Touch::DEATHBOMB_TOLERANCE
+                                   : 0;
+        if (this->respawnTimer <= minRequiredTimer)
+        {
+            return false;
+        }
+    }
+
+    if (automatic)
+    {
+        // The replay recorder runs after collision managers. Preserve the
+        // automatic action as an ordinary Bomb input so playback stays deterministic.
+        g_CurFrameRawInput |= TH_BUTTON_BOMB;
+        g_CurFrameGameInput |= TH_BUTTON_BOMB;
+        g_CurFrameRawInputs[this->initParam] |= TH_BUTTON_BOMB;
+        g_CurFrameGameInputs[this->initParam] |= TH_BUTTON_BOMB;
+    }
+    g_ReplayManager->replayEventFlags |= 1;
+    g_GameManager.AddBombsUsed(1);
+    AddPlayerBombs(this->initParam, -1);
+    g_Gui.bombDisplayUpdateFrames = 2;
+    this->bombInfo.isFocus = (i32)this->isFocus;
+    this->bombInfo.isInUse = 1;
+    this->isBombing = 1;
+    this->bombInfo.bombTimer = 0;
+    this->bombInfo.bombDuration = 999;
+    if (!this->bombInfo.isFocus)
+    {
+        this->bombInfo.bombCalc(this);
+    }
+    else
+    {
+        this->bombInfo.bombFocusCalc(this);
+    }
+    g_EnemyManager.spellcardInfo.captureScore = 0;
+    g_EnemyManager.spellcardInfo.isCapturing = 0;
+    g_GameManager.DecreaseSubrank(200);
+    g_EnemyManager.spellcardInfo.usedBomb = g_EnemyManager.spellcardInfo.isActive;
+    this->respawnTimer += 6;
+    if (this->respawnTimer > this->shooterData->initialRespawnTimer)
+    {
+        this->respawnTimer = this->shooterData->initialRespawnTimer;
+    }
+
+    if (automatic)
+    {
+        MobileDiagnostics::Log("gameplay/auto-bomb",
+                               "triggered bombsRemaining=%d focus=%d playerState=%d",
+                               GetPlayerBombs(this->initParam),
+                               this->bombInfo.isFocus, this->playerState);
+    }
+    return true;
+}
+
 void Player::UpdateBorderAndBombState()
 {
     if (this->hasBorder != BORDER_NONE && !this->bombInfo.isInUse &&
-        IS_PRESSED_GAME(TH_BUTTON_BOMB))
+        IS_PRESSED_PLAYER(this, TH_BUTTON_BOMB))
     {
         BreakBorder();
         this->isBombing = 0;
@@ -1827,48 +2105,7 @@ void Player::UpdateBorderAndBombState()
         }
         else
         {
-            if (!g_GameManager.CheckGameIntegrity() && !g_Gui.HasCurrentMsgIdx() &&
-                this->respawnTimer != 0 && 0 < (i32)g_GameManager.globals->bombsRemaining &&
-                this->borderInvulnerabilityTime == 0 && IS_PRESSED_GAME(TH_BUTTON_BOMB))
-            {
-                if (this->playerState == PLAYER_STATE_DEAD)
-                {
-                    i32 minRequiredTimer = (Touch::WasUsedThisRun() && !Touch::UsedTouchToBomb())
-                                               ? Touch::DEATHBOMB_TOLERANCE
-                                               : 0;
-                    if (this->respawnTimer <= minRequiredTimer)
-                    {
-                        return;
-                    }
-                }
-                g_ReplayManager->replayEventFlags |= 1;
-                g_GameManager.AddBombsUsed(1);
-                g_GameManager.AddBombsRemaining(-1);
-                g_Gui.bombDisplayUpdateFrames = 2;
-                this->bombInfo.isFocus = (i32)this->isFocus;
-                this->bombInfo.isInUse = 1;
-                this->isBombing = 1;
-                this->bombInfo.bombTimer = 0;
-                this->bombInfo.bombDuration = 999;
-                if (!this->bombInfo.isFocus)
-                {
-                    this->bombInfo.bombCalc(this);
-                }
-                else
-                {
-                    this->bombInfo.bombFocusCalc(this);
-                }
-                g_EnemyManager.spellcardInfo.captureScore = 0;
-                g_EnemyManager.spellcardInfo.isCapturing = 0;
-                g_GameManager.DecreaseSubrank(200);
-                g_EnemyManager.spellcardInfo.usedBomb = g_EnemyManager.spellcardInfo.isActive;
-                this->respawnTimer += 6;
-                if (this->respawnTimer > g_Player.shooterData->initialRespawnTimer)
-                {
-                    this->respawnTimer = g_Player.shooterData->initialRespawnTimer;
-                }
-            }
-            else
+            if (!(IS_PRESSED_PLAYER(this, TH_BUTTON_BOMB) && TryActivateBomb(false)))
             {
                 this->isBombing = 0;
             }
@@ -1896,16 +2133,15 @@ i32 Player::UpdateDeath()
             g_EnemyManager.spellcardInfo.captureScore = 0;
             g_EnemyManager.spellcardInfo.isCapturing = 0;
             g_GameManager.CheckGameIntegrityOnDeath(1);
-            if ((i32)g_GameManager.globals->livesRemaining > 0)
+            if (GetPlayerLives(this->initParam) > 0)
             {
-                if ((i32)g_GameManager.globals->currentPower <= 16)
+                if (GetPlayerPower(this->initParam) <= 16)
                 {
-                    g_GameManager.globals->currentPower = 0.0f;
-                    g_GameManager.RegenerateGameIntegrityCsum();
+                    SetPlayerPower(this->initParam, 0);
                 }
                 else
                 {
-                    g_GameManager.AddCurrentPower(-16);
+                    AddPlayerPower(this->initParam, -16);
                 }
                 g_ItemManager.SpawnItem(&this->positionCenter, ITEM_POWER_BIG, 2);
                 g_ItemManager.SpawnItem(&this->positionCenter, ITEM_POWER_SMALL, 2);
@@ -1915,8 +2151,8 @@ i32 Player::UpdateDeath()
                 g_ItemManager.SpawnItem(&this->positionCenter, ITEM_POWER_SMALL, 2);
                 g_Gui.powerDisplayUpdateFrames = 2;
                 cherryPenalty = (f32)(g_GameManager.cherry - g_GameManager.globals->cherryStart) *
-                                g_Player.shooterData->cherryPenaltyMultiplier;
-                if (g_GameManager.character != CHAR_SAKUYA)
+                                this->shooterData->cherryPenaltyMultiplier;
+                if (GetPlayerCharacter(this) != CHAR_SAKUYA)
                 {
                     if (cherryPenalty > 100000)
                     {
@@ -1934,8 +2170,7 @@ i32 Player::UpdateDeath()
             }
             else
             {
-                g_GameManager.globals->currentPower = 0.0f;
-                g_GameManager.RegenerateGameIntegrityCsum();
+                SetPlayerPower(this->initParam, 0);
                 g_ItemManager.SpawnItem(&this->positionCenter, ITEM_FULL_POWER, 2);
                 g_ItemManager.SpawnItem(&this->positionCenter, ITEM_FULL_POWER, 2);
                 g_ItemManager.SpawnItem(&this->positionCenter, ITEM_FULL_POWER, 2);
@@ -1966,16 +2201,45 @@ i32 Player::UpdateDeath()
             this->invulnerabilityTimer = 0;
             this->playerSprite.scale.x = 3.0f;
             this->playerSprite.scale.y = 3.0f;
-            g_AnmManager->SetAnmIdxAndExecuteScript(&this->playerSprite, 1024);
-            if ((i32)g_GameManager.globals->livesRemaining <= 0)
+            g_AnmManager->SetAnmIdxAndExecuteScript(
+                &this->playerSprite, GetPlayerAnmScript(this, 1024));
+            if (GetPlayerLives(this->initParam) <= 0)
             {
-                g_GameManager.isInRetryMenu = 1;
+                if (Online::IsNetworkSession())
+                {
+                    // A game-over is a shared decision in netplay. Keep the
+                    // shell open on both devices instead of letting the other
+                    // player continue alone with a stale HUD.
+                    g_PlayerActive[this->initParam] = false;
+                    Online::RequestSharedShellEnter(Online::SHARED_SHELL_RETRY);
+                    MobileDiagnostics::Log("online/player", "P%d is out of lives; shared retry requested",
+                                           this->initParam + 1);
+                    return 0;
+                }
+                bool partnerStillActive = false;
+                for (i32 playerId = 0; playerId < 2; ++playerId)
+                {
+                    if (playerId != this->initParam && IsPlayerSlotActive((u8)playerId))
+                    {
+                        partnerStillActive = true;
+                    }
+                }
+                if (partnerStillActive)
+                {
+                    g_PlayerActive[this->initParam] = false;
+                    MobileDiagnostics::Log("online/player", "P%d is out of lives",
+                                           this->initParam + 1);
+                }
+                else
+                {
+                    g_GameManager.isInRetryMenu = 1;
+                }
             }
             else
             {
-                g_GameManager.AddLivesRemaining(-1);
+                AddPlayerLives(this->initParam, -1);
                 g_Gui.lifeDisplayUpdateFrames = 2;
-                g_GameManager.SetBombsRemainingAndComputeCsum(g_Player.shooterData->initialBombs);
+                SetPlayerBombs(this->initParam, this->shooterData->initialBombs);
                 g_Gui.bombDisplayUpdateFrames = 2;
                 return 1;
             }
@@ -2004,7 +2268,7 @@ void Player::Respawn()
         this->playerSprite.color.color = 0xffffffff;
         this->playerSprite.blendMode = 0;
         this->invulnerabilityTimer = 240;
-        this->respawnTimer = g_Player.shooterData->initialRespawnTimer;
+        this->respawnTimer = this->shooterData->initialRespawnTimer;
     }
 }
 
@@ -2077,15 +2341,15 @@ void Player::UpdateState()
                 this->playerSprite.color.color = 0xffffffff;
             }
             color.bytes.a = 128;
-            if (g_Player.invulnerabilityTimer >= 510)
+            if (this->invulnerabilityTimer >= 510)
             {
                 color.bytes.r = color.bytes.g = color.bytes.b =
-                    128 - (540 - g_Player.invulnerabilityTimer.GetCurrent()) * 80 / 30;
+                    128 - (540 - this->invulnerabilityTimer.GetCurrent()) * 80 / 30;
             }
-            else if (g_Player.invulnerabilityTimer < 30)
+            else if (this->invulnerabilityTimer < 30)
             {
                 color.bytes.r = color.bytes.g = color.bytes.b =
-                    128 - g_Player.invulnerabilityTimer.GetCurrent() * 80 / 30;
+                    128 - this->invulnerabilityTimer.GetCurrent() * 80 / 30;
             }
             else
             {
@@ -2119,7 +2383,7 @@ void Player::BreakBorderNaturally()
         this->playerSprite.color.color = 0xffffffff;
         this->playerSprite.blendMode = 0;
         this->invulnerabilityTimer = 240;
-        this->respawnTimer = g_Player.shooterData->initialRespawnTimer;
+        this->respawnTimer = this->shooterData->initialRespawnTimer;
     }
     this->playerState = PLAYER_STATE_INVULNERABLE;
     this->invulnerabilityTimer = 40;
@@ -2218,7 +2482,8 @@ void Player::ActivateBorder()
             this->effect->inUseFlag = 0;
             this->effect = NULL;
         }
-        spawnedEffect = g_EffectManager.SpawnEffect(28, &this->positionCenter, 4, 1, 0xffffffff);
+        spawnedEffect = g_EffectManager.SpawnEffect(
+            28, &this->positionCenter, GetPlayerEffectSlot(this, 4), 1, 0xffffffff);
         spawnedEffect->vm.interpStartTimes[4] = 0;
         spawnedEffect->vm.interpEndTimes[4] = this->invulnerabilityTimer.GetCurrent();
         spawnedEffect->vm.easeModes[4] = 0;
@@ -2248,7 +2513,8 @@ void Player::BreakBorder()
         this->borderEffect->inUseFlag = 0;
         this->borderEffect = NULL;
     }
-    effect = g_EffectManager.SpawnEffect(28, &this->positionCenter, 4, 1, 0xffffffff);
+    effect = g_EffectManager.SpawnEffect(
+        28, &this->positionCenter, GetPlayerEffectSlot(this, 4), 1, 0xffffffff);
     effect->vm.interpStartTimes[4] = 0;
     effect->vm.interpEndTimes[4] = 30;
     effect->vm.easeModes[4] = 0;
@@ -2288,6 +2554,10 @@ void Player::UpdateUI()
     this->positionOfLastEnemyHit = ZunVec3(-999.0f, -999.0f, 0.0f);
     this->sakuyaTargetPosition = ZunVec3(-999.0f, -999.0f, 0.0f);
     this->targetingEnemy = 0;
+    if (this->initParam != 0)
+    {
+        return;
+    }
     if (this->positionCenter.y >= 400.0f)
     {
         if (g_AsciiManager.GetFadeState() != 2 && this->positionCenter.x < 160.0f)
@@ -2310,6 +2580,16 @@ void Player::UpdateUI()
 
 u32 Player::OnUpdate(Player *arg)
 {
+    if (!IsPlayerSlotActive(arg->initParam))
+    {
+        return CHAIN_CALLBACK_RESULT_CONTINUE;
+    }
+    const bool isolateRng = Online::IsNetworkSession();
+    Rng savedRng;
+    if (isolateRng)
+    {
+        savedRng = g_Rng;
+    }
     arg->UpdatePrev();
 
     arg->prevPositionCenter = arg->positionCenter;
@@ -2317,6 +2597,10 @@ u32 Player::OnUpdate(Player *arg)
     arg->prevOptionsPosition[1] = arg->optionsPosition[1];
     if (g_GameManager.isTimeStopped)
     {
+        if (isolateRng)
+        {
+            g_Rng = savedRng;
+        }
         return CHAIN_CALLBACK_RESULT_CONTINUE;
     }
     arg->UpdateBombProjectiles();
@@ -2352,12 +2636,56 @@ WHY:
     arg->UpdateShots();
     arg->UpdateFireBulletTimer();
     arg->UpdateUI();
+    if (isolateRng)
+    {
+        g_Rng = savedRng;
+    }
+    if (arg->initParam == 1 || !IsPlayerSlotActive(1))
+    {
+        Online::PublishAuthoritativeState();
+    }
     return CHAIN_CALLBACK_RESULT_CONTINUE;
+}
+
+static u32 GetRemotePlayerRenderColor(const Player &remote, const Player &local,
+                                      u32 baseColor)
+{
+    u32 renderColor = baseColor;
+    if (GetPlayerCharacter(&remote) == GetPlayerCharacter(&local))
+    {
+        // Match the reference co-op tint while retaining the animation's
+        // alpha.  The tint is applied only to the remote sprite, never to the
+        // simulation VM or the local player's rendering state.
+        renderColor = (renderColor & 0xff000000u) | 0x0080ffffu;
+    }
+
+    const ZunVec3 remotePos = remote.prevPositionCenter.Lerp(remote.positionCenter,
+                                                              g_RenderAlpha);
+    const ZunVec3 localPos = local.prevPositionCenter.Lerp(local.positionCenter,
+                                                           g_RenderAlpha);
+    const f32 dx = remotePos.x - localPos.x;
+    const f32 dy = remotePos.y - localPos.y;
+    const f32 distance = sqrtf(dx * dx + dy * dy);
+    if (distance < 100.0f)
+    {
+        const f32 clamped = std::max(50.0f, distance);
+        const u32 proximityAlpha = (u32)std::clamp(
+            (i32)lroundf(((clamped - 50.0f) / 50.0f) * 200.0f + 55.0f), 55, 255);
+        const u32 baseAlpha = (renderColor >> 24) & 0xffu;
+        if (proximityAlpha < baseAlpha)
+        {
+            renderColor = (renderColor & 0x00ffffffu) | (proximityAlpha << 24);
+        }
+    }
+    return renderColor;
 }
 
 u32 Player::OnDrawHighPrio(Player *arg)
 {
-    ZunColor color;
+    if (!IsPlayerSlotActive(arg->initParam))
+    {
+        return CHAIN_CALLBACK_RESULT_CONTINUE;
+    }
 
     arg->DrawBullets();
     if (arg->bombInfo.isInUse)
@@ -2380,23 +2708,72 @@ u32 Player::OnDrawHighPrio(Player *arg)
         arg->playerSprite.pos.x = g_GameManager.arcadeRegionTopLeftPos.x + drawPlayerPos.x;
         arg->playerSprite.pos.y = g_GameManager.arcadeRegionTopLeftPos.y + drawPlayerPos.y;
         arg->playerSprite.pos.z = 0.0f;
-        g_AnmManager->DrawNoRotation(&arg->playerSprite);
+        if (arg->playerState != PLAYER_STATE_DEAD)
+        {
+            const i32 localSlot = Online::GetLocalPlayerSlot();
+            const bool remotePlayer = Online::IsNetworkSession() &&
+                arg->initParam != localSlot && g_PlayerActive[localSlot];
+            if (remotePlayer)
+            {
+                // Draw a value copy.  Mutating arg->playerSprite and restoring
+                // only color left prevColor one frame behind, so AnmManager's
+                // interpolation alternated between the old and faded colors.
+                AnmVm remoteSprite = arg->playerSprite;
+                remoteSprite.color.color = GetRemotePlayerRenderColor(
+                    *arg, g_Players[localSlot], remoteSprite.color.color);
+                remoteSprite.prevColor = remoteSprite.color;
+                g_AnmManager->DrawNoRotation(&remoteSprite);
+            }
+            else
+            {
+                g_AnmManager->DrawNoRotation(&arg->playerSprite);
+            }
+        }
         if (arg->optionState != OPTION_HIDDEN &&
             (arg->playerState == PLAYER_STATE_ALIVE || arg->playerState == PLAYER_STATE_BORDER ||
              arg->playerState == PLAYER_STATE_INVULNERABLE))
         {
-            arg->optionsSprite[0].pos.x =
-                g_GameManager.arcadeRegionTopLeftPos.x + drawOptionsPos[0].x;
-            arg->optionsSprite[0].pos.y =
-                g_GameManager.arcadeRegionTopLeftPos.y + drawOptionsPos[0].y;
-            arg->optionsSprite[0].pos.z = 0.0f;
-            arg->optionsSprite[1].pos.x =
-                g_GameManager.arcadeRegionTopLeftPos.x + drawOptionsPos[1].x;
-            arg->optionsSprite[1].pos.y =
-                g_GameManager.arcadeRegionTopLeftPos.y + drawOptionsPos[1].y;
-            arg->optionsSprite[1].pos.z = 0.0f;
-            g_AnmManager->Draw(&arg->optionsSprite[0]);
-            g_AnmManager->Draw(&arg->optionsSprite[1]);
+            const i32 localSlot = Online::GetLocalPlayerSlot();
+            const bool remotePlayer = Online::IsNetworkSession() &&
+                arg->initParam != localSlot && g_PlayerActive[localSlot];
+            if (remotePlayer)
+            {
+                AnmVm remoteOption0 = arg->optionsSprite[0];
+                AnmVm remoteOption1 = arg->optionsSprite[1];
+                remoteOption0.color.color = GetRemotePlayerRenderColor(
+                    *arg, g_Players[localSlot], remoteOption0.color.color);
+                remoteOption1.color.color = GetRemotePlayerRenderColor(
+                    *arg, g_Players[localSlot], remoteOption1.color.color);
+                remoteOption0.prevColor = remoteOption0.color;
+                remoteOption1.prevColor = remoteOption1.color;
+                remoteOption0.pos.x =
+                    g_GameManager.arcadeRegionTopLeftPos.x + drawOptionsPos[0].x;
+                remoteOption0.pos.y =
+                    g_GameManager.arcadeRegionTopLeftPos.y + drawOptionsPos[0].y;
+                remoteOption0.pos.z = 0.0f;
+                remoteOption1.pos.x =
+                    g_GameManager.arcadeRegionTopLeftPos.x + drawOptionsPos[1].x;
+                remoteOption1.pos.y =
+                    g_GameManager.arcadeRegionTopLeftPos.y + drawOptionsPos[1].y;
+                remoteOption1.pos.z = 0.0f;
+                g_AnmManager->Draw(&remoteOption0);
+                g_AnmManager->Draw(&remoteOption1);
+            }
+            else
+            {
+                arg->optionsSprite[0].pos.x =
+                    g_GameManager.arcadeRegionTopLeftPos.x + drawOptionsPos[0].x;
+                arg->optionsSprite[0].pos.y =
+                    g_GameManager.arcadeRegionTopLeftPos.y + drawOptionsPos[0].y;
+                arg->optionsSprite[0].pos.z = 0.0f;
+                arg->optionsSprite[1].pos.x =
+                    g_GameManager.arcadeRegionTopLeftPos.x + drawOptionsPos[1].x;
+                arg->optionsSprite[1].pos.y =
+                    g_GameManager.arcadeRegionTopLeftPos.y + drawOptionsPos[1].y;
+                arg->optionsSprite[1].pos.z = 0.0f;
+                g_AnmManager->Draw(&arg->optionsSprite[0]);
+                g_AnmManager->Draw(&arg->optionsSprite[1]);
+            }
         }
     }
     return CHAIN_CALLBACK_RESULT_CONTINUE;
@@ -2404,6 +2781,10 @@ u32 Player::OnDrawHighPrio(Player *arg)
 
 u32 Player::OnDrawLowPrio(Player *arg)
 {
+    if (!IsPlayerSlotActive(arg->initParam))
+    {
+        return CHAIN_CALLBACK_RESULT_CONTINUE;
+    }
     arg->DrawBulletExplosions();
     return CHAIN_CALLBACK_RESULT_CONTINUE;
 }
@@ -2429,15 +2810,19 @@ ZunResult Player::AddedCallback(Player *arg)
 {
     PlayerBullet *bullet;
     i32 i;
+    const i32 loadoutIndex = GetPlayerLoadoutIndex(arg);
+    const i32 playerCharacter = GetPlayerCharacter(arg);
+    const i32 playerAnmFile = arg->initParam == 0 ? ANM_FILE_PLAYER : ANM_FILE_PLAYER2;
+    const i32 playerAnmOffset = arg->initParam == 0 ? ANM_OFFSET_PLAYER : ANM_OFFSET_PLAYER2;
 
     if (ShtData::LoadShtData(&arg->shooterData,
-                             g_ShooterTable[g_GameManager.shotTypeAndCharacter]) != ZUN_SUCCESS)
+                             g_ShooterTable[loadoutIndex]) != ZUN_SUCCESS)
     {
         return ZUN_ERROR;
     }
 
     if (ShtData::LoadShtData(&arg->shooterDataFocus,
-                             g_ShooterTableFocus[g_GameManager.shotTypeAndCharacter]) !=
+                             g_ShooterTableFocus[loadoutIndex]) !=
         ZUN_SUCCESS)
     {
         return ZUN_ERROR;
@@ -2446,32 +2831,18 @@ ZunResult Player::AddedCallback(Player *arg)
     if ((u32)(g_Supervisor.curState != 3 && g_Supervisor.curState != 11 &&
               g_Supervisor.curState != 12))
     {
-        switch (g_GameManager.character)
+        if (g_AnmManager->LoadAnms(playerAnmFile, GetPlayerAnmPath(playerCharacter),
+                                   playerAnmOffset) != ZUN_SUCCESS)
         {
-        case CHAR_REIMU:
-            if (g_AnmManager->LoadAnms(ANM_FILE_PLAYER, "data/player00.anm", ANM_OFFSET_PLAYER) !=
-                ZUN_SUCCESS)
-            {
-                return ZUN_ERROR;
-            }
-            break;
-        case CHAR_MARISA:
-            if (g_AnmManager->LoadAnms(ANM_FILE_PLAYER, "data/player01.anm", ANM_OFFSET_PLAYER) !=
-                ZUN_SUCCESS)
-            {
-                return ZUN_ERROR;
-            }
-            break;
-        case CHAR_SAKUYA:
-            if (g_AnmManager->LoadAnms(ANM_FILE_PLAYER, "data/player02.anm", ANM_OFFSET_PLAYER) !=
-                ZUN_SUCCESS)
-            {
-                return ZUN_ERROR;
-            }
+            return ZUN_ERROR;
         }
     }
-    g_AnmManager->SetAnmIdxAndExecuteScript(&arg->playerSprite, 1024);
-    arg->positionCenter.x = g_GameManager.arcadeRegionSize.x / 2.0f;
+    g_AnmManager->SetAnmIdxAndExecuteScript(
+        &arg->playerSprite, GetPlayerAnmScript(arg, 1024));
+    arg->positionCenter.x = g_GameManager.arcadeRegionSize.x / 2.0f +
+                            (Online::IsMultiplayerSession()
+                                 ? (arg->initParam == 0 ? -32.0f : 32.0f)
+                                 : 0.0f);
     arg->positionCenter.y = g_GameManager.arcadeRegionSize.y - 64.0f;
     arg->positionCenter.z = 0.49f;
     arg->optionsPosition[0].z = 0.49f;
@@ -2488,10 +2859,10 @@ ZunResult Player::AddedCallback(Player *arg)
     {
         arg->bombClearBoxes[i].size.x = 0.0f;
     }
-    arg->hitboxSize.y = g_Player.shooterData->hitboxRadius / 2.0f;
+    arg->hitboxSize.y = arg->shooterData->hitboxRadius / 2.0f;
     arg->hitboxSize.x = arg->hitboxSize.y;
     arg->hitboxSize.z = 5.0f;
-    arg->grazeSize.y = g_Player.shooterData->grabItemRadius / 2.0f;
+    arg->grazeSize.y = arg->shooterData->grabItemRadius / 2.0f;
     arg->grazeSize.x = arg->grazeSize.y;
     arg->grazeSize.z = 5.0f;
     arg->grabItemSize.x = 12.0f;
@@ -2501,79 +2872,89 @@ ZunResult Player::AddedCallback(Player *arg)
     arg->playerState = PLAYER_STATE_SPAWNING;
     arg->invulnerabilityTimer = 120;
     arg->optionState = OPTION_UNFOCUSED;
-    g_AnmManager->SetAnmIdxAndExecuteScript(&arg->optionsSprite[0], 1152);
-    g_AnmManager->SetAnmIdxAndExecuteScript(&arg->optionsSprite[1], 1153);
+    g_AnmManager->SetAnmIdxAndExecuteScript(
+        &arg->optionsSprite[0], GetPlayerAnmScript(arg, 1152));
+    g_AnmManager->SetAnmIdxAndExecuteScript(
+        &arg->optionsSprite[1], GetPlayerAnmScript(arg, 1153));
     bullet = arg->bullets;
     for (i = 0; i < 96; i++, bullet++)
     {
         bullet->bulletState = 0;
     }
     arg->fireBulletTimer = -1;
-    arg->bombInfo.bombCalc = g_BombData[g_GameManager.shotTypeAndCharacter].calc;
-    arg->bombInfo.draw = g_BombData[g_GameManager.shotTypeAndCharacter].draw;
-    arg->bombInfo.bombFocusCalc = g_BombData[g_GameManager.shotTypeAndCharacter].calcFocus;
-    arg->bombInfo.drawFocus = g_BombData[g_GameManager.shotTypeAndCharacter].drawFocus;
+    arg->bombInfo.bombCalc = g_BombData[loadoutIndex].calc;
+    arg->bombInfo.draw = g_BombData[loadoutIndex].draw;
+    arg->bombInfo.bombFocusCalc = g_BombData[loadoutIndex].calcFocus;
+    arg->bombInfo.drawFocus = g_BombData[loadoutIndex].drawFocus;
     arg->bombInfo.isInUse = 0;
     arg->dirtyBombBoxes = true;
     arg->numActiveBombClearBoxes = 0;
     arg->optionAngle = -1.5707964f;
     arg->verticalMovementSpeedMultiplierDuringBomb = 1.0f;
     arg->horizontalMovementSpeedMultiplierDuringBomb = 1.0f;
-    arg->respawnTimer = g_Player.shooterData->initialRespawnTimer;
-    if ((u32)(g_Supervisor.curState != 3 && g_Supervisor.curState != 11 &&
+    arg->respawnTimer = arg->shooterData->initialRespawnTimer;
+    if (arg->initParam == 0 &&
+        (u32)(g_Supervisor.curState != 3 && g_Supervisor.curState != 11 &&
               g_Supervisor.curState != 12))
     {
         g_AsciiManager.cherryGauge.pendingInterrupt = 1;
         g_AsciiManager.uiFadeState = 1;
     }
-    g_AsciiManager.GetBossMarker(0)->pendingInterrupt = 2;
-    g_AsciiManager.GetBossMarker(1)->pendingInterrupt = 2;
-    g_AsciiManager.GetBossMarker(2)->pendingInterrupt = 2;
+    if (arg->initParam == 0)
+    {
+        g_AsciiManager.GetBossMarker(0)->pendingInterrupt = 2;
+        g_AsciiManager.GetBossMarker(1)->pendingInterrupt = 2;
+        g_AsciiManager.GetBossMarker(2)->pendingInterrupt = 2;
+    }
     if (g_GameManager.cherryPlus >= g_GameManager.globals->cherryStart + 50000)
     {
         g_GameManager.cherryPlus = g_GameManager.globals->cherryStart + 50000;
-        g_Player.ActivateBorder();
+        arg->ActivateBorder();
     }
     return ZUN_SUCCESS;
 }
 
 ZunResult Player::DeletedCallback(Player *arg)
 {
-    (void)arg;
-
     if ((u32)(g_Supervisor.curState != 3 && g_Supervisor.curState != 11 &&
               g_Supervisor.curState != 12))
     {
-        g_AnmManager->ReleaseAnm(10);
-        g_AsciiManager.cherryGauge.pendingInterrupt = 99;
-        g_AsciiManager.uiFadeState = 99;
-        g_AsciiManager.GetBossMarker(0)->pendingInterrupt = 99;
-        g_AsciiManager.GetBossMarker(1)->pendingInterrupt = 99;
-        g_AsciiManager.GetBossMarker(2)->pendingInterrupt = 99;
+        g_AnmManager->ReleaseAnm(arg->initParam == 0 ? ANM_FILE_PLAYER : ANM_FILE_PLAYER2);
+        if (arg->initParam == 0)
+        {
+            g_AsciiManager.cherryGauge.pendingInterrupt = 99;
+            g_AsciiManager.uiFadeState = 99;
+            g_AsciiManager.GetBossMarker(0)->pendingInterrupt = 99;
+            g_AsciiManager.GetBossMarker(1)->pendingInterrupt = 99;
+            g_AsciiManager.GetBossMarker(2)->pendingInterrupt = 99;
+        }
     }
-    SAFE_DELETE_ARRAY(g_Player.shooterData->levels);
-    SAFE_DELETE_ARRAY(g_Player.shooterData->entries);
-    SAFE_DELETE(g_Player.shooterData);
-    SAFE_DELETE_ARRAY(g_Player.shooterDataFocus->levels);
-    SAFE_DELETE_ARRAY(g_Player.shooterDataFocus->entries);
-    SAFE_DELETE(g_Player.shooterDataFocus);
+    SAFE_DELETE_ARRAY(arg->shooterData->levels);
+    SAFE_DELETE_ARRAY(arg->shooterData->entries);
+    SAFE_DELETE(arg->shooterData);
+    SAFE_DELETE_ARRAY(arg->shooterDataFocus->levels);
+    SAFE_DELETE_ARRAY(arg->shooterDataFocus->entries);
+    SAFE_DELETE(arg->shooterDataFocus);
     return ZUN_SUCCESS;
 }
 
-ZunResult Player::RegisterChain(u32 param_1)
+static ZunResult RegisterOnePlayer(Player *mgr, u8 playerId)
 {
-    Player *mgr = &g_Player;
     memset(mgr, 0, sizeof(Player));
     mgr->invulnerabilityTimer = 0;
-    mgr->initParam = param_1;
-    mgr->calcChain = g_Chain.CreateElem((ChainCallback)OnUpdate);
-    mgr->drawChain1 = g_Chain.CreateElem((ChainCallback)OnDrawHighPrio);
-    mgr->drawChain2 = g_Chain.CreateElem((ChainCallback)OnDrawLowPrio);
+    mgr->initParam = playerId;
+    mgr->calcChain = g_Chain.CreateElem((ChainCallback)Player::OnUpdate);
+    mgr->drawChain1 = g_Chain.CreateElem((ChainCallback)Player::OnDrawHighPrio);
+    mgr->drawChain2 = g_Chain.CreateElem((ChainCallback)Player::OnDrawLowPrio);
+    if (!mgr->calcChain || !mgr->drawChain1 || !mgr->drawChain2)
+    {
+        return ZUN_ERROR;
+    }
     mgr->calcChain->arg = mgr;
     mgr->drawChain1->arg = mgr;
     mgr->drawChain2->arg = mgr;
-    mgr->calcChain->addedCallback = (ChainLifecycleCallback)AddedCallback;
-    mgr->calcChain->deletedCallback = (ChainLifecycleCallback)DeletedCallback;
+    mgr->calcChain->addedCallback = (ChainLifecycleCallback)Player::AddedCallback;
+    mgr->calcChain->deletedCallback = (ChainLifecycleCallback)Player::DeletedCallback;
     if (g_Chain.AddToCalcChain(mgr->calcChain, 8))
     {
         return ZUN_ERROR;
@@ -2584,14 +2965,58 @@ ZunResult Player::RegisterChain(u32 param_1)
     return ZUN_SUCCESS;
 }
 
+ZunResult Player::RegisterChain(u32 param_1)
+{
+    (void)param_1;
+    g_PlayerActive[0] = true;
+    g_PlayerActive[1] = Online::IsMultiplayerSession() && !g_GameManager.replay;
+    if (RegisterOnePlayer(&g_Players[0], 0) != ZUN_SUCCESS)
+    {
+        return ZUN_ERROR;
+    }
+    if (g_PlayerActive[1] && RegisterOnePlayer(&g_Players[1], 1) != ZUN_SUCCESS)
+    {
+        return ZUN_ERROR;
+    }
+    if (g_PlayerActive[1] && g_Supervisor.curState != 3)
+    {
+        ResetMultiplayerPlayerResources(1);
+    }
+    MobileDiagnostics::Log("online/player", "registered active=%d p1=%d/%d p2=%d/%d",
+                           g_PlayerActive[1] ? 2 : 1, GetPlayerCharacter(&g_Players[0]),
+                           GetPlayerShot(&g_Players[0]), GetPlayerCharacter(&g_Players[1]),
+                           GetPlayerShot(&g_Players[1]));
+    return ZUN_SUCCESS;
+}
+
+static void CutPlayerChains(Player *player)
+{
+    if (player->calcChain)
+    {
+        g_Chain.Cut(player->calcChain);
+        player->calcChain = NULL;
+    }
+    if (player->drawChain1)
+    {
+        g_Chain.Cut(player->drawChain1);
+        player->drawChain1 = NULL;
+    }
+    if (player->drawChain2)
+    {
+        g_Chain.Cut(player->drawChain2);
+        player->drawChain2 = NULL;
+    }
+}
+
 void Player::CutChain()
 {
-    g_Chain.Cut(g_Player.calcChain);
-    g_Player.calcChain = NULL;
-    g_Chain.Cut(g_Player.drawChain1);
-    g_Player.drawChain1 = NULL;
-    g_Chain.Cut(g_Player.drawChain2);
-    g_Player.drawChain2 = NULL;
+    for (i32 playerId = 0; playerId < 2; ++playerId)
+    {
+        // A player that ran out of lives is marked inactive, but its chain
+        // elements still belong to the current game and must be removed.
+        CutPlayerChains(&g_Players[playerId]);
+        g_PlayerActive[playerId] = playerId == 0;
+    }
 }
 
 ZunResult ShtData::LoadShtData(ShtData **data, const char *shtPath)

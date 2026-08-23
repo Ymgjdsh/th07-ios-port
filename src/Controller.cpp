@@ -5,6 +5,7 @@
 #include <SDL3/SDL_keyboard.h>
 
 #include "Supervisor.hpp"
+#include "MobileUi.hpp"
 #include "Touch.hpp"
 #include "inttypes.hpp"
 #include "utils.hpp"
@@ -49,6 +50,13 @@ u16 Controller::GetControllerInput(u16 buttons)
     u32 isShooting =
         SetButton(&buttons, g_Supervisor.cfg.controllerMapping.shootButton, TH_BUTTON_SHOOT);
 
+#if defined(TH07_MOBILE)
+    // Mobile players already have a dedicated Focus button/toggle. The original
+    // shotSlow option turns a held controller Shoot button into Focus after ten
+    // frames, which makes sustained fire unexpectedly slow on iOS.
+    (void)isShooting;
+    g_AutoFocusTimer = 0;
+#else
     if (g_Supervisor.cfg.shotSlow)
     {
         if (isShooting)
@@ -72,6 +80,7 @@ u16 Controller::GetControllerInput(u16 buttons)
             g_AutoFocusTimer = 0;
         }
     }
+#endif
 
     SetButton(&buttons, g_Supervisor.cfg.controllerMapping.bombButton, TH_BUTTON_BOMB);
     SetButton(&buttons, g_Supervisor.cfg.controllerMapping.focusButton, TH_BUTTON_FOCUS);
@@ -82,7 +91,9 @@ u16 Controller::GetControllerInput(u16 buttons)
     SetButton(&buttons, g_Supervisor.cfg.controllerMapping.rightButton, TH_BUTTON_RIGHT);
     SetButton(&buttons, g_Supervisor.cfg.controllerMapping.skipButton, TH_BUTTON_SKIP);
 
-    SetButton(&buttons, 7, TH_BUTTON_D);
+    // Start must always pause on mobile controllers, even when an old th07.cfg
+    // contains a desktop-era custom mapping.
+    SetButton(&buttons, 7, TH_BUTTON_MENU);
 
     Sint16 x = SDL_GetGamepadAxis(g_Supervisor.controller, SDL_GAMEPAD_AXIS_LEFTX) / 32.767f;
     Sint16 y = SDL_GetGamepadAxis(g_Supervisor.controller, SDL_GAMEPAD_AXIS_LEFTY) / 32.767f;
@@ -182,7 +193,8 @@ u16 Controller::GetInput()
     buttons |= KEY_PRESSED(SDL_SCANCODE_R, TH_BUTTON_RESET);
     buttons |= KEY_PRESSED(SDL_SCANCODE_RETURN, TH_BUTTON_ENTER);
 
-    return GetControllerInput(buttons) | Touch::GetButtonBits();
+    buttons = GetControllerInput(buttons) | Touch::GetButtonBits() | MobileUi::GetButtonBits();
+    return Touch::ApplyDialogueButtonPolicy(buttons);
 }
 
 void Controller::ResetKeyboard()

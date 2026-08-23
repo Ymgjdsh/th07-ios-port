@@ -2,6 +2,7 @@
 
 #include "AnmVm.hpp"
 #include "Chain.hpp"
+#include "MobileUi.hpp"
 #include "ReplayManager.hpp"
 #include "Supervisor.hpp"
 
@@ -58,6 +59,7 @@ struct MainMenu
     void SwapMapping(i16 btnPressed, i16 oldMapping);
     ZunResult UpdateMenuDigits(AnmVm *param_1, i16 param_2);
     void SetGameState(GameState state);
+    bool HandleMobileTouch(MobileUi::MenuTouchAction action, f32 gameX, f32 gameY, f32 delta);
 
     i32 IsSelected(i32 idx)
     {

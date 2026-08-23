@@ -11,6 +11,7 @@
 #include "Gui.hpp"
 #include "ScreenEffect.hpp"
 #include "Supervisor.hpp"
+#include "MobileUi.hpp"
 #include "ZunResult.hpp"
 #include "dxutil.hpp"
 #include "utils.hpp"
@@ -544,7 +545,7 @@ u32 Stage::OnDrawHighPrio(Stage *arg)
     {
         g_AnmManager->SetColorWithMulEnabled(arg->color2.color);
     }
-    if (arg->spellCardState <= 1)
+    if (!MobileUi::IsStageBackgroundDisabled() && arg->spellCardState <= 1)
     {
         if (!g_Gui.IsStageFinished())
         {
@@ -558,7 +559,12 @@ u32 Stage::OnDrawHighPrio(Stage *arg)
             }
         }
     }
-    if (arg->color != 0)
+    if (MobileUi::IsStageBackgroundDisabled())
+    {
+        g_Supervisor.gfxDevice->SetClearColor({0xff000000});
+        g_Supervisor.gfxDevice->Clear(CLEAR_COLOR_BUFFER | CLEAR_DEPTH_BUFFER);
+    }
+    else if (arg->color != 0)
     {
         g_Supervisor.gfxDevice->SetClearColor({arg->color});
         g_Supervisor.gfxDevice->Clear(CLEAR_COLOR_BUFFER | CLEAR_DEPTH_BUFFER);
@@ -585,7 +591,7 @@ u32 Stage::OnDrawHighPrio(Stage *arg)
     {
         g_Supervisor.EnableFog();
     }
-    if (arg->spellCardState <= 1)
+    if (!MobileUi::IsStageBackgroundDisabled() && arg->spellCardState <= 1)
     {
         if (!g_Gui.IsStageFinished())
         {
@@ -602,7 +608,7 @@ u32 Stage::OnDrawLowPrio(Stage *arg)
     ZunRect local_1c;
     i32 alpha;
 
-    if (arg->spellCardState <= 1)
+    if (!MobileUi::IsStageBackgroundDisabled() && arg->spellCardState <= 1)
     {
         if (g_Gui.IsStageFinished() == 0)
         {
@@ -613,7 +619,8 @@ u32 Stage::OnDrawLowPrio(Stage *arg)
                 g_Supervisor.DisableFog();
             }
             g_EffectManager.UpdateSpecialEffect();
-            if (arg->spellCardState == 1)
+            if (arg->spellCardState == 1 &&
+                g_Supervisor.cfg.effectQuality != QUALITY_WORST)
             {
                 local_1c.left = 32.0f;
                 local_1c.top = 16.0f;
@@ -636,7 +643,8 @@ u32 Stage::OnDrawLowPrio(Stage *arg)
     {
         g_Supervisor.DisableFog();
     }
-    if (arg->spellCardState >= 1)
+    if (arg->spellCardState >= 1 &&
+        g_Supervisor.cfg.effectQuality != QUALITY_WORST)
     {
         for (i = 0; i < arg->numSpellcardVms; i++)
         {

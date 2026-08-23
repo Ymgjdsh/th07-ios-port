@@ -1,0 +1,7 @@
+Repository: https://github.com/some100/th07
+Branch: reallyportable
+Commit: 50c20024783445f4044b4faec6d7f31bb830d78e
+Captured: 2026-08-13
+
+The mobile/iOS work in this package is maintained independently from the
+matching decompilation branch and from the TH06 project in the parent workspace.

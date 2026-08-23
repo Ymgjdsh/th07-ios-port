@@ -1,9 +1,15 @@
 #include "SoundPlayer.hpp"
 
+#include <atomic>
 #include <cstdio>
+
+#if defined(TH07_IOS)
+#import <AVFoundation/AVFoundation.h>
+#endif
 
 #include "FileSystem.hpp"
 #include "GameErrorContext.hpp"
+#include "MobileDiagnostics.hpp"
 #include "Supervisor.hpp"
 #include "dxutil.hpp"
 
@@ -34,6 +40,80 @@ const char *g_SFXList[30] = {
 };
 
 SoundPlayer g_SoundPlayer;
+
+namespace
+{
+std::atomic<bool> g_AudioInterrupted(false);
+std::atomic<bool> g_AudioRouteChanged(false);
+std::atomic<bool> g_AudioRestartRequested(false);
+
+void AudioDeviceNotification(const ma_device_notification *notification)
+{
+    if (!notification) return;
+    switch (notification->type)
+    {
+    case ma_device_notification_type_rerouted:
+        g_AudioRouteChanged.store(true, std::memory_order_release);
+        break;
+    case ma_device_notification_type_interruption_began:
+        g_AudioInterrupted.store(true, std::memory_order_release);
+        break;
+    case ma_device_notification_type_interruption_ended:
+        g_AudioInterrupted.store(false, std::memory_order_release);
+        g_AudioRouteChanged.store(true, std::memory_order_release);
+        g_AudioRestartRequested.store(true, std::memory_order_release);
+        break;
+    default:
+        break;
+    }
+}
+
+#if defined(TH07_IOS)
+bool ActivateIosPlaybackSession(const char *reason)
+{
+    @autoreleasepool
+    {
+        AVAudioSession *session = [AVAudioSession sharedInstance];
+        NSError *error = nil;
+        BOOL categoryOk = [session setCategory:AVAudioSessionCategoryPlayback
+                                  withOptions:0 error:&error];
+        if (!categoryOk)
+        {
+            MobileDiagnostics::Log("audio/session", "category failed reason=%s error=%s",
+                                   reason, error.localizedDescription.UTF8String ?: "unknown");
+            return false;
+        }
+
+        error = nil;
+        BOOL activeOk = [session setActive:YES error:&error];
+        if (!activeOk)
+        {
+            MobileDiagnostics::Log("audio/session", "activation failed reason=%s error=%s",
+                                   reason, error.localizedDescription.UTF8String ?: "unknown");
+            return false;
+        }
+
+        NSMutableString *outputs = [NSMutableString string];
+        for (AVAudioSessionPortDescription *port in session.currentRoute.outputs)
+        {
+            if (outputs.length != 0) [outputs appendString:@","];
+            [outputs appendFormat:@"%@:%@", port.portType, port.portName];
+        }
+        MobileDiagnostics::Log("audio/session",
+                               "active reason=%s category=%s outputs=%s rate=%.0f channels=%ld",
+                               reason, session.category.UTF8String,
+                               outputs.UTF8String ?: "none", session.sampleRate,
+                               (long)session.outputNumberOfChannels);
+        return true;
+    }
+}
+#else
+bool ActivateIosPlaybackSession(const char *)
+{
+    return true;
+}
+#endif
+} // namespace
 
 static ma_result ThBgmDataSource_read(ma_data_source *pDataSource, void *pFramesOut,
                                       ma_uint64 frameCount, ma_uint64 *pFramesRead)
@@ -344,6 +424,7 @@ SoundPlayer::SoundPlayer()
 ZunResult SoundPlayer::InitializeSound()
 {
     ma_engine_config engineConfig;
+    ma_context_config contextConfig;
 
     memset(this, 0, sizeof(SoundPlayer));
     for (i32 i = 0; i < 128; i++)
@@ -351,27 +432,71 @@ ZunResult SoundPlayer::InitializeSound()
         this->unusedSoundVolRelated[i] = -1;
     }
 
+    // Playback already follows wired-headset, A2DP and AirPlay routes. Passing
+    // PlayAndRecord-only route options here makes some iOS versions reject the
+    // whole session and leaves miniaudio without an output device.
+    ActivateIosPlaybackSession("pre-initialize");
+
+    this->context = new ma_context;
+    contextConfig = ma_context_config_init();
+#if defined(TH07_IOS)
+    contextConfig.coreaudio.sessionCategory = ma_ios_session_category_playback;
+    contextConfig.coreaudio.sessionCategoryOptions = 0;
+#endif
+    ma_result contextResult = ma_context_init(NULL, 0, &contextConfig, this->context);
+#if defined(TH07_IOS)
+    if (contextResult != MA_SUCCESS)
+    {
+        MobileDiagnostics::Log("audio/init",
+                               "playback context failed result=%d; retrying default context",
+                               (i32)contextResult);
+        SAFE_DELETE(this->context);
+        this->context = new ma_context;
+        contextConfig = ma_context_config_init();
+        contextResult = ma_context_init(NULL, 0, &contextConfig, this->context);
+    }
+#endif
+    if (contextResult != MA_SUCCESS)
+    {
+        MobileDiagnostics::Log("audio/init", "context failed result=%d", (i32)contextResult);
+        SAFE_DELETE(this->context);
+        return ZUN_ERROR;
+    }
+
     this->engine = new ma_engine;
 
     engineConfig = ma_engine_config_init();
     engineConfig.sampleRate = 44100;
     engineConfig.channels = 2;
+    engineConfig.pContext = this->context;
+    engineConfig.notificationCallback = AudioDeviceNotification;
 
-    if (ma_engine_init(&engineConfig, this->engine) != MA_SUCCESS)
+    ma_result engineResult = ma_engine_init(&engineConfig, this->engine);
+    if (engineResult != MA_SUCCESS)
     {
         g_GameErrorContext.Log("DirectSound オブジェクトの初期化が失敗したよ\n");
         SAFE_DELETE(this->engine);
+        ma_context_uninit(this->context);
+        SAFE_DELETE(this->context);
+        MobileDiagnostics::Log("audio/init", "engine failed result=%d", (i32)engineResult);
         return ZUN_ERROR;
     }
 
-    if (ma_engine_start(this->engine) != MA_SUCCESS)
+    const ma_result startResult = ma_engine_start(this->engine);
+    if (startResult != MA_SUCCESS)
     {
         g_GameErrorContext.Log("DirectSound オブジェクトの初期化が失敗したよ\n");
+        ma_engine_uninit(this->engine);
         SAFE_DELETE(this->engine);
+        ma_context_uninit(this->context);
+        SAFE_DELETE(this->context);
+        MobileDiagnostics::Log("audio/init", "engine start failed result=%d", (i32)startResult);
         return ZUN_ERROR;
     }
 
     g_GameErrorContext.Log("DirectSound は正常に初期化されました\n");
+    ActivateIosPlaybackSession("initialize");
+    MobileDiagnostics::Log("audio/init", "engine started rate=44100 channels=2");
     return ZUN_SUCCESS;
 }
 
@@ -407,6 +532,11 @@ ZunResult SoundPlayer::Release()
 
     ma_engine_uninit(this->engine);
     SAFE_DELETE(this->engine);
+    if (this->context)
+    {
+        ma_context_uninit(this->context);
+        SAFE_DELETE(this->context);
+    }
     for (i = 0; i < 16; i++)
     {
         SAFE_FREE(this->bgmPreloadData[i]);
@@ -416,6 +546,43 @@ ZunResult SoundPlayer::Release()
         free(this->bgmFmtData);
     }
     return ZUN_SUCCESS;
+}
+
+void SoundPlayer::RequestDeviceRecovery()
+{
+    g_AudioRouteChanged.store(true, std::memory_order_release);
+    g_AudioRestartRequested.store(true, std::memory_order_release);
+}
+
+void SoundPlayer::ProcessDeviceNotifications()
+{
+    const bool routeChanged = g_AudioRouteChanged.exchange(false, std::memory_order_acq_rel);
+    const bool restartRequested =
+        g_AudioRestartRequested.exchange(false, std::memory_order_acq_rel);
+    if (!routeChanged && !restartRequested) return;
+    if (g_AudioInterrupted.load(std::memory_order_acquire))
+    {
+        g_AudioRouteChanged.store(true, std::memory_order_release);
+        g_AudioRestartRequested.store(true, std::memory_order_release);
+        return;
+    }
+
+    ActivateIosPlaybackSession(routeChanged ? "route-change" : "recovery");
+    if (!this->engine) return;
+    ma_device *device = ma_engine_get_device(this->engine);
+    if (!device) return;
+
+    const ma_device_state state = ma_device_get_state(device);
+    if (state != ma_device_state_started)
+    {
+        const ma_result result = ma_device_start(device);
+        MobileDiagnostics::Log("audio/device", "restart state=%d result=%d",
+                               (i32)state, (i32)result);
+    }
+    else
+    {
+        MobileDiagnostics::Log("audio/device", "route refreshed; device already running");
+    }
 }
 
 i32 SoundPlayer::GetFmtIndexByName(const char *param_1)
@@ -670,6 +837,16 @@ void SoundPlayer::StopBGM()
     }
 }
 
+void SoundPlayer::SetBgmMuted(bool muted)
+{
+    if (this->bgmMuted == muted) return;
+    this->bgmMuted = muted;
+    if (this->backgroundMusic)
+    {
+        ma_sound_set_volume(this->backgroundMusic, muted ? 0.0f : 1.0f);
+    }
+}
+
 ZunResult SoundPlayer::InitSoundBuffers()
 {
     i32 i;
@@ -753,6 +930,7 @@ i32 SoundPlayer::ProcessQueues()
     i32 i;
     u32 loopAgain;
 
+    ProcessDeviceNotifications();
     if (!this->engine)
     {
         return 0;
@@ -826,7 +1004,10 @@ loop:
         else if (!commandCursor->arg2)
         {
             Supervisor::DebugPrint("Sound : Stop Stage\n");
-            ma_sound_stop(this->backgroundMusic);
+            if (this->backgroundMusic)
+            {
+                ma_sound_stop(this->backgroundMusic);
+            }
         }
         else if (commandCursor->arg2 == 1)
         {
@@ -846,7 +1027,10 @@ loop:
         else if (commandCursor->arg2 == 4)
         {
             Supervisor::DebugPrint("Sound : Play Stage\n");
-            ma_sound_start(this->backgroundMusic);
+            if (this->backgroundMusic)
+            {
+                ma_sound_start(this->backgroundMusic);
+            }
         }
         else if (commandCursor->arg2 >= 7)
         {

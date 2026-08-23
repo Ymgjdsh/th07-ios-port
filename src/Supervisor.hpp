@@ -11,6 +11,12 @@ extern u16 g_CurFrameRawInput;
 extern u16 g_CurFrameGameInput;
 extern u16 g_LastFrameRawInput;
 extern u16 g_LastFrameGameInput;
+extern u16 g_CurFrameRawInputs[2];
+extern u16 g_CurFrameGameInputs[2];
+extern u16 g_LastFrameRawInputs[2];
+extern u16 g_LastFrameGameInputs[2];
+extern f32 g_CurFrameTouchDx[2];
+extern f32 g_CurFrameTouchDy[2];
 extern u16 g_IsEighthFrameOfHeldInput;
 extern u16 g_NumOfFramesInputsWereHeld;
 

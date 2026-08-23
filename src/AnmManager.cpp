@@ -580,10 +580,12 @@ void AnmManager::SetRenderStateForVm(AnmVm *vm)
 {
     ZunColor color;
     ZunColor prevColor;
+    bool stateChanged = false;
 
     if ((u32)this->currentBlendMode != vm->blendMode)
     {
         Flush();
+        stateChanged = true;
         this->currentBlendMode = vm->blendMode;
         if (!this->currentBlendMode)
         {
@@ -612,6 +614,7 @@ void AnmManager::SetRenderStateForVm(AnmVm *vm)
         {
             this->currentTextureFactor.color = color.color;
             g_Supervisor.gfxDevice->SetTextureFactor(this->currentTextureFactor);
+            stateChanged = true;
         }
     }
     else
@@ -635,12 +638,14 @@ void AnmManager::SetRenderStateForVm(AnmVm *vm)
     if (!g_Supervisor.cfg.disableZBuffer && (u32)this->currentZWriteDisable != vm->zWriteDisable)
     {
         Flush();
+        stateChanged = true;
         this->currentZWriteDisable = vm->zWriteDisable;
         g_Supervisor.gfxDevice->SetDepthMask(this->currentZWriteDisable == 0);
     }
     if ((u32)this->currentCameraMode != vm->cameraMode)
     {
         Flush();
+        stateChanged = true;
         this->currentCameraMode = vm->cameraMode;
         if (!this->currentCameraMode)
         {
@@ -653,14 +658,16 @@ void AnmManager::SetRenderStateForVm(AnmVm *vm)
             g_Supervisor.gfxDevice->SetViewport(g_Supervisor.viewport);
         }
     }
-    this->renderStateChangesThisFrame++;
+    if (stateChanged) this->renderStateChangesThisFrame++;
 }
 
 void AnmManager::SyncRenderState(AnmVm *vm)
 {
+    bool stateChanged = false;
     if ((u32)this->currentBlendMode != vm->blendMode)
     {
         Flush();
+        stateChanged = true;
         this->currentBlendMode = vm->blendMode;
         if (!this->currentBlendMode)
         {
@@ -674,10 +681,11 @@ void AnmManager::SyncRenderState(AnmVm *vm)
     if (!g_Supervisor.cfg.disableZBuffer && (u32)this->currentZWriteDisable != vm->zWriteDisable)
     {
         Flush();
+        stateChanged = true;
         this->currentZWriteDisable = vm->zWriteDisable;
         g_Supervisor.gfxDevice->SetDepthMask(this->currentZWriteDisable == 0);
     }
-    this->renderStateChangesThisFrame++;
+    if (stateChanged) this->renderStateChangesThisFrame++;
 }
 
 ZunResult AnmManager::DrawInner(AnmVm *vm, u32 drawFlags)

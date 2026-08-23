@@ -18,3 +18,31 @@ android/.idea
 android/local.properties
 android/app/.cxx
 android/app/src/main/res/mipmap-mdpi/ic_launcher.png
+
+# Local build products and generated files
+/dist/
+/build*/
+/package-build*/
+/_verify*/
+*.obj
+*.o
+*.pyc
+*.ipa
+*.zip
+*.log
+__pycache__/
+.DS_Store
+
+# Machine-local and signing configuration (never publish)
+*.local.psd1
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.mobileprovision
+xcuserdata/
+DerivedData/
+*.xcuserstate

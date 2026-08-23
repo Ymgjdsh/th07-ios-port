@@ -10,6 +10,7 @@
 #include "Player.hpp"
 #include "Rng.hpp"
 #include "SoundPlayer.hpp"
+#include "Supervisor.hpp"
 #include "ZunResult.hpp"
 #include "utils.hpp"
 
@@ -38,6 +39,20 @@ EnemyManager g_EnemyManager;
 ChainElem g_EnemyManagerCalcChain;
 
 ChainElem g_EnemyManagerDrawChain2;
+
+static bool ShouldFreezeForActivePlayer()
+{
+    for (i32 playerId = 0; playerId < 2; ++playerId)
+    {
+        if (IsPlayerSlotActive((u8)playerId) &&
+            (g_Players[playerId].bombInfo.isInUse ||
+             g_Players[playerId].playerState != PLAYER_STATE_ALIVE))
+        {
+            return true;
+        }
+    }
+    return false;
+}
 
 void Enemy::Move()
 {
@@ -640,15 +655,29 @@ void Enemy::ClampPos()
 void Enemy::CheckBulletPlayerCollision(ZunVec3 *bulletCenter, ZunVec3 *bulletSize)
 {
     ZunVec3 grazeSize;
+    bool hitPlayer = false;
 
     grazeSize = *bulletSize / 0.7f;
     if (this->isProjectile && this->timer.HasTicked() && this->timer.current % 6 == 0)
     {
-        g_Player.CheckGraze(bulletCenter, &grazeSize);
+        for (i32 playerId = 0; playerId < 2; ++playerId)
+        {
+            if (IsPlayerSlotActive((u8)playerId))
+            {
+                g_Players[playerId].CheckGraze(bulletCenter, &grazeSize);
+            }
+        }
     }
     grazeSize = *bulletSize / 1.5f;
-    if (g_Player.CalcKillboxCollision(bulletCenter, &grazeSize) == 1 && this->canDie &&
-        (!this->isBoss && !this->isProjectile))
+    for (i32 playerId = 0; playerId < 2; ++playerId)
+    {
+        if (IsPlayerSlotActive((u8)playerId) &&
+            g_Players[playerId].CalcKillboxCollision(bulletCenter, &grazeSize) == 1)
+        {
+            hitPlayer = true;
+        }
+    }
+    if (hitPlayer && this->canDie && (!this->isBoss && !this->isProjectile))
     {
         this->life = this->life - 10;
     }
@@ -674,6 +703,10 @@ u32 EnemyManager::OnUpdate(EnemyManager *arg)
     i32 collisionOut;
     i32 stageFactor;
     ZunVec3 enemyDiff;
+    i32 playerDamage[2];
+    i32 playerCollision[2];
+    i32 damageOwnerId;
+    Player *targetingPlayer;
 
     collisionOut = 0;
     stageFactor = g_GameManager.currentStage >= 5 ? 10 : g_GameManager.currentStage * 2;
@@ -711,8 +744,7 @@ u32 EnemyManager::OnUpdate(EnemyManager *arg)
         enemy->UpdatePrev();
         enemy->prevPosition = enemy->pos;
         arg->enemyCountReal++;
-        if (enemy->freezeEclDuringBombs &&
-            (g_Player.bombInfo.isInUse || g_Player.playerState != PLAYER_STATE_ALIVE))
+        if (enemy->freezeEclDuringBombs && ShouldFreezeForActivePlayer())
         {
             enemy->timer--;
             goto LAB_00421da7;
@@ -819,21 +851,45 @@ u32 EnemyManager::OnUpdate(EnemyManager *arg)
             enemy->lastDamage = 0;
             if (enemy->canDie && enemy->isHittable)
             {
-                damage = g_Player.CalcDamageToEnemy(&enemy->pos, &enemy->hitboxSize, &collisionOut);
-                if (enemy->grazeSize.x > 0.0f)
+                damage = 0;
+                collisionOut = 0;
+                damageOwnerId = 0;
+                for (i32 playerId = 0; playerId < 2; ++playerId)
                 {
-                    grazeDamage =
-                        g_Player.CalcDamageToEnemy(&enemy->pos, &enemy->grazeSize, &collisionOut);
-                    if (collisionOut == 0)
+                    playerDamage[playerId] = 0;
+                    playerCollision[playerId] = 0;
+                    if (!IsPlayerSlotActive((u8)playerId))
                     {
-                        damage = (i32)((f32)damage + (f32)grazeDamage / 2.5f);
+                        continue;
+                    }
+                    playerDamage[playerId] = g_Players[playerId].CalcDamageToEnemy(
+                        &enemy->pos, &enemy->hitboxSize, &playerCollision[playerId]);
+                    if (enemy->grazeSize.x > 0.0f)
+                    {
+                        grazeDamage = g_Players[playerId].CalcDamageToEnemy(
+                            &enemy->pos, &enemy->grazeSize, &playerCollision[playerId]);
+                        if (playerCollision[playerId] == 0)
+                        {
+                            playerDamage[playerId] =
+                                (i32)((f32)playerDamage[playerId] + (f32)grazeDamage / 2.5f);
+                        }
+                    }
+                    damage += playerDamage[playerId];
+                    if (playerCollision[playerId] != 0)
+                    {
+                        collisionOut = playerCollision[playerId];
+                    }
+                    if (playerDamage[playerId] > playerDamage[damageOwnerId])
+                    {
+                        damageOwnerId = playerId;
                     }
                 }
                 if (damage > 0)
                 {
-                    if ((enemy->isBoss || !g_Player.isFocus) && g_Player.bombInfo.isInUse == 0)
+                    if ((enemy->isBoss || !g_Players[damageOwnerId].isFocus) &&
+                        g_Players[damageOwnerId].bombInfo.isInUse == 0)
                     {
-                        if (enemy->isBoss && !g_Player.isFocus)
+                        if (enemy->isBoss && !g_Players[damageOwnerId].isFocus)
                         {
                             cherryGain = damage / (10 - stageFactor / 3) * 10;
                         }
@@ -846,13 +902,15 @@ u32 EnemyManager::OnUpdate(EnemyManager *arg)
                             cherryGain = 70;
                         }
                         if (cherryGain == 0 &&
-                            (g_Player.isFocus == 0 || (enemy->timer.GetCurrent() & 1) != 0))
+                            (g_Players[damageOwnerId].isFocus == 0 ||
+                             (enemy->timer.GetCurrent() & 1) != 0))
                         {
                             cherryGain = 10;
                         }
 
                         // ABSOLUTELY no reason for this to be a switch statement
-                        switch (g_GameManager.shotTypeAndCharacter)
+                        switch (GetPlayerCharacter(&g_Players[damageOwnerId]) * 2 +
+                                GetPlayerShot(&g_Players[damageOwnerId]))
                         {
                         default:
                             break;
@@ -929,49 +987,57 @@ u32 EnemyManager::OnUpdate(EnemyManager *arg)
                     }
                     playedDamageSound = 1;
                 }
-                if (enemy->isBoss)
+                for (i32 playerId = 0; playerId < 2; ++playerId)
                 {
-                    diffToPlayer = g_Player.positionOfLastEnemyHit - g_Player.positionCenter;
-                    enemyDiff = enemy->pos - g_Player.positionCenter;
-
-                    if (!g_Player.targetingEnemy || fabsf(diffToPlayer.x) > fabsf(enemyDiff.x))
+                    if (!IsPlayerSlotActive((u8)playerId))
                     {
-                        g_Player.positionOfLastEnemyHit = enemy->pos;
+                        continue;
                     }
-
-                    if (g_GameManager.character == CHAR_SAKUYA)
+                    targetingPlayer = &g_Players[playerId];
+                    if (enemy->isBoss)
                     {
-                        diffToPlayer = g_Player.sakuyaTargetPosition - g_Player.positionCenter;
-                        angle = atan2f(enemy->pos.y - g_Player.positionCenter.y,
-                                       enemy->pos.x - g_Player.positionCenter.x);
-
-                        if (angle >= -2.0943952f && angle <= -1.0471976f &&
-                            (!g_Player.targetingEnemy ||
-                             fabsf(diffToPlayer.x) > fabsf(enemyDiff.x)))
+                        diffToPlayer = targetingPlayer->positionOfLastEnemyHit -
+                                       targetingPlayer->positionCenter;
+                        enemyDiff = enemy->pos - targetingPlayer->positionCenter;
+                        if (!targetingPlayer->targetingEnemy ||
+                            fabsf(diffToPlayer.x) > fabsf(enemyDiff.x))
                         {
-                            g_Player.sakuyaTargetPosition = enemy->pos;
-                            g_Player.targetingEnemy = 1;
+                            targetingPlayer->positionOfLastEnemyHit = enemy->pos;
+                        }
+                        if (GetPlayerCharacter(targetingPlayer) == CHAR_SAKUYA)
+                        {
+                            diffToPlayer = targetingPlayer->sakuyaTargetPosition -
+                                           targetingPlayer->positionCenter;
+                            angle = atan2f(enemy->pos.y - targetingPlayer->positionCenter.y,
+                                           enemy->pos.x - targetingPlayer->positionCenter.x);
+                            if (angle >= -2.0943952f && angle <= -1.0471976f &&
+                                (!targetingPlayer->targetingEnemy ||
+                                 fabsf(diffToPlayer.x) > fabsf(enemyDiff.x)))
+                            {
+                                targetingPlayer->sakuyaTargetPosition = enemy->pos;
+                                targetingPlayer->targetingEnemy = 1;
+                            }
+                        }
+                        else
+                        {
+                            targetingPlayer->targetingEnemy = 1;
                         }
                     }
-                    else
+                    if (!targetingPlayer->targetingEnemy)
                     {
-                        g_Player.targetingEnemy = 1;
-                    }
-                }
-                if (!g_Player.targetingEnemy)
-                {
-                    if (g_Player.positionOfLastEnemyHit.y < enemy->pos.y)
-                    {
-                        g_Player.positionOfLastEnemyHit = enemy->pos;
-                    }
-                    if (g_GameManager.character == CHAR_SAKUYA &&
-                        g_Player.sakuyaTargetPosition.y < -900.0f)
-                    {
-                        angle = atan2f(enemy->pos.y - g_Player.positionCenter.y,
-                                       enemy->pos.x - g_Player.positionCenter.x);
-                        if (angle >= -2.0943952f && angle <= -1.0471976f)
+                        if (targetingPlayer->positionOfLastEnemyHit.y < enemy->pos.y)
                         {
-                            g_Player.sakuyaTargetPosition = enemy->pos;
+                            targetingPlayer->positionOfLastEnemyHit = enemy->pos;
+                        }
+                        if (GetPlayerCharacter(targetingPlayer) == CHAR_SAKUYA &&
+                            targetingPlayer->sakuyaTargetPosition.y < -900.0f)
+                        {
+                            angle = atan2f(enemy->pos.y - targetingPlayer->positionCenter.y,
+                                           enemy->pos.x - targetingPlayer->positionCenter.x);
+                            if (angle >= -2.0943952f && angle <= -1.0471976f)
+                            {
+                                targetingPlayer->sakuyaTargetPosition = enemy->pos;
+                            }
                         }
                     }
                 }
@@ -1209,7 +1275,7 @@ u32 EnemyManager::ActualOnDraw(EnemyManager *arg, i32 first, i32 last)
             vm = &enemy->vms[0];
             for (j = 0; j < 1; j++, vm++)
             {
-                if (vm->anmFileIdx >= 0)
+                if (g_Supervisor.cfg.effectQuality != QUALITY_WORST && vm->anmFileIdx >= 0)
                 {
                     if (vm->autoRotate)
                     {
@@ -1242,7 +1308,7 @@ u32 EnemyManager::ActualOnDraw(EnemyManager *arg, i32 first, i32 last)
 
             for (j = 1; j < 2; j++, vm++)
             {
-                if (vm->anmFileIdx >= 0)
+                if (g_Supervisor.cfg.effectQuality != QUALITY_WORST && vm->anmFileIdx >= 0)
                 {
                     if (vm->autoRotate)
                     {
@@ -1257,7 +1323,7 @@ u32 EnemyManager::ActualOnDraw(EnemyManager *arg, i32 first, i32 last)
                 }
             }
 
-            if (enemy->trailFlags != 0)
+            if (g_Supervisor.cfg.effectQuality != QUALITY_WORST && enemy->trailFlags != 0)
             {
                 scale = enemy->primaryVm.scale;
 

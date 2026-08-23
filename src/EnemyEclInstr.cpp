@@ -692,8 +692,9 @@ void EnemyEclInstr::ExInsYoumuRedirectBulletsToPlayer(Enemy *enemy, EclRawInstr 
 
         if (bullet->state2 == 1)
         {
-            bullet->AddTargetVelocityCommand(0, 0, 90, 0.026666667f,
-                                             g_Player.AngleToPlayer(&bullet->pos));
+            bullet->AddTargetVelocityCommand(
+                0, 0, 90, 0.026666667f,
+                GetClosestActivePlayer(&bullet->pos)->AngleToPlayer(&bullet->pos));
             bullet->ClearCommand(1);
             bullet->state2 = 2;
         }

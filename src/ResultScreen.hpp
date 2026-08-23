@@ -152,6 +152,10 @@ struct ScoreListNode
 
 struct ScoreDat
 {
+    ScoreDat() : raw{}, scores(NULL), decodedData(NULL)
+    {
+    }
+
     ScoreDatRaw raw;
     ScoreListNode *scores;
     u8 *decodedData;
@@ -165,10 +169,7 @@ struct ResultScreen
         this->cursor = 1;
     }
 
-    ~ResultScreen()
-    {
-        free(this->scoreDat);
-    }
+    ~ResultScreen();
 
     static ZunResult RegisterChain(u32 type);
 

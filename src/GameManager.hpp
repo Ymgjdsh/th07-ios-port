@@ -23,6 +23,25 @@ typedef enum ShotType
     SHOT_SAKUYA_B = 5
 } ShotType;
 
+struct MultiplayerPlayerResources
+{
+    i32 livesRemaining;
+    i32 bombsRemaining;
+    i32 currentPower;
+};
+
+extern MultiplayerPlayerResources g_MultiplayerPlayerResources[1];
+i32 GetPlayerLives(u8 playerId);
+i32 GetPlayerBombs(u8 playerId);
+i32 GetPlayerPower(u8 playerId);
+void SetPlayerLives(u8 playerId, i32 amount);
+void SetPlayerBombs(u8 playerId, i32 amount);
+void SetPlayerPower(u8 playerId, i32 amount);
+void AddPlayerLives(u8 playerId, i32 amount);
+void AddPlayerBombs(u8 playerId, i32 amount);
+void AddPlayerPower(u8 playerId, i32 amount);
+void ResetMultiplayerPlayerResources(u8 playerId);
+
 struct ZunGlobals
 {
     u32 guiScore;
@@ -163,6 +182,7 @@ struct GameManager
 
     i32 HasReachedMaxClears(i32 shotType);
     i32 HasReachedMaxClearsAllShotTypes();
+    i32 HasUnlockedExtra();
     i32 HasUnlockedPhantom(i32 shotType);
     i32 HasUnlockedPhantomAndMaxClears();
 
@@ -171,6 +191,7 @@ struct GameManager
     void AddCherry(i32 amount);
     void AddLivesRemaining(i32 amount);
     void ExtendFromPoints();
+    void ExtendFromPointsForPlayer(u8 playerId);
 
     void DecreaseSubrank(i32 amount);
     void IncreaseCherry(i32 amount);

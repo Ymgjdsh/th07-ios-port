@@ -134,6 +134,9 @@ struct ReplayManager
     ChainElem *rngCalcChain;
     u16 rngSeed;
     u16 replayEventFlags;
+    u32 touchReplayFrames;
+    bool touchReplayOverflow;
+    bool touchWasUsed;
 };
 
 extern ReplayManager *g_ReplayManager;

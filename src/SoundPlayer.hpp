@@ -115,6 +115,9 @@ struct SoundPlayer
     ZunResult ReopenBGM(const char *name);
     ZunResult StartBGM(const char *path);
     void StopBGM();
+    void SetBgmMuted(bool muted);
+    void RequestDeviceRecovery();
+    void ProcessDeviceNotifications();
 
     void FadeOut(f32 duration)
     {
@@ -127,6 +130,7 @@ struct SoundPlayer
         }
     }
 
+    ma_context *context;
     ma_engine *engine;
     ma_audio_buffer *duplicateSfxData[128];
     ma_audio_buffer *sfxData[128];
@@ -147,6 +151,7 @@ struct SoundPlayer
     ThBgmDataSource *bgmDataSource;
     ma_sound *backgroundMusic;
     i32 bgmSeekOffset;
+    bool bgmMuted;
 };
 
 extern SoundPlayer g_SoundPlayer;

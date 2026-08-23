@@ -28,17 +28,21 @@ struct Item
 
     i32 IsBelowPoc()
     {
-        return this->currentPosition.y < g_Player.shooterData->pocY;
+        return this->currentPosition.y <
+               GetClosestActivePlayer(&this->currentPosition)->shooterData->pocY;
     }
 
     i32 OffsetFromPoc()
     {
-        return this->currentPosition.y - g_Player.shooterData->pocY;
+        return this->currentPosition.y -
+               GetClosestActivePlayer(&this->currentPosition)->shooterData->pocY;
     }
 
     i32 ShouldAwardMaxScore()
     {
-        return this->currentPosition.y < g_Player.shooterData->pocY || this->autoCollect;
+        return this->currentPosition.y <
+                   GetClosestActivePlayer(&this->currentPosition)->shooterData->pocY ||
+               this->autoCollect;
     }
 
     AnmVm sprite;

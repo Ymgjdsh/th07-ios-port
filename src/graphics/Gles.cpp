@@ -4,10 +4,12 @@
 #include <SDL3/SDL_timer.h>
 #include <SDL3/SDL_video.h>
 #include <cstddef>
+#include <cstring>
 
 #include "AnmManager.hpp"
 #include "GameWindow.hpp"
 #include "Supervisor.hpp"
+#include "MobileUi.hpp"
 
 #ifdef USING_GL
 #define GLSL_VERSION "#version 330 core\n"
@@ -120,11 +122,13 @@ const char *fragmentShaderSource =
 
 const char *blitVSSource =
     GLSL_VERSION
+    "uniform vec4 u_SrcRect;\n"
     "out vec2 v_TexCoord;\n"
     "void main() {\n"
     "    float x = float((gl_VertexID & 1) << 2) - 1.0;\n"
     "    float y = float((gl_VertexID & 2) << 1) - 1.0;\n"
-    "    v_TexCoord = vec2((x + 1.0) * 0.5, (y + 1.0) * 0.5);\n"
+    "    vec2 uv = vec2((x + 1.0) * 0.5, (y + 1.0) * 0.5);\n"
+    "    v_TexCoord = u_SrcRect.xy + uv * u_SrcRect.zw;\n"
     "    gl_Position = vec4(x, y, 0.0, 1.0);\n"
     "}\n";
 
@@ -250,12 +254,14 @@ ZunGraphics *GlesGraphics::Init()
     gfx->u_FogNear = glGetUniformLocation(gfx->shaderProgram, "u_FogNear");
     gfx->u_FogFar = glGetUniformLocation(gfx->shaderProgram, "u_FogFar");
     gfx->u_BlitTexture = glGetUniformLocation(gfx->blitProgram, "u_Texture");
+    gfx->u_BlitSrcRect = glGetUniformLocation(gfx->blitProgram, "u_SrcRect");
 
     glUseProgram(gfx->shaderProgram);
     glUniform1i(gfx->u_Texture, 0);
 
     glUseProgram(gfx->blitProgram);
     glUniform1i(gfx->u_BlitTexture, 0);
+    glUniform4f(gfx->u_BlitSrcRect, 0.0f, 0.0f, 1.0f, 1.0f);
 
     glGenVertexArrays(9, &gfx->vaos[0][0]);
     glGenBuffers(3, gfx->vbos);
@@ -323,6 +329,8 @@ void GlesGraphics::Exit()
 
 void GlesGraphics::BeginFrame()
 {
+    telemetryEnabled = MobileUi::IsPerformanceTelemetryEnabled();
+    if (telemetryEnabled) frameStats = {};
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
 
     curVbo = (curVbo + 1) % 3;
@@ -398,6 +406,11 @@ void GlesGraphics::SetTextureArg(TextureArg arg)
 
 void GlesGraphics::SetTransformMatrix(TransformMatrix type, const ZunMatrix &matrix)
 {
+    if (memcmp(&transforms[type], &matrix, sizeof(matrix)) == 0)
+    {
+        if (telemetryEnabled) frameStats.redundantStateCalls++;
+        return;
+    }
     transforms[type] = matrix;
     stateCache.dirtyMatrix = true;
 }
@@ -413,8 +426,16 @@ void GlesGraphics::GetViewport(ZunViewport &viewport)
 
 void GlesGraphics::SetViewport(const ZunViewport &viewport)
 {
+    if (this->viewport.x == viewport.x && this->viewport.y == viewport.y &&
+        this->viewport.width == viewport.width && this->viewport.height == viewport.height &&
+        this->viewport.minZ == viewport.minZ && this->viewport.maxZ == viewport.maxZ)
+    {
+        if (telemetryEnabled) frameStats.redundantStateCalls++;
+        return;
+    }
     this->viewport = viewport;
     glViewport(viewport.x, 480 - (viewport.y + viewport.height), viewport.width, viewport.height);
+    if (telemetryEnabled) frameStats.viewportChanges++;
     stateCache.dirtyViewport = true;
 }
 
@@ -517,17 +538,37 @@ void GlesGraphics::SetBlendMode(BlendMode srcMode, BlendMode dstMode)
         glDstMode = GL_ZERO;
         break;
     }
-    glBlendFunc(glSrcMode, glDstMode);
+    if (blendSrc == glSrcMode && blendDst == glDstMode)
+    {
+        if (telemetryEnabled) frameStats.redundantStateCalls++;
+        return;
+    }
+    blendSrc = glSrcMode;
+    blendDst = glDstMode;
+    glBlendFunc(blendSrc, blendDst);
+    if (telemetryEnabled) frameStats.blendChanges++;
 }
 
 void GlesGraphics::SetDepthMask(bool enable)
 {
+    if (depthMaskEnabled == enable)
+    {
+        if (telemetryEnabled) frameStats.redundantStateCalls++;
+        return;
+    }
     depthMaskEnabled = enable;
     glDepthMask(enable);
+    if (telemetryEnabled) frameStats.depthChanges++;
 }
 
 void GlesGraphics::SetDepthFunc(DepthFunc func)
 {
+    if (depthFunc == func)
+    {
+        if (telemetryEnabled) frameStats.redundantStateCalls++;
+        return;
+    }
+    depthFunc = func;
     switch (func)
     {
     case DEPTH_FUNC_LEQUAL:
@@ -537,10 +578,17 @@ void GlesGraphics::SetDepthFunc(DepthFunc func)
         glDepthFunc(GL_ALWAYS);
         break;
     }
+    if (telemetryEnabled) frameStats.depthChanges++;
 }
 
 void GlesGraphics::SetClearDepth(f32 depth)
 {
+    if (clearDepth == depth)
+    {
+        if (telemetryEnabled) frameStats.redundantStateCalls++;
+        return;
+    }
+    clearDepth = depth;
 #ifdef USING_GL
     glClearDepth(depth);
 #else
@@ -550,6 +598,11 @@ void GlesGraphics::SetClearDepth(f32 depth)
 
 void GlesGraphics::SetClearColor(ZunColor color)
 {
+    if (clearColor.color == color.color)
+    {
+        if (telemetryEnabled) frameStats.redundantStateCalls++;
+        return;
+    }
     clearColor = color;
     glClearColor(color.bytes.r / 255.0f, color.bytes.g / 255.0f, color.bytes.b / 255.0f,
                  color.bytes.a / 255.0f);
@@ -595,13 +648,21 @@ GfxTextureHandle GlesGraphics::CreateTexture()
 
 void GlesGraphics::BindTexture(GfxTextureHandle handle)
 {
+    if (boundTexture == handle.id)
+    {
+        if (telemetryEnabled) frameStats.redundantStateCalls++;
+        return;
+    }
+    boundTexture = handle.id;
     glBindTexture(GL_TEXTURE_2D, handle.id);
+    if (telemetryEnabled) frameStats.textureBinds++;
 }
 
 void GlesGraphics::DeleteTexture(GfxTextureHandle handle)
 {
     GLuint tex = handle.id;
     glDeleteTextures(1, &tex);
+    if (boundTexture == handle.id) boundTexture = 0xFFFFFFFFu;
 }
 
 void GlesGraphics::SetTextureImage(u32 width, u32 height, PixelFormat fmt, PixelDataType type,
@@ -761,6 +822,7 @@ void GlesGraphics::DrawPrimitive(PrimitiveType type, i32 startVertex, i32 primit
     }
 
     glDrawArrays(glMode, startVertex, vertexCount);
+    if (telemetryEnabled) frameStats.drawCalls++;
 }
 
 void GlesGraphics::DrawPrimitiveUP(PrimitiveType type, i32 primitiveCount, const void *vertexData,
@@ -796,6 +858,11 @@ void GlesGraphics::DrawPrimitiveUP(PrimitiveType type, i32 primitiveCount, const
         vboOffset = 0;
     }
     glBufferSubData(GL_ARRAY_BUFFER, vboOffset, bytesNeeded, vertexData);
+    if (telemetryEnabled)
+    {
+        frameStats.bufferUploads++;
+        frameStats.bufferUploadBytes += (u64)bytesNeeded;
+    }
 
     GLint firstVertex = (GLint)(vboOffset / vertexStride);
 
@@ -890,12 +957,18 @@ void GlesGraphics::DrawPrimitiveUP(PrimitiveType type, i32 primitiveCount, const
     }
 
     glDrawArrays(glMode, firstVertex, vertexCount);
+    if (telemetryEnabled) frameStats.drawCalls++;
 }
 
 void GlesGraphics::SwapBuffers()
 {
     i32 drawableWidth, drawableHeight;
     SDL_GetWindowSizeInPixels(g_GameWindow.window, &drawableWidth, &drawableHeight);
+    if (telemetryEnabled)
+    {
+        frameStats.drawableWidth = drawableWidth;
+        frameStats.drawableHeight = drawableHeight;
+    }
 
 #if defined(__APPLE__) && TARGET_OS_IPHONE
     SDL_PropertiesID props = SDL_GetWindowProperties(g_GameWindow.window);
@@ -954,8 +1027,44 @@ void GlesGraphics::SwapBuffers()
     glBindTexture(GL_TEXTURE_2D, this->fboColor);
 
     glBindVertexArray(this->blitVao);
-    glDrawArrays(GL_TRIANGLES, 0, 3);
+    if (MobileUi::IsPortraitGameplayLayout())
+    {
+        const MobileUi::PortraitLayout layout =
+            MobileUi::GetPortraitLayout(drawableWidth, drawableHeight);
+        const i32 leftHudWidth = layout.hudWidth / 2;
+        auto drawRegion = [&](i32 srcX, i32 srcY, i32 srcWidth, i32 srcHeight,
+                              i32 destX, i32 destY, i32 destWidth, i32 destHeight) {
+            // Source rectangles use the game's top-left origin. OpenGL texture and
+            // viewport coordinates use a bottom-left origin.
+            const f32 u = (f32)srcX / 640.0f;
+            const f32 v = (f32)(480 - srcY - srcHeight) / 480.0f;
+            const f32 uw = (f32)srcWidth / 640.0f;
+            const f32 vh = (f32)srcHeight / 480.0f;
+            glUniform4f(this->u_BlitSrcRect, u, v, uw, vh);
+            glViewport(destX, drawableHeight - destY - destHeight, destWidth, destHeight);
+            glDrawArrays(GL_TRIANGLES, 0, 3);
+            if (telemetryEnabled) frameStats.drawCalls++;
+        };
+
+        drawRegion(416, 16, 224, 224,
+                   layout.hudX, layout.hudY, leftHudWidth, layout.hudHeight);
+        drawRegion(416, 240, 224, 224,
+                   layout.hudX + leftHudWidth, layout.hudY,
+                   layout.hudWidth - leftHudWidth, layout.hudHeight);
+        drawRegion(32, 16, 384, 448,
+                   layout.gameX, layout.gameY, layout.gameWidth, layout.gameHeight);
+    }
+    else
+    {
+        glUniform4f(this->u_BlitSrcRect, 0.0f, 0.0f, 1.0f, 1.0f);
+        glViewport(dstX, dstY, dstWidth, dstHeight);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        if (telemetryEnabled) frameStats.drawCalls++;
+    }
+    glUniform4f(this->u_BlitSrcRect, 0.0f, 0.0f, 1.0f, 1.0f);
     glBindVertexArray(0);
+
+    MobileUi::Draw(drawableWidth, drawableHeight);
 
 #if defined(__APPLE__) && TARGET_OS_IPHONE
     glBindRenderbuffer(
@@ -984,10 +1093,12 @@ void GlesGraphics::SwapBuffers()
         glDisable(GL_DEPTH_TEST);
     }
     glDepthMask(depthMaskEnabled ? GL_TRUE : GL_FALSE);
+    glBlendFunc(blendSrc, blendDst);
 
     glClearColor(clearColor.bytes.r / 255.0f, clearColor.bytes.g / 255.0f,
                  clearColor.bytes.b / 255.0f, clearColor.bytes.a / 255.0f);
 
     glUseProgram(this->shaderProgram);
+    boundTexture = 0xFFFFFFFFu;
     stateCache.Invalidate();
 }

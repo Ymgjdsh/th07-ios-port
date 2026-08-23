@@ -187,7 +187,20 @@ i32 EffectManager::UpdateAttachToPlayer(Effect *effect)
         return false;
     }
 
-    effect->pos1 = g_Player.positionCenter;
+    Player *target = nullptr;
+    if (effect->attachedPlayerId >= 0 && effect->attachedPlayerId < 2)
+    {
+        if (!IsPlayerSlotActive((u8)effect->attachedPlayerId))
+        {
+            return false;
+        }
+        target = GetPlayerById((u8)effect->attachedPlayerId);
+    }
+    else
+    {
+        target = GetPrimaryActivePlayer();
+    }
+    effect->pos1 = target->positionCenter;
     return true;
 }
 
@@ -475,6 +488,7 @@ Effect *EffectManager::SpawnParticles(i32 effectId, ZunVec3 *pos, i32 numParticl
         }
 
         effect->is2D = 0;
+        effect->attachedPlayerId = -1;
         effect->inUseFlag = 1;
         effect->effectId = (u8)effectId;
         effect->pos1 = *pos;
@@ -540,6 +554,7 @@ Effect *EffectManager::SpawnMovingParticles(i32 effectId, ZunVec3 *pos, ZunVec3 
         }
 
         effect->is2D = 0;
+        effect->attachedPlayerId = -1;
         effect->inUseFlag = 1;
         effect->effectId = effectId;
         effect->pos1 = *pos;
@@ -583,6 +598,7 @@ Effect *EffectManager::SpawnEffect(i32 effectId, ZunVec3 *pos, i32 param_3, i32 
 
     effect = &this->effects[param_3 + 400];
     effect->is2D = 0;
+    effect->attachedPlayerId = -1;
     effect->inUseFlag = 1;
     effect->effectId = effectId;
     effect->pos1 = *pos;
@@ -603,6 +619,14 @@ Effect *EffectManager::SpawnEffect(i32 effectId, ZunVec3 *pos, i32 param_3, i32 
     }
     effect->prevPos = effect->pos1;
     effect->vm.UpdatePrev();
+    return effect;
+}
+
+Effect *EffectManager::SpawnEffectForPlayer(i32 effectId, ZunVec3 *pos, u8 playerId,
+                                             i32 param_3, i32 param_4, u32 color)
+{
+    Effect *effect = SpawnEffect(effectId, pos, param_3, param_4, color);
+    effect->attachedPlayerId = playerId < 2 ? (i8)playerId : (i8)-1;
     return effect;
 }
 
@@ -691,34 +715,45 @@ u32 EffectManager::OnUpdate(EffectManager *arg)
 
 u32 EffectManager::OnDraw(EffectManager *arg)
 {
+    // Keep effect objects and their scripts alive for gameplay compatibility,
+    // but avoid all ordinary particle rendering in the lowest quality mode.
+    if (g_Supervisor.cfg.effectQuality == QUALITY_WORST)
+    {
+        return CHAIN_CALLBACK_RESULT_CONTINUE;
+    }
+
     auto sortAndDraw = [](Effect *layerHead, bool isBillboard) {
-        Effect *active[409];
+        struct EffectDrawEntry
+        {
+            Effect *effect;
+            i32 textureIndex;
+        };
+        EffectDrawEntry active[409];
         i32 count = 0;
         Effect *effect = layerHead->next;
         while (effect)
         {
-            active[count++] = effect;
+            active[count++] = {effect, effect->vm.sprite ? effect->vm.sprite->sourceFileIndex : -1};
             effect = effect->next;
         }
 
-        std::sort(active, active + count, [](Effect *a, Effect *b) {
-            i32 texA = a->vm.sprite ? a->vm.sprite->sourceFileIndex : -1;
-            i32 texB = b->vm.sprite ? b->vm.sprite->sourceFileIndex : -1;
-            return texA < texB;
+        std::sort(active, active + count, [](const EffectDrawEntry &a, const EffectDrawEntry &b) {
+            return a.textureIndex < b.textureIndex;
         });
 
         for (i32 i = 0; i < count; i++)
         {
-            active[i]->vm.pos = active[i]->prevPos.Lerp(active[i]->pos1, g_RenderAlpha);
+            effect = active[i].effect;
+            effect->vm.pos = effect->prevPos.Lerp(effect->pos1, g_RenderAlpha);
             if (isBillboard)
             {
-                g_AnmManager->DrawBillboard(&active[i]->vm);
+                g_AnmManager->DrawBillboard(&effect->vm);
             }
             else
             {
-                active[i]->vm.pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
-                active[i]->vm.pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
-                g_AnmManager->Draw(&active[i]->vm);
+                effect->vm.pos.x += g_GameManager.arcadeRegionTopLeftPos.x;
+                effect->vm.pos.y += g_GameManager.arcadeRegionTopLeftPos.y;
+                g_AnmManager->Draw(&effect->vm);
             }
         }
     };

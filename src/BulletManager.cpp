@@ -563,7 +563,7 @@ i32 BulletManager::SpawnBulletPattern(EnemyBulletShooter *bulletProps)
     }
 
     bulletProps->sprites = this->bulletTypeTemplates + bulletProps->sprite;
-    angle = g_Player.AngleToPlayer(&bulletProps->pos);
+    angle = GetClosestActivePlayer(&bulletProps->pos)->AngleToPlayer(&bulletProps->pos);
     for (x = 0; x < bulletProps->count2; x++)
     {
         for (y = 0; y < bulletProps->count1; y++)
@@ -613,7 +613,8 @@ Laser *BulletManager::SpawnLaserPattern(EnemyLaserShooter *laserShooter)
         if (laserShooter->type == 0)
         {
             laser->prevAngle = laser->angle =
-                g_Player.AngleToPlayer(&laserShooter->pos) + laser->angle;
+                GetClosestActivePlayer(&laserShooter->pos)->AngleToPlayer(&laserShooter->pos) +
+                laser->angle;
         }
         laser->flags = laserShooter->flags;
         laser->timer = 0;
@@ -767,8 +768,9 @@ void Bullet::UpdateBulletDirChangeAimAtPlayer()
         {
             this->exFlags = this->exFlags & 0xffffff7f;
         }
-        this->angle = utils::AddNormalizeAngle(g_Player.AngleToPlayer(&this->pos),
-                                               this->commandStates[3].angle);
+        this->angle = utils::AddNormalizeAngle(
+            GetClosestActivePlayer(&this->pos)->AngleToPlayer(&this->pos),
+            this->commandStates[3].angle);
         this->speed = this->commandStates[3].speed;
         local_8 = this->speed;
         this->commandStates[3].timer = 0;
@@ -827,6 +829,8 @@ u32 BulletManager::OnUpdate(BulletManager *arg)
     f32 width;
     i32 i;
     i32 collisionRes;
+    Player *collisionPlayer;
+    i32 playerId;
 
     for (i = 0; i < 1024; i++)
     {
@@ -940,7 +944,18 @@ u32 BulletManager::OnUpdate(BulletManager *arg)
         do_collision:
             if (!bullet->grazed && bullet->timer2.GetCurrent() >= 16)
             {
-                collisionRes = g_Player.CheckGraze(&bullet->pos, &bullet->sprites.grazeSize);
+                collisionPlayer = &g_Player;
+                collisionRes = 0;
+                for (playerId = 0; playerId < 2 && collisionRes == 0; ++playerId)
+                {
+                    if (!IsPlayerSlotActive((u8)playerId))
+                    {
+                        continue;
+                    }
+                    collisionPlayer = &g_Players[playerId];
+                    collisionRes = collisionPlayer->CheckGraze(
+                        &bullet->pos, &bullet->sprites.grazeSize);
+                }
                 if (collisionRes == 1)
                 {
                     bullet->grazed = 1;
@@ -951,14 +966,25 @@ u32 BulletManager::OnUpdate(BulletManager *arg)
                     if ((bullet->moreFlags & 0x1000) == 0)
                     {
                         bullet->state = BULLET_DESPAWN;
-                        g_ItemManager.SpawnItem(&bullet->pos, g_Player.itemType, 1);
+                        g_ItemManager.SpawnItem(&bullet->pos, collisionPlayer->itemType, 1);
                     }
                 }
                 goto do_sprite_anim;
             }
 
         do_player_collision:
-            collisionRes = g_Player.CalcKillboxCollision(&bullet->pos, &bullet->sprites.grazeSize);
+            collisionPlayer = &g_Player;
+            collisionRes = 0;
+            for (playerId = 0; playerId < 2 && collisionRes == 0; ++playerId)
+            {
+                if (!IsPlayerSlotActive((u8)playerId))
+                {
+                    continue;
+                }
+                collisionPlayer = &g_Players[playerId];
+                collisionRes = collisionPlayer->CalcKillboxCollision(
+                    &bullet->pos, &bullet->sprites.grazeSize);
+            }
             if (collisionRes != 0)
             {
                 if (collisionRes != 2 || (bullet->moreFlags & 0x1000) == 0)
@@ -966,7 +992,7 @@ u32 BulletManager::OnUpdate(BulletManager *arg)
                     bullet->state = BULLET_DESPAWN;
                     if (collisionRes == 2)
                     {
-                        g_ItemManager.SpawnItem(&bullet->pos, g_Player.itemType, 1);
+                        g_ItemManager.SpawnItem(&bullet->pos, collisionPlayer->itemType, 1);
                     }
                 }
             }
@@ -1108,8 +1134,15 @@ u32 BulletManager::OnUpdate(BulletManager *arg)
             }
             if (laser->timer >= laser->hitboxStartTime)
             {
-                g_Player.CalcLaserHitbox(&laserCenter, &laserHitbox, &laser->pos, laser->angle,
-                                         laser->timer.GetCurrent() % 12 == 0);
+                for (playerId = 0; playerId < 2; ++playerId)
+                {
+                    if (IsPlayerSlotActive((u8)playerId))
+                    {
+                        g_Players[playerId].CalcLaserHitbox(
+                            &laserCenter, &laserHitbox, &laser->pos, laser->angle,
+                            laser->timer.GetCurrent() % 12 == 0);
+                    }
+                }
             }
             if (laser->timer < laser->startTime)
             {
@@ -1119,8 +1152,15 @@ u32 BulletManager::OnUpdate(BulletManager *arg)
             laser->state++;
             laser->targetWidth = laser->width;
         case LASER_ACTIVE:
-            g_Player.CalcLaserHitbox(&laserCenter, &laserHitbox, &laser->pos, laser->angle,
-                                     laser->timer.GetCurrent() % 12 == 0);
+            for (playerId = 0; playerId < 2; ++playerId)
+            {
+                if (IsPlayerSlotActive((u8)playerId))
+                {
+                    g_Players[playerId].CalcLaserHitbox(
+                        &laserCenter, &laserHitbox, &laser->pos, laser->angle,
+                        laser->timer.GetCurrent() % 12 == 0);
+                }
+            }
             if (laser->timer < laser->duration)
             {
                 break;
@@ -1157,8 +1197,15 @@ u32 BulletManager::OnUpdate(BulletManager *arg)
             }
             if (laser->timer < laser->hitboxEndTime)
             {
-                g_Player.CalcLaserHitbox(&laserCenter, &laserHitbox, &laser->pos, laser->angle,
-                                         laser->timer.GetCurrent() % 12 == 0);
+                for (playerId = 0; playerId < 2; ++playerId)
+                {
+                    if (IsPlayerSlotActive((u8)playerId))
+                    {
+                        g_Players[playerId].CalcLaserHitbox(
+                            &laserCenter, &laserHitbox, &laser->pos, laser->angle,
+                            laser->timer.GetCurrent() % 12 == 0);
+                    }
+                }
             }
             if (laser->timer < laser->endTime)
             {
@@ -1189,23 +1236,37 @@ void Bullet::Draw()
 {
     AnmVm *vm;
 
-    switch (this->state)
+    if (g_Supervisor.cfg.effectQuality == QUALITY_WORST)
     {
-    case BULLET_SPAWNING_FAST:
-        vm = &this->sprites.spriteSpawnEffectFast;
-        break;
-    case BULLET_SPAWNING_NORMAL:
-        vm = &this->sprites.spriteSpawnEffectNormal;
-        break;
-    case BULLET_SPAWNING_SLOW:
-        vm = &this->sprites.spriteSpawnEffectSlow;
-        break;
-    case BULLET_DESPAWN:
-        vm = &this->sprites.spriteSpawnEffectDonut;
-        break;
-    default:
+        // A despawning bullet has already stopped participating in gameplay.
+        // Hide its donut effect; spawning bullets remain readable as bullets.
+        if (this->state == BULLET_DESPAWN)
+        {
+            return;
+        }
         vm = &this->sprites.spriteBullet;
-        break;
+    }
+    else
+    {
+
+        switch (this->state)
+        {
+        case BULLET_SPAWNING_FAST:
+            vm = &this->sprites.spriteSpawnEffectFast;
+            break;
+        case BULLET_SPAWNING_NORMAL:
+            vm = &this->sprites.spriteSpawnEffectNormal;
+            break;
+        case BULLET_SPAWNING_SLOW:
+            vm = &this->sprites.spriteSpawnEffectSlow;
+            break;
+        case BULLET_DESPAWN:
+            vm = &this->sprites.spriteSpawnEffectDonut;
+            break;
+        default:
+            vm = &this->sprites.spriteBullet;
+            break;
+        }
     }
 
     ZunVec3 drawPos = this->prevPos.Lerp(this->pos, g_RenderAlpha);
@@ -1308,39 +1369,49 @@ u32 BulletManager::OnDraw(BulletManager *arg)
     }
     g_ItemManager.OnDraw();
 
-    Bullet *activeBullets[1024];
+    struct BulletDrawEntry
+    {
+        Bullet *bullet;
+        i32 blendMode;
+        i32 collisionType;
+        i32 textureIndex;
+    };
+    BulletDrawEntry activeBullets[1024];
     i32 activeCount = 0;
     for (i = 0; i < 1024; i++)
     {
         if (arg->bullets[i].state != BULLET_INACTIVE && arg->bullets[i].state != BULLET_END_ARRAY)
         {
-            activeBullets[activeCount++] = &arg->bullets[i];
+            Bullet *bullet = &arg->bullets[i];
+            if (g_Supervisor.cfg.effectQuality == QUALITY_WORST &&
+                bullet->state == BULLET_DESPAWN)
+            {
+                continue;
+            }
+            AnmVm *vm = bullet->state == BULLET_DESPAWN
+                            ? &bullet->sprites.spriteSpawnEffectDonut
+                            : &bullet->sprites.spriteBullet;
+            activeBullets[activeCount++] = {bullet, (i32)vm->blendMode,
+                                            (i32)bullet->sprites.collisionType,
+                                            vm->sprite ? vm->sprite->sourceFileIndex : -1};
         }
     }
-    std::stable_sort(activeBullets, activeBullets + activeCount, [](Bullet *a, Bullet *b) {
-        AnmVm *vmA = (a->state == BULLET_DESPAWN) ? &a->sprites.spriteSpawnEffectDonut
-                                                  : &a->sprites.spriteBullet;
-        AnmVm *vmB = (b->state == BULLET_DESPAWN) ? &b->sprites.spriteSpawnEffectDonut
-                                                  : &b->sprites.spriteBullet;
-
-        if (vmA->blendMode != vmB->blendMode)
+    std::stable_sort(activeBullets, activeBullets + activeCount,
+                     [](const BulletDrawEntry &a, const BulletDrawEntry &b) {
+        if (a.blendMode != b.blendMode)
         {
-            return vmA->blendMode < vmB->blendMode;
+            return a.blendMode < b.blendMode;
         }
-
-        if (a->sprites.collisionType != b->sprites.collisionType)
+        if (a.collisionType != b.collisionType)
         {
-            return a->sprites.collisionType < b->sprites.collisionType;
+            return a.collisionType < b.collisionType;
         }
-
-        i32 texA = vmA->sprite ? vmA->sprite->sourceFileIndex : -1;
-        i32 texB = vmB->sprite ? vmB->sprite->sourceFileIndex : -1;
-        return texA < texB;
+        return a.textureIndex < b.textureIndex;
     });
 
     for (i = 0; i < activeCount; i++)
     {
-        activeBullets[i]->Draw();
+        activeBullets[i].bullet->Draw();
     }
 
     return CHAIN_CALLBACK_RESULT_CONTINUE;

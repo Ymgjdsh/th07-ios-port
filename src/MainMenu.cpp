@@ -1,6 +1,7 @@
 #include "MainMenu.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <string>
@@ -14,6 +15,9 @@
 #include "FileSystem.hpp"
 #include "GameErrorContext.hpp"
 #include "GameManager.hpp"
+#include "MobileDiagnostics.hpp"
+#include "MobileUi.hpp"
+#include "Online.hpp"
 #include "ReplayManager.hpp"
 #include "ScreenEffect.hpp"
 #include "SoundPlayer.hpp"
@@ -48,6 +52,8 @@ const char *g_CharacterAndShottypeReplayStrings[6] = {
 };
 
 i16 g_LastJoystickInput = 32;
+i32 g_OnlineP1Character = 0;
+i32 g_OnlineP1Shot = 0;
 
 const char *g_KeyConfigStrings[12] = {
     "ショット、決定ボタンを設定します",
@@ -76,7 +82,7 @@ const char *g_OptionsStrings[9] = {
     "おいそれと終了します",
 };
 
-const char *g_MainMenuStrings[8] = {
+const char *g_MainMenuStrings[9] = {
     "ゲームを開始します",
     "エキストラステージを開始します",
     "ステージを選択し、練習を開始します",
@@ -85,6 +91,7 @@ const char *g_MainMenuStrings[8] = {
     "音楽を聴けます",
     "各種設定できます",
     "いろいろと終了します",
+    "通信方法を選択して二人プレイを開始します",
 };
 
 void InitializeTimingVars(Supervisor *arg)
@@ -100,6 +107,10 @@ void MainMenu::SetGameState(GameState gameState)
 {
     this->prevGameState = this->gameState;
     this->gameState = gameState;
+    // A cursor target belongs to the page on which it was tapped. Drop any
+    // unsent target when that page transitions; the synchronized select edge
+    // will be handled by the new state without carrying an old target into it.
+    if (Online::IsNetworkSession()) Online::QueueMenuCursor(-1);
     this->inputDelayTimer = 0;
     this->stateTimer = 0;
     this->menuSubState = 0;
@@ -111,6 +122,157 @@ u32 MainMenu::OnUpdate(MainMenu *arg)
     u32 result;
 
     arg->UpdatePrev();
+    MobileUi::SetMainMenuHome(arg->gameState == STATE_PRE_INPUT && arg->menuSubState == 1);
+    f32 mobileTapX = 0.0f;
+    f32 mobileTapY = 0.0f;
+    f32 mobileDelta = 0.0f;
+    const MobileUi::MenuTouchAction mobileAction =
+        MobileUi::ConsumeMainMenuTouch(mobileTapX, mobileTapY, mobileDelta);
+    if (mobileAction != MobileUi::MENU_TOUCH_NONE)
+    {
+        if (Online::IsNetworkSession())
+        {
+            // Use the same hit testing as single-player. The selected cursor
+            // is sent with the next lockstep frame so both devices confirm
+            // the item under the finger instead of requiring a swipe first.
+            const bool handled =
+                arg->HandleMobileTouch(mobileAction, mobileTapX, mobileTapY, mobileDelta);
+            if (handled)
+            {
+                const u16 synchronizedButton =
+                    mobileAction == MobileUi::MENU_TOUCH_TAP
+                        ? TH_BUTTON_SELECTMENU
+                        : (mobileAction == MobileUi::MENU_TOUCH_SWIPE_HORIZONTAL
+                               ? (mobileDelta > 0.0f ? TH_BUTTON_RIGHT : TH_BUTTON_LEFT)
+                               : (mobileDelta < 0.0f ? TH_BUTTON_UP : TH_BUTTON_DOWN));
+                // A UIKit touch is a pulse, not a held button. Queue it in
+                // Online so it survives a lockstep stall until stored in a
+                // concrete input frame.
+                Online::QueueInputPulse(synchronizedButton);
+                MobileDiagnostics::Log("online/input", "queued synchronized menu pulse=0x%x",
+                                       synchronizedButton);
+            }
+        }
+        else
+        {
+            arg->HandleMobileTouch(mobileAction, mobileTapX, mobileTapY, mobileDelta);
+        }
+    }
+    if (Online::IsMenuOpen())
+    {
+        const bool startOnline = Online::ConsumeStartGameRequested();
+        const bool startLocal = Online::ConsumeLocalGameRequested();
+        if (startOnline || startLocal)
+        {
+            Online::CloseMenu();
+            arg->cursor = 0;
+            g_LastFrameRawInput &= ~TH_BUTTON_SELECTMENU;
+            g_CurFrameRawInput |= TH_BUTTON_SELECTMENU;
+            MobileDiagnostics::Log("online", "launcher start local=%d connected=%d",
+                                   startLocal, Online::IsConnected());
+        }
+        else
+        {
+            g_AnmManager->ExecuteScripts(arg->vmHead, arg->vmCount);
+            if (arg->cursorVm) g_AnmManager->ExecuteScript(arg->cursorVm);
+            return CHAIN_CALLBACK_RESULT_CONTINUE;
+        }
+    }
+
+    if (Online::IsNetworkSession())
+    {
+        i32 synchronizedCursor = -1;
+        if (Online::ConsumeMenuCursorTarget(&synchronizedCursor))
+        {
+            arg->cursor = synchronizedCursor;
+            MobileDiagnostics::Log("online/input", "applied synchronized menu cursor=%d",
+                                   synchronizedCursor);
+        }
+    }
+
+    const bool difficultySelection =
+        arg->gameState == STATE_NORMAL_SELECT_DIFFICULTY ||
+        arg->gameState == STATE_PRACTICE_SELECT_DIFFICULTY ||
+        arg->gameState == STATE_EXTRA_SELECT_DIFFICULTY;
+    if (Online::IsNetworkSession() && difficultySelection && arg->menuSubState == 1)
+    {
+        const bool synchronizationWasActive = Online::IsInputSynchronizationActive();
+        const bool committedNow = Online::NotifyMenuReady(arg->gameState, arg->cursor);
+        if (Online::IsAwaitingMenuCommit() || !synchronizationWasActive || committedNow)
+        {
+            g_CurFrameRawInput &= ~TH_BUTTON_SELECTMENU;
+            g_AnmManager->ExecuteScripts(arg->vmHead, arg->vmCount);
+            if (arg->cursorVm) g_AnmManager->ExecuteScript(arg->cursorVm);
+            return CHAIN_CALLBACK_RESULT_CONTINUE;
+        }
+    }
+
+    const bool shotSelection =
+        arg->gameState == STATE_NORMAL_SELECT_SHOTTYPE ||
+        arg->gameState == STATE_PRACTICE_SELECT_SHOTTYPE ||
+        arg->gameState == STATE_EXTRA_SELECT_SHOTTYPE;
+    if (Online::IsNetworkSession() && shotSelection && arg->menuSubState == 1)
+    {
+        if (Online::ConsumeGameplayCommit())
+        {
+            g_LastFrameRawInput &= ~TH_BUTTON_SELECTMENU;
+            g_CurFrameRawInput |= TH_BUTTON_SELECTMENU;
+            MobileDiagnostics::Log("online/startup", "game commit consumed; entering scene");
+        }
+        else if (Online::IsAwaitingGameCommit())
+        {
+            g_CurFrameRawInput &= ~TH_BUTTON_SELECTMENU;
+            g_AnmManager->ExecuteScripts(arg->vmHead, arg->vmCount);
+            if (arg->cursorVm) g_AnmManager->ExecuteScript(arg->cursorVm);
+            return CHAIN_CALLBACK_RESULT_CONTINUE;
+        }
+    }
+    if (Online::IsMultiplayerSession() && shotSelection &&
+        arg->menuSubState == 1 && WAS_PRESSED_RAW(TH_BUTTON_SELECTMENU))
+    {
+        if (!Online::IsSelectingPlayer2Loadout() && Online::NeedsPlayer2Loadout())
+        {
+            g_OnlineP1Character = g_GameManager.character;
+            g_OnlineP1Shot = arg->cursor;
+            Online::BeginPlayer2Loadout(g_OnlineP1Character, g_OnlineP1Shot);
+            const GameState characterState =
+                arg->gameState == STATE_EXTRA_SELECT_SHOTTYPE
+                    ? STATE_EXTRA_SELECT_CHARACTER
+                    : (arg->gameState == STATE_PRACTICE_SELECT_SHOTTYPE
+                           ? STATE_PRACTICE_SELECT_CHARACTER
+                           : STATE_NORMAL_SELECT_CHARACTER);
+            arg->SetGameState(characterState);
+            g_GameManager.character = 0;
+            g_GameManager.shotType = 0;
+            arg->cursor = 0;
+            MobileDiagnostics::Log("online", "P1 loadout=%d/%d; selecting P2",
+                                   g_OnlineP1Character, g_OnlineP1Shot);
+            g_AnmManager->ExecuteScripts(arg->vmHead, arg->vmCount);
+            return CHAIN_CALLBACK_RESULT_CONTINUE;
+        }
+        if (Online::IsSelectingPlayer2Loadout())
+        {
+            Online::CompletePlayer2Loadout(g_GameManager.character, arg->cursor);
+            MobileDiagnostics::Log("online", "P2 loadout=%d/%d",
+                                   g_GameManager.character, arg->cursor);
+            g_GameManager.character = (u8)g_OnlineP1Character;
+            g_GameManager.shotType = (u8)g_OnlineP1Shot;
+            arg->cursor = g_OnlineP1Shot;
+            if (Online::IsNetworkSession())
+            {
+                const i32 difficulty = g_Supervisor.cfg.defaultDifficulty;
+                const i32 stage = difficulty < DIFF_EXTRA ? 0 : difficulty + DIFF_HARD;
+                g_GameManager.difficulty = difficulty;
+                g_GameManager.currentStage = stage;
+                Online::NotifyGameReady(difficulty, stage);
+                g_CurFrameRawInput &= ~TH_BUTTON_SELECTMENU;
+                g_AnmManager->ExecuteScripts(arg->vmHead, arg->vmCount);
+                if (arg->cursorVm) g_AnmManager->ExecuteScript(arg->cursorVm);
+                return CHAIN_CALLBACK_RESULT_CONTINUE;
+            }
+            // Local two-player continues through the original start handler.
+        }
+    }
 
     switch (arg->gameState)
     {
@@ -183,8 +345,11 @@ u32 MainMenu::OnUpdatePreInput()
             g_AnmManager->SetActiveSprite(&this->vmHead[i + 1],
                                           this->vmHead[i + 1].baseSpriteIdx + 1);
         }
-        g_AnmManager->SetActiveSprite(&this->vmHead[this->cursor + 1],
-                                      (i32)this->vmHead[this->cursor + 1].baseSpriteIdx);
+        if (this->cursor < 8)
+        {
+            g_AnmManager->SetActiveSprite(&this->vmHead[this->cursor + 1],
+                                          (i32)this->vmHead[this->cursor + 1].baseSpriteIdx);
+        }
         this->menuSubState = 0;
         this->inputDelayTimer = 0;
         this->selected = -1;
@@ -215,13 +380,13 @@ u32 MainMenu::OnUpdatePreInput()
             this->cursorVm->SetInterrupt(2);
             return CHAIN_CALLBACK_RESULT_CONTINUE;
         }
-        for (i = 0; (u32)i < 8; i++)
+        for (i = 0; (u32)i < 9; i++)
         {
             g_AnmManager->DrawStringFormat2(&this->vms[i], 0xfff0e0, 0x300000,
                                             g_MainMenuStrings[i]);
         }
     case 1: {
-        i = MoveCursorVertical(8);
+        i = MoveCursorVertical(9);
         if (i != 0)
         {
             while (g_GameManager.HasReachedMaxClearsAllShotTypes() == 0 && this->cursor == 1)
@@ -233,52 +398,15 @@ u32 MainMenu::OnUpdatePreInput()
                 g_AnmManager->SetActiveSprite(&this->vmHead[i + 1],
                                               this->vmHead[i + 1].baseSpriteIdx + 1);
             }
-            g_AnmManager->SetActiveSprite(&this->vmHead[this->cursor + 1],
-                                          (i32)this->vmHead[this->cursor + 1].baseSpriteIdx);
-        }
-        this->demoFramesCount++;
-        if (g_CurFrameRawInput != 0)
-        {
-            this->demoFramesCount = 0;
-        }
-        if (900 < this->demoFramesCount)
-        {
-            g_GameManager.demoIdx++;
-            g_GameManager.demoIdx %= 3;
-            SDL_strlcpy(g_GameManager.replayFilename, g_DemoReplayPaths[g_GameManager.demoIdx],
-                        sizeof(g_GameManager.replayFilename));
-            this->currentReplay =
-                (ReplayFile *)FileSystem::OpenFile(g_GameManager.replayFilename, 0);
-            this->currentReplay =
-                ReplayManager::ValidateReplayData(this->currentReplay, g_LastFileSize);
-            if (!this->currentReplay)
+            if (this->cursor < 8)
             {
-                Supervisor::DebugPrint("error : Demo Play is not ready\n");
-                this->demoFramesCount = 0;
-            }
-            else
-            {
-                g_GameManager.SetReplay(1);
-                g_GameManager.flags |= 2;
-                g_GameManager.demoFrames = 0;
-                g_GameManager.difficulty = this->currentReplay->data.difficulty;
-                g_GameManager.character = this->currentReplay->data.shotType / 2;
-                g_GameManager.shotType = this->currentReplay->data.shotType % 2;
-                g_GameManager.shotTypeAndCharacter = this->currentReplay->data.shotType;
-                i = 0;
-                while (!this->currentReplay->stageReplayData[i])
-                {
-                    i++;
-                }
-
-                g_GameManager.currentStage = i;
-                ReplayManager::FreeReplay(this->currentReplay);
-                this->currentReplay = NULL;
-                g_Supervisor.curState = 2;
-                g_GameManager.replayStage = 0;
-                return CHAIN_CALLBACK_RESULT_CONTINUE_AND_REMOVE_JOB;
+                g_AnmManager->SetActiveSprite(&this->vmHead[this->cursor + 1],
+                                              (i32)this->vmHead[this->cursor + 1].baseSpriteIdx);
             }
         }
+        // The original idle timer started a demo replay after 15 seconds. Mobile
+        // settings and the Online launcher must never be interrupted by it.
+        this->demoFramesCount = 0;
         if (this->selected != this->cursor)
         {
             this->cursorVm = &this->vms[this->cursor];
@@ -380,12 +508,19 @@ u32 MainMenu::OnUpdatePreInput()
                     g_Supervisor.midiOutput->PlayLoaded(30);
                 }
                 break;
+            case 8:
+                Online::OpenMenu();
+                MobileDiagnostics::Log("online", "opened from native title item");
+                break;
             }
         }
         if (WAS_PRESSED_RAW(TH_BUTTON_RETURNMENU))
         {
-            g_AnmManager->SetActiveSprite(&this->vmHead[this->cursor + 1],
-                                          this->vmHead[this->cursor + 1].baseSpriteIdx + 1);
+            if (this->cursor < 8)
+            {
+                g_AnmManager->SetActiveSprite(&this->vmHead[this->cursor + 1],
+                                              this->vmHead[this->cursor + 1].baseSpriteIdx + 1);
+            }
             this->cursor = 7;
             g_AnmManager->SetActiveSprite(&this->vmHead[this->cursor + 1],
                                           (i32)this->vmHead[this->cursor + 1].baseSpriteIdx);
@@ -1855,7 +1990,8 @@ u32 MainMenu::OnUpdateSelectReplay()
             {
                 char filename[32];
                 snprintf(filename, sizeof(filename), "th7_%.2d.rpy", i + 1);
-                std::string replayPath = fs::path(FileSystem::GetPrefPath("replay")) / filename;
+                std::string replayPath =
+                    (fs::path(FileSystem::GetPrefPath("replay")) / filename).string();
                 file = (ReplayFile *)FileSystem::OpenFile(replayPath.c_str(), 1);
                 if (!file)
                 {
@@ -2341,6 +2477,28 @@ u32 MainMenu::OnDraw(MainMenu *arg)
     {
         g_AnmManager->DrawInterpNoRotation(arg->cursorVm);
     }
+    if (arg->gameState == STATE_PRE_INPUT && arg->menuSubState == 1)
+    {
+        // The original title ANM has no ninth baked sprite. Queue the extra
+        // item through the native ASCII/title font so it matches the other
+        // entries on desktop and iOS alike.
+        const bool selected = arg->cursor == 8;
+        const u32 previousColor = g_AsciiManager.color;
+        const Float2 previousScale = g_AsciiManager.scale;
+        const i32 previousSelected = g_AsciiManager.isSelected;
+        const i32 previousGui = g_AsciiManager.isGui;
+        ZunVec3 onlinePos(472.0f, 425.0f, 0.0f);
+        g_AsciiManager.color = selected ? 0xffffffff : 0xffd0d0e0;
+        g_AsciiManager.scale.x = 1.0f;
+        g_AsciiManager.scale.y = 1.0f;
+        g_AsciiManager.isSelected = selected ? 1 : 0;
+        g_AsciiManager.isGui = 0;
+        g_AsciiManager.AddString(&onlinePos, "Online");
+        g_AsciiManager.color = previousColor;
+        g_AsciiManager.scale = previousScale;
+        g_AsciiManager.isSelected = previousSelected;
+        g_AsciiManager.isGui = previousGui;
+    }
     return CHAIN_CALLBACK_RESULT_CONTINUE;
 }
 
@@ -2369,10 +2527,17 @@ ZunResult MainMenu::ActualAddedCallback()
         g_GameManager.replay = 0;
     }
     local_8 = ResultScreen::OpenScore(FileSystem::GetPrefPath("score.dat").c_str());
+    if (!local_8)
+    {
+        Supervisor::DebugPrint("error : main menu could not create score state\n");
+        return ZUN_ERROR;
+    }
+    Supervisor::DebugPrint("info : main menu score opened\n");
     ResultScreen::ParseClrd(local_8, g_GameManager.clrd);
     ResultScreen::ParsePscr(local_8, &g_GameManager.pscr[0][0][0]);
     ResultScreen::ParseCatk(local_8, g_GameManager.catk);
     ResultScreen::ReleaseScoreDat(local_8);
+    Supervisor::DebugPrint("info : main menu score parsed\n");
     if (g_GameManager.plst.gameHours < 7)
     {
         g_GameManager.maxRetries = 3;
@@ -2495,12 +2660,293 @@ ZunResult MainMenu::ActualAddedCallback()
     this->cursorVm = this->vms;
     g_GameManager.demo = 0;
     g_GameManager.demoFrames = 0;
+    Online::ResetLoadouts();
+    Supervisor::DebugPrint("info : main menu ready\n");
     return ZUN_SUCCESS;
+}
+
+static bool MobileVmContainsPoint(const AnmVm &vm, f32 x, f32 y)
+{
+    if (!vm.active || !vm.visible || !vm.sprite)
+    {
+        return false;
+    }
+    const f32 scaleX = fabsf(vm.scale.x) > 0.001f ? fabsf(vm.scale.x) : 1.0f;
+    const f32 scaleY = fabsf(vm.scale.y) > 0.001f ? fabsf(vm.scale.y) : 1.0f;
+    f32 halfW = std::max(16.0f, vm.sprite->widthPx * scaleX * 0.5f);
+    f32 halfH = std::max(10.0f, vm.sprite->heightPx * scaleY * 0.5f);
+    const f32 posX = vm.pos.x + vm.offset.x;
+    const f32 posY = vm.pos.y + vm.offset.y;
+    f32 left = posX - halfW;
+    f32 right = posX + halfW;
+    f32 top = posY - halfH;
+    f32 bottom = posY + halfH;
+    if (vm.anchor & 1)
+    {
+        left = posX;
+        right = posX + halfW * 2.0f;
+    }
+    if (vm.anchor & 2)
+    {
+        top = posY;
+        bottom = posY + halfH * 2.0f;
+    }
+    const f32 padX = std::max(10.0f, halfW * 0.18f);
+    const f32 padY = std::max(7.0f, halfH * 0.28f);
+    return x >= left - padX && x <= right + padX && y >= top - padY && y <= bottom + padY;
+}
+
+static i32 MobileHitVmItems(AnmVm *items, i32 count, i32 stride, f32 x, f32 y)
+{
+    if (!items || count <= 0 || stride <= 0)
+    {
+        return -1;
+    }
+    for (i32 i = 0; i < count; ++i)
+    {
+        if (MobileVmContainsPoint(items[i * stride], x, y))
+        {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static i32 MobileNearestVerticalItem(AnmVm *items, i32 count, i32 stride, f32 x, f32 y)
+{
+    const i32 exact = MobileHitVmItems(items, count, stride, x, y);
+    if (exact >= 0) return exact;
+    if (!items || count <= 0 || stride <= 0 || x < 40.0f || x > 600.0f ||
+        y < 80.0f || y > 440.0f)
+    {
+        return -1;
+    }
+
+    i32 nearest = -1;
+    f32 nearestDistance = 1000000.0f;
+    for (i32 i = 0; i < count; ++i)
+    {
+        const AnmVm &vm = items[i * stride];
+        const f32 itemY = vm.pos.y + vm.offset.y;
+        if (!std::isfinite(itemY)) continue;
+        const f32 distance = fabsf(y - itemY);
+        if (distance < nearestDistance)
+        {
+            nearestDistance = distance;
+            nearest = i;
+        }
+    }
+    return nearestDistance <= 90.0f ? nearest : -1;
+}
+
+bool MainMenu::HandleMobileTouch(MobileUi::MenuTouchAction action, f32 gameX, f32 gameY,
+                                 f32 delta)
+{
+    if (!this->vmHead || this->vmCount <= 0 || this->stateTimer < 4)
+    {
+        return false;
+    }
+
+    if (action != MobileUi::MENU_TOUCH_TAP)
+    {
+        u16 button = 0;
+        const bool horizontalSelection =
+            this->gameState == STATE_NORMAL_SELECT_CHARACTER ||
+            this->gameState == STATE_PRACTICE_SELECT_CHARACTER ||
+            this->gameState == STATE_EXTRA_SELECT_CHARACTER;
+        const bool verticalSelection =
+            this->gameState == STATE_NORMAL_SELECT_SHOTTYPE ||
+            this->gameState == STATE_PRACTICE_SELECT_SHOTTYPE ||
+            this->gameState == STATE_EXTRA_SELECT_SHOTTYPE;
+
+        if (action == MobileUi::MENU_TOUCH_SWIPE_HORIZONTAL && horizontalSelection)
+        {
+            button = delta > 0.0f ? TH_BUTTON_RIGHT : TH_BUTTON_LEFT;
+        }
+        else if (action == MobileUi::MENU_TOUCH_SWIPE_VERTICAL && !horizontalSelection)
+        {
+            button = delta < 0.0f ? TH_BUTTON_UP : TH_BUTTON_DOWN;
+        }
+        else if (action == MobileUi::MENU_TOUCH_SWIPE_HORIZONTAL && !verticalSelection)
+        {
+            button = delta > 0.0f ? TH_BUTTON_RIGHT : TH_BUTTON_LEFT;
+        }
+        if (button)
+        {
+            // In a network session the caller queues this pulse for the next
+            // lockstep frame. Mutating the current raw-input edge here would
+            // make the later synchronized pulse look held and the menu would
+            // ignore the tap (especially while a startup barrier is pending).
+            if (!Online::IsNetworkSession())
+            {
+                g_LastFrameRawInput &= ~button;
+                g_CurFrameRawInput |= button;
+            }
+            this->idleFrames = 0;
+            MobileDiagnostics::Log("mobile/menu", "swipe state=%d button=0x%x delta=%.1f",
+                                   this->gameState, button, delta);
+        }
+        return button != 0;
+    }
+
+    i32 hit = -1;
+    switch (this->gameState)
+    {
+    case STATE_PRE_INPUT:
+        if (this->menuSubState == 1)
+        {
+            // Online is a ninth title item placed alongside Quit because the
+            // original title ANM contains only eight baked menu sprites.
+            if (gameX >= 470.0f && gameX <= 610.0f &&
+                gameY >= 415.0f && gameY <= 460.0f)
+            {
+                hit = 8;
+            }
+            else
+            {
+                hit = MobileHitVmItems(&this->vmHead[1], 8, 1, gameX, gameY);
+            }
+        }
+        break;
+    case STATE_OPTIONS:
+        if (this->menuSubState == 1)
+        {
+            hit = MobileHitVmItems(&this->vmHead[9], 9, 1, gameX, gameY);
+        }
+        break;
+    case STATE_KEY_CONFIG:
+        if (this->menuSubState == 1)
+        {
+            hit = MobileHitVmItems(&this->vmHead[35], 12, 1, gameX, gameY);
+        }
+        break;
+    case STATE_NORMAL_SELECT_DIFFICULTY:
+    case STATE_PRACTICE_SELECT_DIFFICULTY:
+        if (this->menuSubState == 1)
+        {
+            hit = MobileNearestVerticalItem(&this->vmHead[67], 4, 1, gameX, gameY);
+            if (hit < 0 && gameX >= 60.0f && gameX <= 580.0f &&
+                gameY >= 120.0f && gameY < 400.0f)
+            {
+                hit = std::clamp((i32)((gameY - 120.0f) / 70.0f), 0, 3);
+            }
+        }
+        break;
+    case STATE_EXTRA_SELECT_DIFFICULTY:
+        if (this->menuSubState == 1)
+        {
+            const i32 count = g_GameManager.HasUnlockedPhantomAndMaxClears() ? 2 : 1;
+            hit = MobileNearestVerticalItem(&this->vmHead[162], count, 1, gameX, gameY);
+        }
+        break;
+    case STATE_NORMAL_SELECT_CHARACTER:
+    case STATE_PRACTICE_SELECT_CHARACTER:
+    case STATE_EXTRA_SELECT_CHARACTER:
+        if (this->menuSubState == 1)
+        {
+            // This page is a carousel: a tap confirms the character currently
+            // displayed. Horizontal swipes are the only way to change character.
+            if (gameX >= 40.0f && gameX <= 600.0f && gameY >= 80.0f && gameY <= 450.0f)
+            {
+                hit = std::clamp(this->cursor, 0, 2);
+            }
+        }
+        break;
+    case STATE_NORMAL_SELECT_SHOTTYPE:
+    case STATE_PRACTICE_SELECT_SHOTTYPE:
+    case STATE_EXTRA_SELECT_SHOTTYPE:
+        if (this->menuSubState == 1)
+        {
+            i32 base = 72;
+            if (g_GameManager.character == CHAR_MARISA) base = 75;
+            if (g_GameManager.character == CHAR_SAKUYA) base = 78;
+            hit = MobileNearestVerticalItem(&this->vmHead[base], 2, 1, gameX, gameY);
+            if (hit < 0 && gameX >= 50.0f && gameX <= 590.0f &&
+                gameY >= 120.0f && gameY <= 440.0f)
+            {
+                hit = gameY < 280.0f ? 0 : 1;
+            }
+        }
+        break;
+    case STATE_SELECT_PRACTICE_STAGE:
+        if (this->menuSubState == 1)
+        {
+            const i32 unlockedValue = (i32)g_GameManager
+                                          .clrd[g_GameManager.character * 2 +
+                                                g_GameManager.shotType]
+                                          .difficultyClearedWithoutRetries
+                                              [g_Supervisor.cfg.defaultDifficulty];
+            const i32 unlocked = std::clamp(unlockedValue, 1, 6);
+            hit = MobileHitVmItems(&this->vmHead[132], unlocked, 1, gameX, gameY);
+            if (hit < 0 && gameX >= 90.0f && gameX <= 550.0f && gameY >= 160.0f && gameY < 340.0f)
+            {
+                hit = std::clamp((i32)((gameY - 176.0f) / 24.0f), 0, unlocked - 1);
+            }
+        }
+        break;
+    case STATE_SELECT_REPLAY:
+        if (this->menuSubState == 1 && this->replayFilesNum > 0)
+        {
+            const i32 pageStart = this->cursor - this->cursor % 15;
+            if (gameX >= 24.0f && gameX <= 616.0f && gameY >= 120.0f && gameY < 390.0f)
+            {
+                const i32 row = std::clamp((i32)((gameY - 132.0f) / 16.0f), 0, 14);
+                hit = std::min(pageStart + row, this->replayFilesNum - 1);
+            }
+        }
+        else if (this->menuSubState == 2 && this->currentReplay)
+        {
+            if (gameX >= 120.0f && gameX <= 540.0f && gameY >= 160.0f && gameY < 360.0f)
+            {
+                hit = std::clamp((i32)((gameY - 176.0f) / 24.0f), 0, 6);
+                if (!this->currentReplay->head.stageReplayDataOffsets[hit]) hit = -1;
+            }
+        }
+        else if (this->menuSubState == 3 && gameY >= 160.0f && gameY <= 380.0f)
+        {
+            hit = std::clamp((i32)((gameY - 190.0f) / 48.0f), 0, 2);
+        }
+        break;
+    }
+
+    if (hit < 0)
+    {
+        MobileDiagnostics::Log("mobile/menu", "miss state=%d sub=%d at=(%.1f,%.1f)",
+                               this->gameState, this->menuSubState, gameX, gameY);
+        return false;
+    }
+
+    const i32 oldCursor = this->cursor;
+    // In a network session the target cursor is applied only when its input
+    // frame is consumed on both devices. This keeps page transitions atomic.
+    if (Online::IsNetworkSession())
+        Online::QueueMenuCursor(hit);
+    else
+        this->cursor = hit;
+    // Direct touch semantics: the item under the finger is selected and
+    // confirmed. In a network session the caller has already queued the
+    // confirmation for the next synchronized frame; changing the current
+    // raw-input edge here would consume that edge before it is transmitted.
+    if (!Online::IsNetworkSession())
+    {
+        g_LastFrameRawInput &= ~TH_BUTTON_SELECTMENU;
+        g_CurFrameRawInput |= TH_BUTTON_SELECTMENU;
+    }
+    MobileDiagnostics::Log("mobile/menu", "tap-confirm state=%d sub=%d item=%d old=%d",
+                           this->gameState, this->menuSubState, hit, oldCursor);
+    this->idleFrames = 0;
+    return true;
 }
 
 ZunResult MainMenu::AddedCallback(MainMenu *arg)
 {
-    return arg->ActualAddedCallback();
+    MobileUi::SetMainMenuActive(true);
+    const ZunResult result = arg->ActualAddedCallback();
+    if (result != ZUN_SUCCESS)
+    {
+        MobileUi::SetMainMenuActive(false);
+    }
+    return result;
 }
 
 ZunResult MainMenu::Release()
@@ -2516,6 +2962,7 @@ ZunResult MainMenu::Release()
 
 ZunResult MainMenu::DeletedCallback(MainMenu *arg)
 {
+    MobileUi::SetMainMenuActive(false);
     for (i32 i = 32; i <= 41; i++)
     {
         g_AnmManager->ReleaseAnm(i);

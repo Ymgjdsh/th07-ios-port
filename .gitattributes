@@ -1,0 +1,13 @@
+*.sh text eol=lf
+*.py text eol=lf
+*.cmake text eol=lf
+CMakeLists.txt text eol=lf
+*.cpp text eol=lf
+*.hpp text eol=lf
+*.plist text eol=lf
+*.in text eol=lf
+*.storyboard text eol=lf
+*.md text eol=lf
+*.png binary
+*.dat binary
+*.ttc binary

@@ -6,14 +6,42 @@
 #include "FileSystem.hpp"
 #include "GameManager.hpp"
 #include "Gui.hpp"
+#include "MobileDiagnostics.hpp"
 #include "Player.hpp"
 #include "Rng.hpp"
 #include "Supervisor.hpp"
+#include "Touch.hpp"
 #include "dxutil.hpp"
 #include "pbg4/Lzss.hpp"
 #include <cstdio>
 
 ReplayManager *g_ReplayManager;
+
+namespace
+{
+constexpr u16 TOUCH_REPLAY_MARKER_FRAME = 0x8000;
+constexpr u16 TOUCH_REPLAY_MARKER_KEY = 0x544d; // "MT": mobile touch
+constexpr i32 TOUCH_REPLAY_DATA_MAGIC = 0x3152544d; // "MTR1"
+
+void StoreReplayFloat(ReplayDataInput *entry, f32 value)
+{
+    static_assert(sizeof(*entry) == sizeof(value));
+    memcpy(entry, &value, sizeof(value));
+}
+
+f32 LoadReplayFloat(const ReplayDataInput *entry)
+{
+    f32 value;
+    memcpy(&value, entry, sizeof(value));
+    return value;
+}
+
+bool IsTouchReplayMarker(const ReplayDataInput *entry)
+{
+    return entry && entry->frameNum == TOUCH_REPLAY_MARKER_FRAME &&
+           entry->inputKey == TOUCH_REPLAY_MARKER_KEY;
+}
+} // namespace
 
 u32 ReplayManager::OnUpdateRng(ReplayManager *arg)
 {
@@ -32,6 +60,8 @@ u32 ReplayManager::OnUpdate(ReplayManager *arg)
 {
     u16 curInput;
     i32 stage;
+    f32 touchDx;
+    f32 touchDy;
 
     if (!g_GameManager.notInMenu)
     {
@@ -40,6 +70,11 @@ u32 ReplayManager::OnUpdate(ReplayManager *arg)
 
     g_LastFrameGameInput = g_CurFrameGameInput;
     g_CurFrameGameInput = g_CurFrameRawInput;
+    for (i32 playerId = 0; playerId < 2; ++playerId)
+    {
+        g_LastFrameGameInputs[playerId] = g_CurFrameGameInputs[playerId];
+        g_CurFrameGameInputs[playerId] = g_CurFrameRawInputs[playerId];
+    }
     if (g_GameManager.defaultCfg->slowMode)
     {
         return CHAIN_CALLBACK_RESULT_CONTINUE;
@@ -55,6 +90,45 @@ u32 ReplayManager::OnUpdate(ReplayManager *arg)
         stage = 6;
     }
     g_CurFrameGameInput = curInput = g_CurFrameRawInput;
+    if (Touch::WasUsedThisRun()) arg->touchWasUsed = true;
+    ReplayDataInput *lastInput =
+        &arg->data->stageReplayData[stage]->replayInputs
+             [sizeof(arg->data->stageReplayData[stage]->replayInputs) /
+                  sizeof(ReplayDataInput) -
+              1];
+    if (arg->touchReplayOverflow || arg->replayInputs + 1 > lastInput)
+    {
+        if (!arg->touchReplayOverflow)
+        {
+            MobileDiagnostics::Log("replay/touch", "input buffer exhausted; replay disabled");
+        }
+        arg->touchReplayOverflow = true;
+        return CHAIN_CALLBACK_RESULT_CONTINUE;
+    }
+    if (Touch::ConsumeRecordedPlayerDelta(&touchDx, &touchDy))
+    {
+        if (arg->replayInputs + 4 <= lastInput)
+        {
+            arg->replayInputs++;
+            arg->replayInputs->frameNum = TOUCH_REPLAY_MARKER_FRAME;
+            arg->replayInputs->inputKey = TOUCH_REPLAY_MARKER_KEY;
+            arg->replayInputs++;
+            StoreReplayFloat(arg->replayInputs, touchDx);
+            arg->replayInputs++;
+            StoreReplayFloat(arg->replayInputs, touchDy);
+            arg->touchReplayFrames++;
+            if (arg->touchReplayFrames == 1)
+            {
+                MobileDiagnostics::Log("replay/touch", "recording extended touch movement");
+            }
+        }
+        else
+        {
+            arg->touchReplayOverflow = true;
+            MobileDiagnostics::Log("replay/touch", "input buffer exhausted; replay disabled");
+            return CHAIN_CALLBACK_RESULT_CONTINUE;
+        }
+    }
     arg->replayInputs++;
     arg->replayInputsByStage[stage] = arg->replayInputs + 1;
     arg->replayInputs->frameNum = curInput;
@@ -103,7 +177,34 @@ u32 ReplayManager::OnUpdateDemoHighPrio(ReplayManager *arg)
     }
 
     g_LastFrameGameInput = g_CurFrameGameInput;
+    if (IsTouchReplayMarker(arg->replayInputs))
+    {
+        i32 stage = g_GameManager.currentStage - 1;
+        if (stage >= 7) stage = 6;
+        const u8 *stageEnd = (const u8 *)arg->data->stageReplayData[stage] +
+                             arg->stageReplayDataSize[stage];
+        if ((const u8 *)(arg->replayInputs + 4) <= stageEnd)
+        {
+            const f32 touchDx = LoadReplayFloat(arg->replayInputs + 1);
+            const f32 touchDy = LoadReplayFloat(arg->replayInputs + 2);
+            Touch::InjectReplayPlayerDelta(touchDx, touchDy);
+            arg->replayInputs += 3;
+            arg->touchReplayFrames++;
+            if (arg->touchReplayFrames == 1)
+            {
+                MobileDiagnostics::Log("replay/touch", "playing extended touch movement");
+            }
+        }
+        else
+        {
+            MobileDiagnostics::Log("replay/touch", "truncated touch extension ignored");
+        }
+    }
     g_CurFrameGameInput = arg->replayInputs->frameNum;
+    g_LastFrameGameInputs[0] = g_CurFrameGameInputs[0];
+    g_CurFrameGameInputs[0] = g_CurFrameGameInput;
+    g_LastFrameGameInputs[1] = g_CurFrameGameInputs[1];
+    g_CurFrameGameInputs[1] = 0;
     arg->replayInputs = arg->replayInputs + 1;
     g_IsEighthFrameOfHeldInput = 0;
     if (g_LastFrameGameInput == g_CurFrameGameInput)
@@ -146,6 +247,9 @@ ZunResult ReplayManager::AddedCallback(ReplayManager *arg)
     arg->unused_40 = NULL;
     if (!arg->data)
     {
+        arg->touchReplayFrames = 0;
+        arg->touchReplayOverflow = false;
+        arg->touchWasUsed = false;
         arg->data = new ReplayFile;
         memset(arg->data, 0, sizeof(ReplayFile));
         memcpy(&arg->data->head.magic, "T7RP", 4);
@@ -326,6 +430,9 @@ ZunResult ReplayManager::AddedCallbackDemo(ReplayManager *arg)
     arg->frameId = 0;
     if (!arg->data)
     {
+        arg->touchReplayFrames = 0;
+        arg->touchReplayOverflow = false;
+        arg->touchWasUsed = false;
         arg->data = (ReplayFile *)FileSystem::OpenFile(arg->replayFilename, !g_GameManager.demo);
         arg->data = ValidateReplayData(arg->data, g_LastFileSize);
         if (!arg->data)
@@ -375,6 +482,10 @@ ZunResult ReplayManager::AddedCallbackDemo(ReplayManager *arg)
                                         arg->data->rawData);
             }
         }
+    }
+    if (arg->data->data.unused_a8[0] == TOUCH_REPLAY_DATA_MAGIC)
+    {
+        Touch::MarkReplayUsesTouch();
     }
     i = g_GameManager.currentStage - 1;
     if (i >= 7)
@@ -473,6 +584,8 @@ ZunResult ReplayManager::RegisterChain(i32 isDemo, const char *replayFilename)
 {
     g_LastFrameGameInput = 0;
     g_CurFrameGameInput = 0;
+    memset(g_CurFrameGameInputs, 0, sizeof(g_CurFrameGameInputs));
+    memset(g_LastFrameGameInputs, 0, sizeof(g_LastFrameGameInputs));
     if (!g_ReplayManager)
     {
         ReplayManager *mgr = new ReplayManager();
@@ -567,12 +680,18 @@ void ReplayManager::SaveReplay(const char *filename, char *replayName)
     u8 *lpBuffer;
     ReplayManager *mgr;
     i32 i;
+    size_t replayPayloadSize;
 
     if (g_ReplayManager)
     {
         mgr = g_ReplayManager;
         if (!mgr->IsDemo())
         {
+            if (mgr->touchReplayOverflow)
+            {
+                MobileDiagnostics::Log("replay/touch", "save refused after input buffer overflow");
+                goto SKIP_WRITE;
+            }
             if (!g_GameManager.practice && g_GameManager.difficulty < 4 &&
                 memcmp(&g_Supervisor.cfg, &mgr->data->data.cfg, sizeof(g_Supervisor.cfg)) != 0)
             {
@@ -584,8 +703,9 @@ void ReplayManager::SaveReplay(const char *filename, char *replayName)
             }
             if (filename)
             {
+                MobileDiagnostics::Log("replay/touch", "saving replay touchFrames=%u",
+                                       mgr->touchReplayFrames);
                 Supervisor::DebugPrint("info : Replay File write %s\n", filename);
-                replayData = (u8 *)malloc(0x100000);
                 replayCopy = *mgr->data;
                 StopRecording();
                 i = g_GameManager.currentStage - 1;
@@ -594,6 +714,27 @@ void ReplayManager::SaveReplay(const char *filename, char *replayName)
                     i = 6;
                 }
                 mgr->data->stageReplayData[i]->score = g_GameManager.globals->score;
+                replayPayloadSize = sizeof(ReplayData);
+                for (i = 0; i < 7; i++)
+                {
+                    if (mgr->data->stageReplayData[i])
+                    {
+                        replayPayloadSize += (u8 *)mgr->replayInputsByStage[i] -
+                                             (u8 *)mgr->data->stageReplayData[i];
+                    }
+                    if (mgr->data->stageEndData[i])
+                    {
+                        replayPayloadSize += (u8 *)mgr->replayDataEndPointers[i] -
+                                             (u8 *)mgr->data->stageEndData[i];
+                    }
+                }
+                replayData = (u8 *)malloc(replayPayloadSize);
+                if (!replayData)
+                {
+                    MobileDiagnostics::Log("replay/save", "allocation failed bytes=%zu",
+                                           replayPayloadSize);
+                    goto SKIP_WRITE;
+                }
                 replaySize = sizeof(ReplayHeader);
                 replaySize += sizeof(ReplayData);
                 for (i = 0; i < 7; i++)
@@ -621,6 +762,10 @@ void ReplayManager::SaveReplay(const char *filename, char *replayName)
                     }
                 }
                 replayCopy.data.score = g_GameManager.globals->guiScore;
+                if (mgr->touchWasUsed || Touch::WasUsedThisRun() || mgr->touchReplayFrames > 0)
+                {
+                    replayCopy.data.unused_a8[0] = TOUCH_REPLAY_DATA_MAGIC;
+                }
                 slowdown =
                     (g_Supervisor.framerateMultiplier / g_Supervisor.fpsAccumulator - 0.5f) * 2.0f;
                 if (slowdown < 0.0f)
@@ -679,8 +824,17 @@ void ReplayManager::SaveReplay(const char *filename, char *replayName)
                     SDL_WriteIO(file, &replayCopy, sizeof(ReplayHeader));
                     SDL_WriteIO(file, lpBuffer, compressedSize);
                     SDL_CloseIO(file);
+                    MobileDiagnostics::Log("replay/save",
+                                           "saved path=%s bytes=%d touchFrames=%u",
+                                           filename, compressedSize + (i32)sizeof(ReplayHeader),
+                                           mgr->touchReplayFrames);
                     Supervisor::DebugPrint("info : Size %d -> %d\n", replaySize,
                                            compressedSize + sizeof(ReplayHeader));
+                    free(lpBuffer);
+                }
+                else
+                {
+                    MobileDiagnostics::Log("replay/save", "open failed path=%s", filename);
                     free(lpBuffer);
                 }
             }
@@ -710,10 +864,16 @@ void ReplayManager::SaveReplay2(const char *filename)
     u8 *lpBuffer;
     ReplayManager *mgr;
     i32 i;
+    size_t replayPayloadSize;
 
     if (g_ReplayManager)
     {
         mgr = g_ReplayManager;
+        if (mgr->touchReplayOverflow)
+        {
+            MobileDiagnostics::Log("replay/touch", "rewrite refused after input buffer overflow");
+            goto SKIP_WRITE;
+        }
         if (!g_GameManager.practice && g_GameManager.difficulty < 4 &&
             memcmp(&g_Supervisor.cfg, &mgr->data->data.cfg, sizeof(g_Supervisor.cfg)) != 0)
         {
@@ -726,7 +886,6 @@ void ReplayManager::SaveReplay2(const char *filename)
         if (filename)
         {
             Supervisor::DebugPrint("info : Replay File rewrite %s\n", filename);
-            replayData = (u8 *)malloc(0x100000);
             replayCopy = *mgr->data;
             i = g_GameManager.currentStage - 1;
             if (i >= 7)
@@ -734,6 +893,25 @@ void ReplayManager::SaveReplay2(const char *filename)
                 i = 6;
             }
             mgr->data->stageReplayData[i]->score = g_GameManager.globals->score;
+            replayPayloadSize = sizeof(ReplayData);
+            for (i = 0; i < 7; i++)
+            {
+                if (mgr->data->stageReplayData[i])
+                {
+                    replayPayloadSize += mgr->stageReplayDataSize[i];
+                }
+                if (mgr->data->stageEndData[i])
+                {
+                    replayPayloadSize += mgr->stageEndDataSize[i];
+                }
+            }
+            replayData = (u8 *)malloc(replayPayloadSize);
+            if (!replayData)
+            {
+                MobileDiagnostics::Log("replay/save", "rewrite allocation failed bytes=%zu",
+                                       replayPayloadSize);
+                goto SKIP_WRITE;
+            }
             replaySize = sizeof(ReplayHeader);
             replaySize += sizeof(ReplayData);
             for (i = 0; i < 7; i++)
@@ -804,8 +982,15 @@ void ReplayManager::SaveReplay2(const char *filename)
                 SDL_WriteIO(file, &replayCopy, sizeof(ReplayHeader));
                 SDL_WriteIO(file, lpBuffer, compressedSize);
                 SDL_CloseIO(file);
+                MobileDiagnostics::Log("replay/save", "rewritten path=%s bytes=%d", filename,
+                                       compressedSize + (i32)sizeof(ReplayHeader));
                 Supervisor::DebugPrint("info : Size %d -> %d\n", replaySize,
                                        compressedSize + sizeof(ReplayHeader));
+                free(lpBuffer);
+            }
+            else
+            {
+                MobileDiagnostics::Log("replay/save", "rewrite open failed path=%s", filename);
                 free(lpBuffer);
             }
         }

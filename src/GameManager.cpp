@@ -12,6 +12,7 @@
 #include "GameWindow.hpp"
 #include "Gui.hpp"
 #include "Player.hpp"
+#include "Online.hpp"
 #include "Rng.hpp"
 #include "SoundPlayer.hpp"
 #include "Stage.hpp"
@@ -128,18 +129,27 @@ i32 GameManager::ComputeGameIntegrityCsum()
 
 void GameManager::ExtendFromPoints()
 {
-    if ((i32)this->globals->livesRemaining < 8)
+    ExtendFromPointsForPlayer(0);
+}
+
+void GameManager::ExtendFromPointsForPlayer(u8 playerId)
+{
+    if (playerId >= 2 || !g_GameManager.globals || !IsPlayerSlotActive(playerId))
     {
-        AddLivesRemaining(1);
+        return;
+    }
+    if (GetPlayerLives(playerId) < 8)
+    {
+        AddPlayerLives(playerId, 1);
         g_SoundPlayer.PlaySoundByIdx(SOUND_EXTEND, 0);
         IncreaseSubrank(200);
         g_Gui.lifeDisplayUpdateFrames = 2;
     }
     else
     {
-        if ((i32)this->globals->bombsRemaining < 8)
+        if (GetPlayerBombs(playerId) < 8)
         {
-            AddBombsRemaining(1);
+            AddPlayerBombs(playerId, 1);
             g_SoundPlayer.PlaySoundByIdx(SOUND_EXTEND, 0);
             IncreaseSubrank(200);
             g_Gui.bombDisplayUpdateFrames = 2;
@@ -149,15 +159,28 @@ void GameManager::ExtendFromPoints()
 
 void GameManager::Pause()
 {
+    if (Online::IsNetworkSession())
+    {
+        Online::RequestSharedShellEnter(Online::SHARED_SHELL_PAUSE);
+        return;
+    }
     this->isInPauseMenu = 1;
     g_GameManager.arcadeRegionTopLeftPos.x = 32.0f;
     g_GameManager.arcadeRegionTopLeftPos.y = 16.0f;
     g_GameManager.arcadeRegionSize.x = 384.0f;
     g_GameManager.arcadeRegionSize.y = 448.0f;
     this->isPaused = 1;
-    g_Player.prevPositionCenter = g_Player.positionCenter;
-    g_Player.prevOptionsPosition[0] = g_Player.optionsPosition[0];
-    g_Player.prevOptionsPosition[1] = g_Player.optionsPosition[1];
+    for (i32 playerId = 0; playerId < 2; ++playerId)
+    {
+        if (!IsPlayerSlotActive((u8)playerId))
+        {
+            continue;
+        }
+        Player &player = g_Players[playerId];
+        player.prevPositionCenter = player.positionCenter;
+        player.prevOptionsPosition[0] = player.optionsPosition[0];
+        player.prevOptionsPosition[1] = player.optionsPosition[1];
+    }
     g_Stage.prevCam = g_Stage.cam;
     g_Stage.prevPos = g_Stage.pos;
     if (g_GameManager.currentStage != 6 || g_Gui.frameCounter >= 300)
@@ -174,7 +197,13 @@ u32 GameManager::OnUpdate(GameManager *arg)
     u32 i;
     i32 csum;
 
+    const bool battlePauseAllowed =
+        arg->notInMenu && arg->globals && arg->currentStage >= 1 &&
+        arg->currentStage <= 6 && arg->framesThisStage > 0 &&
+        g_Supervisor.curState == 2 &&
+        !arg->finished && !arg->replay && !g_Gui.HasCurrentMsgIdx();
     if (arg->isInRetryMenu == 0 && arg->isInPauseMenu == 0 && arg->demo == 0 &&
+        battlePauseAllowed &&
         (arg->slowModeSlowActive == 0 && WAS_PRESSED_RAW(TH_BUTTON_MENU)))
     {
         arg->Pause();
@@ -896,13 +925,14 @@ void GameManager::AddCherryPlus(i32 amount)
     {
         this->cherry = this->cherryMax;
     }
-    if (0 < amount && g_Player.hasBorder == BORDER_NONE)
+    Player *borderPlayer = GetPrimaryActivePlayer();
+    if (0 < amount && borderPlayer->hasBorder == BORDER_NONE)
     {
         this->cherryPlus = this->cherryPlus + amount;
         if (this->cherryPlus >= this->globals->cherryStart + 50000)
         {
             this->cherryPlus = this->globals->cherryStart + 50000;
-            g_Player.ActivateBorder();
+            borderPlayer->ActivateBorder();
         }
     }
     if (this->cherry >= this->cherryMax && oldCherry != this->cherry)
@@ -945,12 +975,36 @@ void GameManager::IncreaseCherryMax(i32 amount)
 
 i32 GameManager::HasReachedMaxClears(i32 shotType)
 {
-    return this->clrd[shotType].difficultyClearedWithRetries[0] != 99 &&
-                   this->clrd[shotType].difficultyClearedWithRetries[1] != 99 &&
-                   this->clrd[shotType].difficultyClearedWithRetries[2] != 99 &&
-                   this->clrd[shotType].difficultyClearedWithRetries[3] != 99
-               ? 0
-               : 1;
+    (void)shotType;
+    return HasUnlockedExtra();
+}
+
+i32 GameManager::HasUnlockedExtra()
+{
+    // The reconstructed field name is misleading: gameplay only advances
+    // difficultyClearedWithRetries while numRetries is zero. Keep that format
+    // for old score.dat compatibility, but make Extra a single global unlock.
+    for (i32 shotType = 0; shotType < 6; shotType++)
+    {
+        for (i32 difficulty = DIFF_EASY; difficulty <= DIFF_LUNATIC; difficulty++)
+        {
+            if (this->clrd[shotType].difficultyClearedWithRetries[difficulty] == 99)
+            {
+                return 1;
+            }
+        }
+    }
+
+    // Older builds could update the aggregate clear counter while failing to
+    // retain the CLRD marker. Accept it as a migration path for existing saves.
+    for (i32 difficulty = DIFF_EASY; difficulty <= DIFF_LUNATIC; difficulty++)
+    {
+        if (this->plst.playDataByDifficulty[difficulty].noContinueClearCount > 0)
+        {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 i32 GameManager::HasUnlockedPhantom(i32 shotType)
@@ -972,11 +1026,7 @@ i32 GameManager::HasUnlockedPhantom(i32 shotType)
 
 i32 GameManager::HasReachedMaxClearsAllShotTypes()
 {
-    return HasReachedMaxClears(0) == 0 && HasReachedMaxClears(1) == 0 &&
-                   HasReachedMaxClears(2) == 0 && HasReachedMaxClears(3) == 0 &&
-                   HasReachedMaxClears(4) == 0 && HasReachedMaxClears(5) == 0
-               ? 0
-               : 1;
+    return HasUnlockedExtra();
 }
 
 i32 GameManager::HasUnlockedPhantomAndMaxClears()
