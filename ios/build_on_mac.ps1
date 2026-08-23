@@ -6,7 +6,7 @@ param(
     [string]$RemoteFolder = "th07-build",
     [string]$XcodeApp = "/Applications/Xcode.app",
     [string]$IosVersion = "0.4.0",
-    [int]$IosBuild = 29,
+    [int]$IosBuild = 30,
     [string]$GitHubRepo = "https://github.com/Ymgjdsh/th07-ios-port.git",
     [switch]$SkipGitHubBackup
 )

@@ -152,7 +152,9 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
     case SDL_EVENT_WINDOW_FOCUS_LOST:
     case SDL_EVENT_WILL_ENTER_BACKGROUND:
     case SDL_EVENT_DID_ENTER_BACKGROUND:
-        if (g_GameManager.notInMenu && !g_GameManager.isInPauseMenu)
+        Online::NotifyAppBackgrounded();
+        if (!Online::IsNetworkSession() && g_GameManager.notInMenu &&
+            !g_GameManager.isInPauseMenu)
         {
             g_GameManager.Pause();
         }
@@ -165,6 +167,7 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event)
         break;
     case SDL_EVENT_WILL_ENTER_FOREGROUND:
     case SDL_EVENT_DID_ENTER_FOREGROUND:
+        Online::NotifyAppForegrounded();
         g_GameWindow.isAppActive = 1;
         g_GameWindow.ResetAccumulator();
         g_SoundPlayer.RequestDeviceRecovery();

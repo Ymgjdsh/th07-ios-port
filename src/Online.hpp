@@ -48,6 +48,10 @@ enum Mode
 void Initialize();
 void Shutdown();
 void Update();
+// Called by the SDL lifecycle bridge. A backgrounded peer pauses the shared
+// simulation; foreground only resumes after the peer has acknowledged return.
+void NotifyAppBackgrounded();
+void NotifyAppForegrounded();
 
 void OpenMenu();
 void CloseMenu();
@@ -125,6 +129,7 @@ void QueueSharedShellSelection(u8 selection);
 // Unlike the mobile UI pulse queue, this survives a lockstep stall until the
 // frame has actually been stored and transmitted.
 void QueueInputPulse(u16 buttons);
+void ReportMenuState(i32 gameState);
 void QueueMenuCursor(i32 cursor);
 bool ConsumeMenuCursorTarget(i32 *cursor);
 

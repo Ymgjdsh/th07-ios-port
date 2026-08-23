@@ -122,6 +122,7 @@ u32 MainMenu::OnUpdate(MainMenu *arg)
     u32 result;
 
     arg->UpdatePrev();
+    if (Online::IsNetworkSession()) Online::ReportMenuState(arg->gameState);
     MobileUi::SetMainMenuHome(arg->gameState == STATE_PRE_INPUT && arg->menuSubState == 1);
     f32 mobileTapX = 0.0f;
     f32 mobileTapY = 0.0f;
@@ -196,15 +197,11 @@ u32 MainMenu::OnUpdate(MainMenu *arg)
         arg->gameState == STATE_EXTRA_SELECT_DIFFICULTY;
     if (Online::IsNetworkSession() && difficultySelection && arg->menuSubState == 1)
     {
-        const bool synchronizationWasActive = Online::IsInputSynchronizationActive();
-        const bool committedNow = Online::NotifyMenuReady(arg->gameState, arg->cursor);
-        if (Online::IsAwaitingMenuCommit() || !synchronizationWasActive || committedNow)
-        {
-            g_CurFrameRawInput &= ~TH_BUTTON_SELECTMENU;
-            g_AnmManager->ExecuteScripts(arg->vmHead, arg->vmCount);
-            if (arg->cursorVm) g_AnmManager->ExecuteScript(arg->cursorVm);
-            return CHAIN_CALLBACK_RESULT_CONTINUE;
-        }
+        // Menu input is replicated through Online's control channel. It is
+        // safe to keep running the native menu while the peer acknowledges
+        // the page; the old implementation blocked here waiting for a
+        // gameplay frame and could turn a dropped menu packet into a timeout.
+        Online::NotifyMenuReady(arg->gameState, arg->cursor);
     }
 
     const bool shotSelection =

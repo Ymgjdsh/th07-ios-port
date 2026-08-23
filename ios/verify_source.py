@@ -63,7 +63,7 @@ with open(cmake_path, "r", encoding="utf-8") as stream:
     cmake_source = stream.read()
 
 for marker in (
-    'set(TH07_IOS_BUILD "29"',
+    'set(TH07_IOS_BUILD "30"',
     'XCODE_ATTRIBUTE_LLVM_LTO "YES_THIN"',
     'set(SDL_GPU OFF CACHE BOOL "" FORCE)',
     'set(SDL_RENDER ON CACHE BOOL "" FORCE)',
@@ -276,7 +276,7 @@ for relative, markers in mobile_markers.items():
 if failed:
     sys.exit(2)
 
-print("ok: build 29 controller focus, dialogue input and touch replay markers")
+print("ok: build 30 controller focus, dialogue input and touch replay markers")
 
 online_markers = {
     os.path.join("src", "Online.cpp"): (
@@ -294,6 +294,10 @@ online_markers = {
         "kMenuCommit",
         "kGameReady",
         "kGameCommit",
+        "kMenuInput",
+        "kPeerBackground",
+        "SynchronizeMenuInputs",
+        "NotifyAppBackgrounded",
         "ackFrame",
         "ackMask",
         "OnlineFrameHistory",
@@ -332,7 +336,6 @@ online_markers = {
         "opened from native title item",
         "original idle timer started a demo replay",
         "NotifyMenuReady",
-        "committedNow",
         "NotifyGameReady",
         "ConsumeGameplayCommit",
         "QueueInputPulse",
@@ -355,7 +358,7 @@ online_markers = {
     os.path.join("ios", "BluetoothPeerTransport.mm"): (
         "MultipeerConnectivity",
         'kServiceType = @"th07-peer"',
-        '@"protocol": @"10"',
+        '@"protocol": @"11"',
     ),
     os.path.join("ios", "OnlineLauncher.mm"): (
         "UITableViewStyleInsetGrouped",
@@ -389,14 +392,14 @@ for relative, markers in online_markers.items():
         source = stream.read()
     for marker in markers:
         if marker not in source:
-            print("error: build 29 Online marker missing:", relative, marker)
+            print("error: build 30 Online marker missing:", relative, marker)
             failed = True
 if "demoFramesCount++" in open(os.path.join(root, "src", "MainMenu.cpp"), encoding="utf-8").read():
     print("error: title idle demo trigger is still enabled")
     failed = True
 if failed:
     sys.exit(2)
-print("ok: Build 29 barrier isolation, discrete state correction and stable shared pause")
+print("ok: Build 30 control channel, reconnect freeze and gameplay lockstep markers")
 
 with open(os.path.join(root, "src", "ResultScreen.cpp"), "r", encoding="utf-8") as stream:
     result_source = stream.read()

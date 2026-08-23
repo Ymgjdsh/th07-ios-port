@@ -36,6 +36,7 @@ constexpr socket_t kInvalidSocket = -1;
 #include "Gui.hpp"
 #include "MobileDiagnostics.hpp"
 #include "OnlineFrameHistory.hpp"
+#include "OnlineControlProtocol.hpp"
 #include "OnlineStartupProtocol.hpp"
 #include "OnlineLauncherIOS.hpp"
 #include "OnlineTextInputIOS.hpp"
@@ -49,11 +50,12 @@ constexpr socket_t kInvalidSocket = -1;
 namespace
 {
 constexpr u32 kMagic = 0x374f4e54; // TNO7
-// Build 29 makes startup barriers a real transport boundary: no lockstep
-// frame is sent or consumed until both peers have entered the committed menu
-// epoch. Keep mixed builds out of the same session.
-constexpr u16 kVersion = 10;
-constexpr u32 kBuildIdentity = 0x07060007u;
+// Build 30 introduces a separate control channel for setup menus. Menu state
+// is replicated as a latest-value snapshot and never enters the gameplay
+// frame history. This is deliberately a new wire identity: an old client
+// must not join a session that uses the new state machine.
+constexpr u16 kVersion = 11;
+constexpr u32 kBuildIdentity = 0x07060008u;
 // XOR of the first SHA-256 words for th07.dat, thbgm.dat and msgothic.ttc.
 constexpr u32 kResourceIdentity = 0xf09a7ea3u;
 constexpr u16 kPort = 37707;
@@ -61,12 +63,20 @@ constexpr u8 kHello = 1, kWelcome = 2, kInput = 3, kBye = 4, kHeartbeat = 5, kAc
              kAuthoritativeState = 7, kIncompatible = 8;
 constexpr u8 kPrepare = 9, kPrepareAck = 10, kMenuReady = 11, kMenuCommit = 12;
 constexpr u8 kGameReady = 13, kGameCommit = 14;
+// Setup input is intentionally not part of the lockstep stream. It carries
+// the current menu buttons/cursor and is retransmitted until replaced.
+constexpr u8 kMenuInput = 15;
+// Lifecycle messages keep a running game frozen while one device is in the
+// background. They are control messages, never gameplay frames.
+constexpr u8 kPeerBackground = 16, kPeerForeground = 17;
+constexpr u8 kMenuInputAck = 18;
 constexpr u32 kDiscoveryIntervalMs = 450;
 constexpr u32 kHandshakeIntervalMs = 300;
 constexpr u32 kHeartbeatIntervalMs = 500;
 constexpr u32 kPeerTimeoutMs = 4000;
 constexpr u32 kInputStallTimeoutMs = 12000;
 constexpr u32 kInputRetransmitIntervalMs = 24;
+constexpr u32 kMenuInputIntervalMs = 32;
 // Bound recovery traffic after a delayed UDP packet. Without a budget, every
 // pending frame is resent in one tick and the resulting burst makes the
 // lockstep renderer appear to stutter on iOS Wi-Fi.
@@ -228,6 +238,27 @@ bool g_ShellHandoffReady = false;
 i32 g_LocalMenuCursor = -1;
 i32 g_RemoteMenuCursor = -1;
 i32 g_MenuCursorTarget = -1;
+u16 g_RemoteMenuButtons = 0;
+u32 g_LastRemoteMenuSequence = 0;
+u32 g_LastMenuInputSend = 0;
+u32 g_LocalMenuSequence = 0;
+u16 g_MenuCommandButtons = 0;
+u16 g_MenuCommandQueuedButtons = 0;
+i32 g_MenuCommandCursor = -1;
+u16 g_LastPublishedMenuButtons = 0;
+bool g_MenuCommandPending = false;
+bool g_LocalMenuCommandConsumed = false;
+bool g_RemoteMenuCommandConsumed = true;
+i32 g_LocalControlMenuState = -1;
+i32 g_RemoteControlMenuState = -1;
+u32 g_MenuPulseGeneration = 0;
+u32 g_MenuCommandPulseGeneration = 0;
+u32 g_MenuCursorGeneration = 0;
+u32 g_MenuCommandCursorGeneration = 0;
+bool g_LocalBackgrounded = false;
+bool g_PeerBackgrounded = false;
+bool g_AwaitingResumeAck = false;
+u32 g_LastLifecycleSend = 0;
 i32 g_LocalShellSelectionRequest = -1;
 i32 g_RemoteShellSelectionRequest = -1;
 u32 g_LastRemoteShellSelectionFrame = 0xffffffffu;
@@ -696,6 +727,25 @@ void ActivateMultiplayerSession(bool local)
     g_QueuedInputButtons = 0;
     g_LastShellButtons[0] = g_LastShellButtons[1] = 0;
     g_LocalMenuCursor = g_RemoteMenuCursor = g_MenuCursorTarget = -1;
+    g_RemoteMenuButtons = 0;
+    g_LastRemoteMenuSequence = 0;
+    g_LastMenuInputSend = 0;
+    g_LocalMenuSequence = 0;
+    g_MenuCommandButtons = 0;
+    g_MenuCommandQueuedButtons = 0;
+    g_MenuCommandCursor = -1;
+    g_LastPublishedMenuButtons = 0;
+    g_MenuCommandPending = false;
+    g_LocalMenuCommandConsumed = false;
+    g_RemoteMenuCommandConsumed = true;
+    g_LocalControlMenuState = -1;
+    g_RemoteControlMenuState = -1;
+    g_MenuPulseGeneration = g_MenuCommandPulseGeneration = 0;
+    g_MenuCursorGeneration = g_MenuCommandCursorGeneration = 0;
+    g_LocalBackgrounded = false;
+    g_PeerBackgrounded = false;
+    g_AwaitingResumeAck = false;
+    g_LastLifecycleSend = 0;
     g_LocalShellSelectionRequest = g_RemoteShellSelectionRequest = -1;
     ResetSyncState();
     g_PlayerCharacters[0] = g_PlayerCharacters[1] = 0;
@@ -1278,7 +1328,9 @@ bool CommitMenuBarrier(u32 epoch)
     if (epoch <= g_BarrierEpoch) return false;
     g_BarrierEpoch = epoch;
     g_StartupPhase = STARTUP_MENU_COMMITTED;
-    g_InputSynchronizationActive = true;
+    // MENU_COMMIT only confirms the replicated setup page. Gameplay
+    // lockstep remains disabled until GAME_COMMIT.
+    g_InputSynchronizationActive = false;
     g_StartupStartedAt = SDL_GetTicks();
     ResetSessionRng();
     ResetSyncState();
@@ -1297,9 +1349,12 @@ bool CommitGameplayBarrier(u32 epoch)
     if (epoch <= g_BarrierEpoch) return false;
     g_BarrierEpoch = epoch;
     g_StartupPhase = STARTUP_GAME_COMMITTED;
+    // The protocol commit is consumed by MainMenu after the final setup page.
+    // Lockstep is enabled there so this Supervisor frame cannot accidentally
+    // allocate a gameplay frame while it is still running menu code.
+    g_InputSynchronizationActive = false;
     g_GameplayCommit = true;
     g_StartupStartedAt = SDL_GetTicks();
-    ResetSyncState();
     g_LocalMenuCursor = g_RemoteMenuCursor = g_MenuCursorTarget = -1;
     MobileDiagnostics::Log("online/barrier", "game commit role=%s epoch=%u frame=%u",
                            g_Host ? "host" : "guest", g_BarrierEpoch, g_InputFrame);
@@ -1331,6 +1386,175 @@ bool SendStartupPacket(u8 kind)
     if (g_Socket == kInvalidSocket || g_Peer.sin_addr.s_addr == 0) return false;
     return sendto(g_Socket, (const char *)&packet, sizeof(packet), 0,
                   (const sockaddr *)&g_Peer, sizeof(g_Peer)) == (int)sizeof(packet);
+}
+
+bool SendMenuInputPacket(u32 sequence, u16 buttons, i32 cursor)
+{
+    if (!g_MultiplayerSession || g_LocalSession || g_State != Online::STATE_CONNECTED)
+        return false;
+    Packet packet;
+    FillPacket(packet, kMenuInput, buttons, 0);
+    packet.frame = sequence;
+    packet.menuState = (u8)std::clamp(g_LocalControlMenuState, 0, 255);
+    packet.menuCursor = (i16)std::clamp(cursor, -1, 32767);
+    packet.menuCursorValid = cursor >= 0 ? 1 : 0;
+    if (g_Mode == Online::MODE_BLUETOOTH)
+    {
+#if defined(TH07_IOS)
+        return TH07_IOS_BluetoothSend(&packet, (int)sizeof(packet), 1) != 0;
+#else
+        return false;
+#endif
+    }
+    if (g_Socket == kInvalidSocket || g_Peer.sin_addr.s_addr == 0) return false;
+    return sendto(g_Socket, (const char *)&packet, sizeof(packet), 0,
+                  (const sockaddr *)&g_Peer, sizeof(g_Peer)) == (int)sizeof(packet);
+}
+
+bool SendMenuInputAck(u32 sequence)
+{
+    if (!g_MultiplayerSession || g_LocalSession || g_State != Online::STATE_CONNECTED)
+        return false;
+    Packet packet;
+    FillPacket(packet, kMenuInputAck, 0, sequence);
+    if (g_Mode == Online::MODE_BLUETOOTH)
+    {
+#if defined(TH07_IOS)
+        return TH07_IOS_BluetoothSend(&packet, (int)sizeof(packet), 1) != 0;
+#else
+        return false;
+#endif
+    }
+    if (g_Socket == kInvalidSocket || g_Peer.sin_addr.s_addr == 0) return false;
+    return sendto(g_Socket, (const char *)&packet, sizeof(packet), 0,
+                  (const sockaddr *)&g_Peer, sizeof(g_Peer)) == (int)sizeof(packet);
+}
+
+bool SynchronizeMenuInputs(u16 localButtons, f32 localDx, f32 localDy,
+                           u16 *p1Buttons, u16 *p2Buttons,
+                           f32 *p1Dx, f32 *p1Dy, f32 *p2Dx, f32 *p2Dy)
+{
+    (void)localDx;
+    (void)localDy;
+    const u32 now = SDL_GetTicks();
+    if (!g_MenuCommandPending &&
+        (g_QueuedInputButtons != 0 || g_QueuedShellButtons != 0 ||
+         g_LocalMenuCursor >= 0 || localButtons != g_LastPublishedMenuButtons))
+    {
+        ++g_LocalMenuSequence;
+        if (g_LocalMenuSequence == 0) ++g_LocalMenuSequence;
+        g_MenuCommandQueuedButtons = g_QueuedInputButtons | g_QueuedShellButtons;
+        g_MenuCommandButtons = localButtons | g_MenuCommandQueuedButtons;
+        g_MenuCommandCursor = g_LocalMenuCursor;
+        g_MenuCommandPulseGeneration = g_MenuPulseGeneration;
+        g_MenuCommandCursorGeneration = g_MenuCursorGeneration;
+        g_MenuCommandPending = true;
+        g_LocalMenuCommandConsumed = false;
+        g_LastMenuInputSend = 0;
+    }
+    if (g_MenuCommandPending && g_State == Online::STATE_CONNECTED &&
+        (!g_LastMenuInputSend || now - g_LastMenuInputSend >= kMenuInputIntervalMs))
+    {
+        if (SendMenuInputPacket(g_LocalMenuSequence, g_MenuCommandButtons,
+                                g_MenuCommandCursor))
+            g_LastMenuInputSend = now ? now : 1;
+    }
+
+    const bool consumeLocal = g_MenuCommandPending && !g_LocalMenuCommandConsumed;
+    const bool consumeRemote = !g_RemoteMenuCommandConsumed &&
+                               g_LastRemoteMenuSequence != 0 &&
+                               OnlineControlPageMatches(g_LocalControlMenuState,
+                                                        g_RemoteControlMenuState);
+    const u16 localMenuButtons = consumeLocal ? g_MenuCommandButtons : 0;
+    const u16 remoteMenuButtons = consumeRemote ? g_RemoteMenuButtons : 0;
+    const i32 localMenuCursor = consumeLocal ? g_MenuCommandCursor : -1;
+    const i32 remoteMenuCursor = consumeRemote ? g_RemoteMenuCursor : -1;
+
+    // Host owns the P1 setup lane. During the second loadout page the guest
+    // owns P2; both devices still receive the same latest snapshot.
+    if (g_Host)
+    {
+        *p1Buttons = localMenuButtons;
+        *p2Buttons = remoteMenuButtons;
+        *p1Dx = localDx;
+        *p1Dy = localDy;
+        *p2Dx = *p2Dy = 0.0f;
+    }
+    else
+    {
+        *p1Buttons = remoteMenuButtons;
+        *p2Buttons = localMenuButtons;
+        *p1Dx = *p1Dy = 0.0f;
+        *p2Dx = localDx;
+        *p2Dy = localDy;
+    }
+
+    const bool useGuestLane = g_SelectingPlayer2Loadout;
+    const i32 cursor = useGuestLane
+                           ? (g_Host ? remoteMenuCursor : localMenuCursor)
+                           : (g_Host ? localMenuCursor : remoteMenuCursor);
+    if (cursor >= 0) g_MenuCursorTarget = cursor;
+    if (consumeLocal) g_LocalMenuCommandConsumed = true;
+    if (consumeRemote)
+    {
+        g_RemoteMenuCommandConsumed = true;
+        SendMenuInputAck(g_LastRemoteMenuSequence);
+    }
+    return true;
+}
+
+bool SendLifecyclePacket(u8 kind)
+{
+    if (!g_MultiplayerSession || g_LocalSession || g_State != Online::STATE_CONNECTED)
+        return false;
+    Packet packet;
+    FillPacket(packet, kind, 0, g_InputFrame);
+    if (g_Mode == Online::MODE_BLUETOOTH)
+    {
+#if defined(TH07_IOS)
+        return TH07_IOS_BluetoothSend(&packet, (int)sizeof(packet), 1) != 0;
+#else
+        return false;
+#endif
+    }
+    if (g_Socket == kInvalidSocket || g_Peer.sin_addr.s_addr == 0) return false;
+    return sendto(g_Socket, (const char *)&packet, sizeof(packet), 0,
+                  (const sockaddr *)&g_Peer, sizeof(g_Peer)) == (int)sizeof(packet);
+}
+
+void StoreRemoteMenuInput(const Packet &packet)
+{
+    if (!g_MultiplayerSession || g_LocalSession || packet.session != g_LaunchNonce)
+        return;
+    // A menu command is held until this device reaches its intended page.
+    // Only then does SynchronizeMenuInputs expose it and acknowledge it.
+    if (!OnlineControlSequenceIsNewer(packet.frame, g_LastRemoteMenuSequence))
+    {
+        if (packet.frame == g_LastRemoteMenuSequence && g_RemoteMenuCommandConsumed)
+            SendMenuInputAck(packet.frame);
+        return;
+    }
+    g_LastRemoteMenuSequence = packet.frame;
+    g_RemoteMenuButtons = packet.buttons;
+    g_RemoteMenuCursor = packet.menuCursorValid ? packet.menuCursor : -1;
+    g_RemoteControlMenuState = packet.menuState;
+    g_RemoteMenuCommandConsumed = false;
+}
+
+void StoreMenuInputAcknowledgement(const Packet &packet)
+{
+    if (!g_MenuCommandPending || packet.session != g_LaunchNonce ||
+        packet.frame != g_LocalMenuSequence)
+        return;
+    g_MenuCommandPending = false;
+    g_LastPublishedMenuButtons = g_MenuCommandButtons;
+    if (g_MenuPulseGeneration == g_MenuCommandPulseGeneration)
+        g_QueuedInputButtons &= (u16)~g_MenuCommandQueuedButtons;
+    g_QueuedShellButtons &= (u16)~g_MenuCommandQueuedButtons;
+    if (g_MenuCursorGeneration == g_MenuCommandCursorGeneration)
+        g_LocalMenuCursor = -1;
+    g_MenuCommandQueuedButtons = 0;
+    g_MenuCommandCursor = -1;
 }
 
 void FailStartup(const char *reason)
@@ -1595,6 +1819,11 @@ void RefreshNativeLauncher()
 void UpdateStartupReliability(u32 now)
 {
     if (!g_MultiplayerSession || g_LocalSession || g_StartupPhase == STARTUP_FAILED) return;
+    if (g_LocalBackgrounded || g_PeerBackgrounded || g_AwaitingResumeAck)
+    {
+        g_StartupStartedAt = now;
+        return;
+    }
     if (now - g_LastStartupSend >= kHandshakeIntervalMs)
     {
         if (g_StartupPhase == STARTUP_PREPARING && g_Host)
@@ -1640,6 +1869,22 @@ void SendDiscovery()
     }
 #endif
 }
+void UpdateLifecycleReliability(u32 now)
+{
+    if (!g_MultiplayerSession || g_LocalSession || g_State != Online::STATE_CONNECTED)
+        return;
+    if (now - g_LastLifecycleSend < kHandshakeIntervalMs) return;
+    if (g_LocalBackgrounded)
+    {
+        if (SendLifecyclePacket(kPeerBackground)) g_LastLifecycleSend = now;
+    }
+    else if (g_PeerBackgrounded || g_AwaitingResumeAck)
+    {
+        // Keep advertising our return while the peer is still suspended. The
+        // peer will clear its wait flag only after it receives this message.
+        if (SendLifecyclePacket(kPeerForeground)) g_LastLifecycleSend = now;
+    }
+}
 #if defined(TH07_IOS)
 void UpdateBluetooth()
 {
@@ -1658,15 +1903,11 @@ void UpdateBluetooth()
     {
         const u32 now = SDL_GetTicks();
         if (!g_BluetoothDisconnectedAt) g_BluetoothDisconnectedAt = now;
-        if (now - g_BluetoothDisconnectedAt >= kBluetoothReconnectGraceMs)
-        {
-            if (g_MultiplayerSession) FailStartup("Nearby peer disconnected");
-            g_State = Online::STATE_IDLE;
-        }
-        else
-        {
-            SetStatus("Nearby transport reconnecting...");
-        }
+        // Bluetooth can disappear while iOS suspends the app. Keep the
+        // session and simulation frozen instead of converting a temporary
+        // transport loss into a permanent startup failure.
+        g_PeerBackgrounded = true;
+        SetStatus("Nearby peer paused; waiting for reconnect...");
         return;
     }
     Packet packet = {};
@@ -1688,6 +1929,31 @@ void UpdateBluetooth()
         else if (packet.kind == kInput && g_State == Online::STATE_CONNECTED)
         {
             StoreRemoteInput(packet); g_LastPeer = now;
+        }
+        else if (packet.kind == kMenuInput && g_State == Online::STATE_CONNECTED)
+        {
+            StoreRemoteMenuInput(packet); g_LastPeer = now;
+        }
+        else if (packet.kind == kMenuInputAck && g_State == Online::STATE_CONNECTED)
+        {
+            StoreMenuInputAcknowledgement(packet); g_LastPeer = now;
+        }
+        else if (packet.kind == kPeerBackground && g_State == Online::STATE_CONNECTED)
+        {
+            g_PeerBackgrounded = true;
+            g_LastPeer = now;
+            SetStatus("Peer paused; waiting for reconnect...");
+        }
+        else if (packet.kind == kPeerForeground && g_State == Online::STATE_CONNECTED)
+        {
+            const bool wasWaiting = g_PeerBackgrounded;
+            g_PeerBackgrounded = false;
+            g_AwaitingResumeAck = false;
+            g_LastSyncProgress = now;
+            g_InputStalled = false;
+            g_LastPeer = now;
+            SetStatus("Peer returned; synchronizing...");
+            if (wasWaiting) SendBluetooth(kPeerForeground);
         }
         else if (packet.kind == kHeartbeat)
         {
@@ -1711,6 +1977,7 @@ void UpdateBluetooth()
         }
     }
     const u32 now = SDL_GetTicks();
+    UpdateLifecycleReliability(now);
     if (g_State == Online::STATE_CONNECTED && now - g_LastHeartbeat >= kHeartbeatIntervalMs)
     {
         SendBluetooth(kHeartbeat);
@@ -1735,6 +2002,37 @@ void Online::Shutdown() { Leave(); TH07_IOS_StopLocalNetworkPermissionProbe();
 #if defined(_WIN32)
     WSACleanup();
 #endif
+}
+void Online::NotifyAppBackgrounded()
+{
+    if (!g_MultiplayerSession || g_LocalSession) return;
+    if (g_LocalBackgrounded)
+    {
+        SendLifecyclePacket(kPeerBackground);
+        return;
+    }
+    g_LocalBackgrounded = true;
+    g_AwaitingResumeAck = false;
+    g_LastLifecycleSend = 0;
+    SetStatus("Paused; waiting for reconnect...");
+    SendLifecyclePacket(kPeerBackground);
+}
+void Online::NotifyAppForegrounded()
+{
+    if (!g_MultiplayerSession || g_LocalSession) return;
+    if (!g_LocalBackgrounded)
+    {
+        if (g_AwaitingResumeAck) SendLifecyclePacket(kPeerForeground);
+        return;
+    }
+    g_LocalBackgrounded = false;
+    g_AwaitingResumeAck = true;
+    g_LastSyncProgress = SDL_GetTicks();
+    g_InputStalled = false;
+    g_LastLifecycleSend = 0;
+    SetStatus(g_PeerBackgrounded ? "Peer paused; synchronizing..." :
+                                  "Reconnecting synchronized play...");
+    SendLifecyclePacket(kPeerForeground);
 }
 void Online::Update()
 {
@@ -1819,6 +2117,31 @@ void Online::Update()
         {
             StoreRemoteInput(packet); g_LastPeer = now;
         }
+        else if (packet.kind == kMenuInput && g_State == STATE_CONNECTED && IsExpectedPeer(from))
+        {
+            StoreRemoteMenuInput(packet); g_LastPeer = now;
+        }
+        else if (packet.kind == kMenuInputAck && g_State == STATE_CONNECTED && IsExpectedPeer(from))
+        {
+            StoreMenuInputAcknowledgement(packet); g_LastPeer = now;
+        }
+        else if (packet.kind == kPeerBackground && g_State == STATE_CONNECTED && IsExpectedPeer(from))
+        {
+            g_PeerBackgrounded = true;
+            g_LastPeer = now;
+            SetStatus("Peer paused; waiting for reconnect...");
+        }
+        else if (packet.kind == kPeerForeground && g_State == STATE_CONNECTED && IsExpectedPeer(from))
+        {
+            const bool wasWaiting = g_PeerBackgrounded;
+            g_PeerBackgrounded = false;
+            g_AwaitingResumeAck = false;
+            g_LastSyncProgress = now;
+            g_InputStalled = false;
+            g_LastPeer = now;
+            SetStatus("Peer returned; synchronizing...");
+            if (wasWaiting) SendPacket(from, kPeerForeground);
+        }
         else if (packet.kind == kHeartbeat && g_State == STATE_CONNECTED && IsExpectedPeer(from))
         {
             StoreLocalAcknowledgement(packet);
@@ -1863,6 +2186,7 @@ void Online::Update()
         SetStatus("Searching nearby rooms...");
     }
     if (g_State == STATE_SEARCHING && !g_Host && g_Peer.sin_addr.s_addr != 0 && now - g_LastHandshake >= kHandshakeIntervalMs) { SendPacket(g_Peer, kHello); g_LastHandshake = now; }
+    UpdateLifecycleReliability(now);
     if (g_State == STATE_CONNECTED && now - g_LastHeartbeat >= kHeartbeatIntervalMs) { SendPacket(g_Peer, kHeartbeat); g_LastHeartbeat = now; }
     UpdateStartupReliability(now);
     if (g_Mode == MODE_RELAY && g_State != STATE_CONNECTED && now - g_LastRelayRegister >= 1000)
@@ -1871,8 +2195,11 @@ void Online::Update()
     {
         if (g_MultiplayerSession)
         {
-            FailStartup("Connection lost; synchronized play stopped");
-            g_State = STATE_IDLE;
+            // A silent peer is treated as a suspended app, not a fatal
+            // protocol error. Freeze both simulations and keep retrying the
+            // lifecycle handshake until the peer returns.
+            g_PeerBackgrounded = true;
+            SetStatus("Peer paused; waiting for reconnect...");
         }
         else
         {
@@ -1997,7 +2324,7 @@ bool Online::IsInputSynchronizationActive()
 }
 void Online::NotifyGameReady(i32 difficulty, i32 stage)
 {
-    if (!g_MultiplayerSession || g_LocalSession || !g_InputSynchronizationActive) return;
+    if (!g_MultiplayerSession || g_LocalSession) return;
     if (difficulty < 0 || difficulty > 5 || stage < 0 || stage > 7)
     {
         FailStartup("Invalid game configuration");
@@ -2039,6 +2366,21 @@ bool Online::ConsumeGameplayCommit()
 {
     const bool value = g_GameplayCommit;
     g_GameplayCommit = false;
+    if (value && g_MultiplayerSession && !g_LocalSession)
+    {
+        // Final SELECT belongs to setup. Do not let an ACK racing GAME_COMMIT
+        // carry that menu pulse into gameplay frame zero.
+        g_QueuedInputButtons = 0;
+        g_LocalMenuCursor = g_RemoteMenuCursor = g_MenuCursorTarget = -1;
+        g_RemoteMenuButtons = 0;
+        g_MenuCommandButtons = g_MenuCommandQueuedButtons = 0;
+        g_MenuCommandCursor = -1;
+        g_MenuCommandPending = false;
+        g_LocalMenuCommandConsumed = true;
+        g_RemoteMenuCommandConsumed = true;
+        g_InputSynchronizationActive = true;
+        ResetSyncState();
+    }
     return value;
 }
 void Online::StartHost()
@@ -2172,6 +2514,24 @@ void Online::Leave()
     g_QueuedShellButtons = 0;
     g_QueuedInputButtons = 0;
     g_LocalMenuCursor = g_RemoteMenuCursor = g_MenuCursorTarget = -1;
+    g_RemoteMenuButtons = 0;
+    g_LastRemoteMenuSequence = 0;
+    g_LocalMenuSequence = 0;
+    g_MenuCommandButtons = 0;
+    g_MenuCommandQueuedButtons = 0;
+    g_MenuCommandCursor = -1;
+    g_LastPublishedMenuButtons = 0;
+    g_MenuCommandPending = false;
+    g_LocalMenuCommandConsumed = false;
+    g_RemoteMenuCommandConsumed = true;
+    g_LocalControlMenuState = -1;
+    g_RemoteControlMenuState = -1;
+    g_MenuPulseGeneration = g_MenuCommandPulseGeneration = 0;
+    g_MenuCursorGeneration = g_MenuCommandCursorGeneration = 0;
+    g_LocalBackgrounded = false;
+    g_PeerBackgrounded = false;
+    g_AwaitingResumeAck = false;
+    g_LastLifecycleSend = 0;
     g_LocalShellSelectionRequest = g_RemoteShellSelectionRequest = -1;
     g_GameManager.isInPauseMenu = 0;
     g_GameManager.isInRetryMenu = 0;
@@ -2252,11 +2612,18 @@ void Online::QueueInputPulse(u16 buttons)
     // Menu gestures are momentary edges.  Keep only the newest unsent edge so
     // a stalled frame cannot combine an old tap with a later swipe.
     g_QueuedInputButtons = buttons;
+    ++g_MenuPulseGeneration;
     if ((buttons & TH_BUTTON_SELECTMENU) == 0) g_LocalMenuCursor = -1;
+}
+void Online::ReportMenuState(i32 gameState)
+{
+    if (IsNetworkSession()) g_LocalControlMenuState = std::clamp(gameState, 0, 255);
 }
 void Online::QueueMenuCursor(i32 cursor)
 {
-    if (IsNetworkSession()) g_LocalMenuCursor = std::max(-1, cursor);
+    if (!IsNetworkSession()) return;
+    g_LocalMenuCursor = std::max(-1, cursor);
+    if (cursor >= 0) ++g_MenuCursorGeneration;
 }
 bool Online::ConsumeMenuCursorTarget(i32 *cursor)
 {
@@ -2270,6 +2637,23 @@ bool Online::SynchronizeInputs(u16 localButtons, f32 localDx, f32 localDy,
                                f32 *p1Dx, f32 *p1Dy, f32 *p2Dx, f32 *p2Dy)
 {
     if (!p1Buttons || !p2Buttons || !p1Dx || !p1Dy || !p2Dx || !p2Dy) return false;
+    // Lifecycle has priority over both channels. Returning false makes the
+    // Supervisor keep the last rendered frame while Online::Update continues
+    // exchanging reconnect control packets.
+    if (g_MultiplayerSession && !g_LocalSession &&
+        OnlineControlShouldFreeze(g_LocalBackgrounded, g_PeerBackgrounded,
+                                  g_AwaitingResumeAck))
+    {
+        return false;
+    }
+    // Menus use the independent latest-value control channel. No frame is
+    // allocated, acknowledged, retransmitted, or allowed to time out here.
+    // Lockstep is enabled only by GAME_COMMIT after both loadouts match.
+    if (g_MultiplayerSession && !g_LocalSession && !g_InputSynchronizationActive)
+    {
+        return SynchronizeMenuInputs(localButtons, localDx, localDy,
+                                     p1Buttons, p2Buttons, p1Dx, p1Dy, p2Dx, p2Dy);
+    }
     UpdateShellCloseComplete();
     if (g_ShellCommit != SHARED_COMMIT_NONE && g_ShellHandoffFrame != 0 &&
         g_InputFrame >= g_ShellHandoffFrame)
@@ -2505,6 +2889,7 @@ void Online::ResetLoadouts()
     g_PeerGameDifficulty = g_PeerGameStage = -1;
     if (g_MultiplayerSession && !g_LocalSession && g_InputSynchronizationActive)
     {
+        g_InputSynchronizationActive = false;
         ++g_BarrierEpoch;
         g_MenuReadySent = g_PeerMenuReady = false;
         g_MenuReadyState = g_PeerMenuState = -1;
