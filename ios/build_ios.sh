@@ -5,7 +5,7 @@ ROOT_DIR=$(cd "$(dirname "$0")/.." && pwd)
 BUILD_DIR=${BUILD_DIR:-"$ROOT_DIR/build-ios"}
 CONFIG=${CONFIG:-Release}
 IOS_VERSION=${IOS_VERSION:-0.4.0}
-IOS_BUILD=${IOS_BUILD:-29}
+IOS_BUILD=${IOS_BUILD:-31}
 OUTPUT_IPA=${OUTPUT_IPA:-"$BUILD_DIR/th07-ios-${IOS_VERSION}-${IOS_BUILD}.ipa"}
 LOG_DIR="$BUILD_DIR/logs"
 mkdir -p "$LOG_DIR"
@@ -63,6 +63,15 @@ fi
 echo "SDK:   $SDK_PATH"
 
 python3 "$ROOT_DIR/ios/verify_source.py" --root "$ROOT_DIR"
+
+echo "Running host-side online protocol tests"
+HOST_CXX=$(xcrun --sdk macosx --find clang++)
+HOST_SDK=$(xcrun --sdk macosx --show-sdk-path)
+"$HOST_CXX" -std=c++17 -O2 -I"$ROOT_DIR/src" \
+    -isysroot "$HOST_SDK" \
+    "$ROOT_DIR/ios/test_online_protocol.cpp" \
+    -o "$BUILD_DIR/test-online-protocol"
+"$BUILD_DIR/test-online-protocol"
 
 cmake -S "$ROOT_DIR" -B "$BUILD_DIR" -G Xcode \
     -DCMAKE_SYSTEM_NAME=iOS \

@@ -14,18 +14,18 @@ struct ControlReceiver
 {
     u32 lastSequence = 0;
     u16 buttons = 0;
-    i32 page = -1;
+    u8 context = kOnlineControlInvalidContext;
     int applied = 0;
     bool consumed = true;
 
-    bool Deliver(u32 sequence, u16 nextButtons, i32 nextPage)
+    bool Deliver(u32 sequence, u16 nextButtons, u8 nextContext)
     {
         const bool fresh = OnlineControlSequenceIsNewer(sequence, lastSequence);
         if (fresh)
         {
             lastSequence = sequence;
             buttons = nextButtons;
-            page = nextPage;
+            context = nextContext;
             consumed = false;
         }
         // A duplicate regenerates an ACK only after the command was consumed
@@ -33,12 +33,49 @@ struct ControlReceiver
         return !fresh && sequence == lastSequence && consumed;
     }
 
-    bool Consume(i32 localPage)
+    bool Consume(i32 localPage, bool selectingPlayer2)
     {
-        if (consumed || !OnlineControlPageMatches(localPage, page)) return false;
+        if (consumed ||
+            !OnlineControlContextMatches(localPage, selectingPlayer2, context))
+            return false;
         consumed = true;
         ++applied;
         return true;
+    }
+};
+
+struct ReliableMenuSender
+{
+    u32 sequence = 0;
+    u16 buttons = 0;
+    i32 cursor = -1;
+    u8 context = kOnlineControlInvalidContext;
+    bool pending = false;
+    bool locallyConsumed = false;
+
+    void Queue(i32 page, bool selectingPlayer2, u16 nextButtons, i32 nextCursor)
+    {
+        assert(!pending);
+        ++sequence;
+        buttons = nextButtons;
+        cursor = nextCursor;
+        context = OnlineControlEncodeContext(page, selectingPlayer2);
+        pending = true;
+        locallyConsumed = false;
+    }
+
+    bool ConsumeLocal(i32 page, bool selectingPlayer2)
+    {
+        if (!pending || locallyConsumed ||
+            !OnlineControlContextMatches(page, selectingPlayer2, context))
+            return false;
+        locallyConsumed = true;
+        return true;
+    }
+
+    void Acknowledge(u32 acknowledgedSequence)
+    {
+        if (pending && acknowledgedSequence == sequence) pending = false;
     }
 };
 
@@ -57,32 +94,107 @@ int main()
     assert(OnlineControlPageMatches(4, 4));
     assert(!OnlineControlPageMatches(3, 4));
     assert(!OnlineControlPageMatches(-1, -1));
+    assert(OnlineControlEncodeContext(5, false) == 0x05);
+    assert(OnlineControlEncodeContext(5, true) == 0x85);
+    assert(OnlineControlContextMatches(5, false, 0x05));
+    assert(!OnlineControlContextMatches(5, true, 0x05));
+    assert(OnlineControlContextMatches(5, true, 0x85));
+    assert(OnlineControlLocalOwnsMenu(true, false));
+    assert(!OnlineControlLocalOwnsMenu(false, false));
+    assert(!OnlineControlLocalOwnsMenu(true, true));
+    assert(OnlineControlLocalOwnsMenu(false, true));
+    assert(OnlineControlPressedButtons(0x0080, 0) == 0x0080);
+    assert(OnlineControlPressedButtons(0x0080, 0x0080) == 0);
+    assert(OnlineControlPressedButtons(0, 0x0080) == 0); // release is not a command
     assert(!OnlineUsesGameplayLockstep(true, false, false));
     assert(OnlineUsesGameplayLockstep(true, false, true));
     assert(!OnlineUsesGameplayLockstep(true, true, true));
 
-    // Simulate the reliable latest-value menu channel. The first difficulty
+    // Simulate the reliable one-shot menu channel. The first difficulty
     // tap packet and its first ACK are lost; retransmission applies the tap
     // exactly once and a duplicate only regenerates the ACK. A delayed older
-    // cursor snapshot cannot replace the newer release snapshot.
+    // command cannot replace a newer event.
     ControlReceiver menuPeer;
     const u32 difficultyTap = 1;
     bool acknowledged = false;
     (void)acknowledged; // first network send is dropped
-    acknowledged = menuPeer.Deliver(difficultyTap, 0x0100, 4);
+    acknowledged = menuPeer.Deliver(difficultyTap, 0x0100,
+                                    OnlineControlEncodeContext(4, false));
     assert(!acknowledged);
-    assert(!menuPeer.Consume(0)); // Peer has not reached difficulty yet.
-    assert(menuPeer.Consume(4));
+    assert(!menuPeer.Consume(0, false)); // Peer has not reached difficulty yet.
+    assert(menuPeer.Consume(4, false));
     assert(menuPeer.buttons == 0x0100);
     assert(menuPeer.applied == 1);
-    acknowledged = menuPeer.Deliver(difficultyTap, 0x0100, 4); // ACK was lost
+    acknowledged = menuPeer.Deliver(difficultyTap, 0x0100,
+                                    OnlineControlEncodeContext(4, false)); // ACK was lost
     assert(acknowledged && menuPeer.applied == 1);
-    assert(!menuPeer.Deliver(2, 0, 5));
-    assert(!menuPeer.Consume(4));
-    assert(menuPeer.Consume(5));
-    assert(menuPeer.buttons == 0 && menuPeer.applied == 2);
-    assert(!menuPeer.Deliver(1, 0x0100, 4));
-    assert(menuPeer.buttons == 0 && menuPeer.applied == 2);
+    assert(!menuPeer.Deliver(2, 0x0080, OnlineControlEncodeContext(5, false)));
+    assert(!menuPeer.Consume(4, false));
+    assert(menuPeer.Consume(5, false));
+    assert(menuPeer.buttons == 0x0080 && menuPeer.applied == 2);
+    assert(!menuPeer.Deliver(1, 0x0100, OnlineControlEncodeContext(4, false)));
+    assert(menuPeer.buttons == 0x0080 && menuPeer.applied == 2);
+
+    // Full two-owner loadout path. The host consumes P1 character locally and
+    // changes to the shot page before its first packet reaches the guest. A
+    // retransmission must retain the original character/P1 context. This is
+    // the Build 30 failure: retransmission used the sender's new page and left
+    // the receiver stuck forever on character selection.
+    constexpr u16 select = 0x1001;
+    constexpr u16 right = 0x0080;
+    ReliableMenuSender hostMenu;
+    ControlReceiver guestMenu;
+    hostMenu.Queue(5, false, select, 1);
+    assert(hostMenu.ConsumeLocal(5, false));
+    const u8 stableP1CharacterContext = hostMenu.context;
+    assert(stableP1CharacterContext == OnlineControlEncodeContext(5, false));
+    // The sender is now on page 6, but the stored wire context is still page 5.
+    assert(!hostMenu.ConsumeLocal(6, false));
+    assert(hostMenu.context == stableP1CharacterContext);
+    assert(!guestMenu.Deliver(hostMenu.sequence, hostMenu.buttons, hostMenu.context));
+    assert(guestMenu.Consume(5, false));
+    assert(guestMenu.buttons == select && guestMenu.applied == 1);
+    assert(guestMenu.Deliver(hostMenu.sequence, hostMenu.buttons,
+                             hostMenu.context)); // duplicate regenerates ACK
+    hostMenu.Acknowledge(hostMenu.sequence);
+    assert(!hostMenu.pending);
+
+    hostMenu.Queue(6, false, select, 0);
+    assert(hostMenu.ConsumeLocal(6, false));
+    assert(!guestMenu.Deliver(hostMenu.sequence, hostMenu.buttons, hostMenu.context));
+    assert(guestMenu.Consume(6, false));
+    hostMenu.Acknowledge(hostMenu.sequence);
+
+    // Both peers now revisit character selection for P2. A delayed P1
+    // character context cannot match this identically numbered page.
+    assert(!OnlineControlContextMatches(5, true, stableP1CharacterContext));
+    ReliableMenuSender guestOwnerMenu;
+    ControlReceiver hostMenuPeer;
+    guestOwnerMenu.Queue(5, true, right, -1);
+    assert(guestOwnerMenu.ConsumeLocal(5, true));
+    assert(!hostMenuPeer.Deliver(guestOwnerMenu.sequence, guestOwnerMenu.buttons,
+                                 guestOwnerMenu.context));
+    assert(!hostMenuPeer.Consume(5, false));
+    assert(hostMenuPeer.Consume(5, true));
+    assert(hostMenuPeer.applied == 1);
+    assert(hostMenuPeer.Deliver(guestOwnerMenu.sequence, guestOwnerMenu.buttons,
+                                guestOwnerMenu.context));
+    assert(hostMenuPeer.applied == 1); // retransmit never moves twice
+    guestOwnerMenu.Acknowledge(guestOwnerMenu.sequence);
+
+    guestOwnerMenu.Queue(5, true, select, 1);
+    assert(guestOwnerMenu.ConsumeLocal(5, true));
+    assert(!hostMenuPeer.Deliver(guestOwnerMenu.sequence, guestOwnerMenu.buttons,
+                                 guestOwnerMenu.context));
+    assert(hostMenuPeer.Consume(5, true));
+    guestOwnerMenu.Acknowledge(guestOwnerMenu.sequence);
+    guestOwnerMenu.Queue(6, true, select, 0);
+    assert(guestOwnerMenu.ConsumeLocal(6, true));
+    assert(!hostMenuPeer.Deliver(guestOwnerMenu.sequence, guestOwnerMenu.buttons,
+                                 guestOwnerMenu.context));
+    assert(hostMenuPeer.Consume(6, true));
+    guestOwnerMenu.Acknowledge(guestOwnerMenu.sequence);
+    assert(hostMenuPeer.applied == 3); // P2 move, character confirm, shot confirm
 
     // Lifecycle handshake: both sides freeze as soon as A backgrounds. On
     // foreground A remains frozen until B's response arrives; B cannot run a
@@ -169,6 +281,6 @@ int main()
     sender.Acknowledge(6, 0);
     for (u32 frame = 0; frame < 7; ++frame) assert(sender.Find(frame)->acknowledged);
 
-    std::puts("online protocol 11 control, reconnect and frame history tests passed");
+    std::puts("online protocol 12 phased menu, reconnect and frame history tests passed");
     return 0;
 }

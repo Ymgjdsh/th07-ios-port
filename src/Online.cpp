@@ -50,12 +50,12 @@ constexpr socket_t kInvalidSocket = -1;
 namespace
 {
 constexpr u32 kMagic = 0x374f4e54; // TNO7
-// Build 30 introduces a separate control channel for setup menus. Menu state
-// is replicated as a latest-value snapshot and never enters the gameplay
-// frame history. This is deliberately a new wire identity: an old client
-// must not join a session that uses the new state machine.
-constexpr u16 kVersion = 11;
-constexpr u32 kBuildIdentity = 0x07060008u;
+// Build 31 sends setup input as reliable, one-shot commands bound to both the
+// menu page and the active P1/P2 selection phase. This is deliberately a new
+// wire identity: an old client must not join a session with different command
+// ownership and retransmission rules.
+constexpr u16 kVersion = 12;
+constexpr u32 kBuildIdentity = 0x07060009u;
 // XOR of the first SHA-256 words for th07.dat, thbgm.dat and msgothic.ttc.
 constexpr u32 kResourceIdentity = 0xf09a7ea3u;
 constexpr u16 kPort = 37707;
@@ -243,18 +243,14 @@ u32 g_LastRemoteMenuSequence = 0;
 u32 g_LastMenuInputSend = 0;
 u32 g_LocalMenuSequence = 0;
 u16 g_MenuCommandButtons = 0;
-u16 g_MenuCommandQueuedButtons = 0;
 i32 g_MenuCommandCursor = -1;
-u16 g_LastPublishedMenuButtons = 0;
+u8 g_MenuCommandContext = kOnlineControlInvalidContext;
+u8 g_RemoteMenuCommandContext = kOnlineControlInvalidContext;
+u16 g_LastSampledMenuButtons = 0;
 bool g_MenuCommandPending = false;
 bool g_LocalMenuCommandConsumed = false;
 bool g_RemoteMenuCommandConsumed = true;
 i32 g_LocalControlMenuState = -1;
-i32 g_RemoteControlMenuState = -1;
-u32 g_MenuPulseGeneration = 0;
-u32 g_MenuCommandPulseGeneration = 0;
-u32 g_MenuCursorGeneration = 0;
-u32 g_MenuCommandCursorGeneration = 0;
 bool g_LocalBackgrounded = false;
 bool g_PeerBackgrounded = false;
 bool g_AwaitingResumeAck = false;
@@ -732,16 +728,14 @@ void ActivateMultiplayerSession(bool local)
     g_LastMenuInputSend = 0;
     g_LocalMenuSequence = 0;
     g_MenuCommandButtons = 0;
-    g_MenuCommandQueuedButtons = 0;
     g_MenuCommandCursor = -1;
-    g_LastPublishedMenuButtons = 0;
+    g_MenuCommandContext = kOnlineControlInvalidContext;
+    g_RemoteMenuCommandContext = kOnlineControlInvalidContext;
+    g_LastSampledMenuButtons = 0;
     g_MenuCommandPending = false;
     g_LocalMenuCommandConsumed = false;
     g_RemoteMenuCommandConsumed = true;
     g_LocalControlMenuState = -1;
-    g_RemoteControlMenuState = -1;
-    g_MenuPulseGeneration = g_MenuCommandPulseGeneration = 0;
-    g_MenuCursorGeneration = g_MenuCommandCursorGeneration = 0;
     g_LocalBackgrounded = false;
     g_PeerBackgrounded = false;
     g_AwaitingResumeAck = false;
@@ -1388,14 +1382,17 @@ bool SendStartupPacket(u8 kind)
                   (const sockaddr *)&g_Peer, sizeof(g_Peer)) == (int)sizeof(packet);
 }
 
-bool SendMenuInputPacket(u32 sequence, u16 buttons, i32 cursor)
+bool SendMenuInputPacket(u32 sequence, u16 buttons, i32 cursor, u8 context)
 {
     if (!g_MultiplayerSession || g_LocalSession || g_State != Online::STATE_CONNECTED)
         return false;
     Packet packet;
     FillPacket(packet, kMenuInput, buttons, 0);
     packet.frame = sequence;
-    packet.menuState = (u8)std::clamp(g_LocalControlMenuState, 0, 255);
+    // The context is captured with the command. A retransmission must never
+    // relabel a character confirmation as a shot-page confirmation just
+    // because the sender already advanced locally.
+    packet.menuState = context;
     packet.menuCursor = (i16)std::clamp(cursor, -1, 32767);
     packet.menuCursorValid = cursor >= 0 ? 1 : 0;
     if (g_Mode == Online::MODE_BLUETOOTH)
@@ -1434,59 +1431,92 @@ bool SynchronizeMenuInputs(u16 localButtons, f32 localDx, f32 localDy,
                            u16 *p1Buttons, u16 *p2Buttons,
                            f32 *p1Dx, f32 *p1Dy, f32 *p2Dx, f32 *p2Dy)
 {
-    (void)localDx;
-    (void)localDy;
     const u32 now = SDL_GetTicks();
-    if (!g_MenuCommandPending &&
+    const bool localOwnsMenu = OnlineControlLocalOwnsMenu(g_Host,
+                                                          g_SelectingPlayer2Loadout);
+    const u8 localContext = OnlineControlEncodeContext(g_LocalControlMenuState,
+                                                        g_SelectingPlayer2Loadout);
+    const u16 pressedButtons = OnlineControlPressedButtons(localButtons,
+                                                            g_LastSampledMenuButtons);
+    g_LastSampledMenuButtons = localButtons;
+    if (pressedButtons != 0) g_QueuedInputButtons |= pressedButtons;
+
+    if (!localOwnsMenu &&
         (g_QueuedInputButtons != 0 || g_QueuedShellButtons != 0 ||
-         g_LocalMenuCursor >= 0 || localButtons != g_LastPublishedMenuButtons))
+         g_LocalMenuCursor >= 0))
+    {
+        MobileDiagnostics::Log("online/menu",
+            "drop inactive local input host=%d p2=%d page=%d buttons=%04x cursor=%d",
+            g_Host, g_SelectingPlayer2Loadout, g_LocalControlMenuState,
+            g_QueuedInputButtons | g_QueuedShellButtons, g_LocalMenuCursor);
+        g_QueuedInputButtons = 0;
+        g_QueuedShellButtons = 0;
+        g_LocalMenuCursor = -1;
+    }
+
+    if (!g_MenuCommandPending && localOwnsMenu &&
+        localContext != kOnlineControlInvalidContext &&
+        (g_QueuedInputButtons != 0 || g_QueuedShellButtons != 0 ||
+         g_LocalMenuCursor >= 0))
     {
         ++g_LocalMenuSequence;
         if (g_LocalMenuSequence == 0) ++g_LocalMenuSequence;
-        g_MenuCommandQueuedButtons = g_QueuedInputButtons | g_QueuedShellButtons;
-        g_MenuCommandButtons = localButtons | g_MenuCommandQueuedButtons;
+        g_MenuCommandButtons = g_QueuedInputButtons | g_QueuedShellButtons;
         g_MenuCommandCursor = g_LocalMenuCursor;
-        g_MenuCommandPulseGeneration = g_MenuPulseGeneration;
-        g_MenuCommandCursorGeneration = g_MenuCursorGeneration;
+        g_MenuCommandContext = localContext;
         g_MenuCommandPending = true;
         g_LocalMenuCommandConsumed = false;
         g_LastMenuInputSend = 0;
+        // The reliable command now owns this event. Network retransmission is
+        // independent from later local taps and from button release.
+        g_QueuedInputButtons = 0;
+        g_QueuedShellButtons = 0;
+        g_LocalMenuCursor = -1;
+        MobileDiagnostics::Log("online/menu",
+            "queue role=%s seq=%u context=%02x page=%d buttons=%04x cursor=%d",
+            g_Host ? "host" : "guest", g_LocalMenuSequence,
+            g_MenuCommandContext, g_LocalControlMenuState,
+            g_MenuCommandButtons, g_MenuCommandCursor);
     }
     if (g_MenuCommandPending && g_State == Online::STATE_CONNECTED &&
         (!g_LastMenuInputSend || now - g_LastMenuInputSend >= kMenuInputIntervalMs))
     {
         if (SendMenuInputPacket(g_LocalMenuSequence, g_MenuCommandButtons,
-                                g_MenuCommandCursor))
+                                g_MenuCommandCursor, g_MenuCommandContext))
             g_LastMenuInputSend = now ? now : 1;
     }
 
-    const bool consumeLocal = g_MenuCommandPending && !g_LocalMenuCommandConsumed;
+    const bool consumeLocal = localOwnsMenu && g_MenuCommandPending &&
+                              !g_LocalMenuCommandConsumed &&
+                              g_MenuCommandContext == localContext;
     const bool consumeRemote = !g_RemoteMenuCommandConsumed &&
+                               !localOwnsMenu &&
                                g_LastRemoteMenuSequence != 0 &&
-                               OnlineControlPageMatches(g_LocalControlMenuState,
-                                                        g_RemoteControlMenuState);
+                               OnlineControlContextMatches(g_LocalControlMenuState,
+                                                           g_SelectingPlayer2Loadout,
+                                                           g_RemoteMenuCommandContext);
     const u16 localMenuButtons = consumeLocal ? g_MenuCommandButtons : 0;
     const u16 remoteMenuButtons = consumeRemote ? g_RemoteMenuButtons : 0;
     const i32 localMenuCursor = consumeLocal ? g_MenuCommandCursor : -1;
     const i32 remoteMenuCursor = consumeRemote ? g_RemoteMenuCursor : -1;
 
     // Host owns the P1 setup lane. During the second loadout page the guest
-    // owns P2; both devices still receive the same latest snapshot.
+    // owns P2; both devices expose the same one-shot event to the native menu.
     if (g_Host)
     {
-        *p1Buttons = localMenuButtons;
-        *p2Buttons = remoteMenuButtons;
-        *p1Dx = localDx;
-        *p1Dy = localDy;
+        *p1Buttons = g_SelectingPlayer2Loadout ? 0 : localMenuButtons;
+        *p2Buttons = g_SelectingPlayer2Loadout ? remoteMenuButtons : 0;
+        *p1Dx = g_SelectingPlayer2Loadout ? 0.0f : localDx;
+        *p1Dy = g_SelectingPlayer2Loadout ? 0.0f : localDy;
         *p2Dx = *p2Dy = 0.0f;
     }
     else
     {
-        *p1Buttons = remoteMenuButtons;
-        *p2Buttons = localMenuButtons;
+        *p1Buttons = g_SelectingPlayer2Loadout ? 0 : remoteMenuButtons;
+        *p2Buttons = g_SelectingPlayer2Loadout ? localMenuButtons : 0;
         *p1Dx = *p1Dy = 0.0f;
-        *p2Dx = localDx;
-        *p2Dy = localDy;
+        *p2Dx = g_SelectingPlayer2Loadout ? localDx : 0.0f;
+        *p2Dy = g_SelectingPlayer2Loadout ? localDy : 0.0f;
     }
 
     const bool useGuestLane = g_SelectingPlayer2Loadout;
@@ -1494,10 +1524,21 @@ bool SynchronizeMenuInputs(u16 localButtons, f32 localDx, f32 localDy,
                            ? (g_Host ? remoteMenuCursor : localMenuCursor)
                            : (g_Host ? localMenuCursor : remoteMenuCursor);
     if (cursor >= 0) g_MenuCursorTarget = cursor;
-    if (consumeLocal) g_LocalMenuCommandConsumed = true;
+    if (consumeLocal)
+    {
+        g_LocalMenuCommandConsumed = true;
+        MobileDiagnostics::Log("online/menu",
+            "consume local role=%s seq=%u context=%02x buttons=%04x cursor=%d",
+            g_Host ? "host" : "guest", g_LocalMenuSequence,
+            g_MenuCommandContext, localMenuButtons, localMenuCursor);
+    }
     if (consumeRemote)
     {
         g_RemoteMenuCommandConsumed = true;
+        MobileDiagnostics::Log("online/menu",
+            "consume remote role=%s seq=%u context=%02x buttons=%04x cursor=%d",
+            g_Host ? "host" : "guest", g_LastRemoteMenuSequence,
+            g_RemoteMenuCommandContext, remoteMenuButtons, remoteMenuCursor);
         SendMenuInputAck(g_LastRemoteMenuSequence);
     }
     return true;
@@ -1537,8 +1578,12 @@ void StoreRemoteMenuInput(const Packet &packet)
     g_LastRemoteMenuSequence = packet.frame;
     g_RemoteMenuButtons = packet.buttons;
     g_RemoteMenuCursor = packet.menuCursorValid ? packet.menuCursor : -1;
-    g_RemoteControlMenuState = packet.menuState;
+    g_RemoteMenuCommandContext = packet.menuState;
     g_RemoteMenuCommandConsumed = false;
+    MobileDiagnostics::Log("online/menu",
+        "receive role=%s seq=%u context=%02x buttons=%04x cursor=%d",
+        g_Host ? "host" : "guest", packet.frame, packet.menuState,
+        packet.buttons, g_RemoteMenuCursor);
 }
 
 void StoreMenuInputAcknowledgement(const Packet &packet)
@@ -1546,15 +1591,13 @@ void StoreMenuInputAcknowledgement(const Packet &packet)
     if (!g_MenuCommandPending || packet.session != g_LaunchNonce ||
         packet.frame != g_LocalMenuSequence)
         return;
+    MobileDiagnostics::Log("online/menu", "ack role=%s seq=%u context=%02x",
+                           g_Host ? "host" : "guest", g_LocalMenuSequence,
+                           g_MenuCommandContext);
     g_MenuCommandPending = false;
-    g_LastPublishedMenuButtons = g_MenuCommandButtons;
-    if (g_MenuPulseGeneration == g_MenuCommandPulseGeneration)
-        g_QueuedInputButtons &= (u16)~g_MenuCommandQueuedButtons;
-    g_QueuedShellButtons &= (u16)~g_MenuCommandQueuedButtons;
-    if (g_MenuCursorGeneration == g_MenuCommandCursorGeneration)
-        g_LocalMenuCursor = -1;
-    g_MenuCommandQueuedButtons = 0;
+    g_MenuCommandButtons = 0;
     g_MenuCommandCursor = -1;
+    g_MenuCommandContext = kOnlineControlInvalidContext;
 }
 
 void FailStartup(const char *reason)
@@ -2373,8 +2416,10 @@ bool Online::ConsumeGameplayCommit()
         g_QueuedInputButtons = 0;
         g_LocalMenuCursor = g_RemoteMenuCursor = g_MenuCursorTarget = -1;
         g_RemoteMenuButtons = 0;
-        g_MenuCommandButtons = g_MenuCommandQueuedButtons = 0;
+        g_MenuCommandButtons = 0;
         g_MenuCommandCursor = -1;
+        g_MenuCommandContext = kOnlineControlInvalidContext;
+        g_RemoteMenuCommandContext = kOnlineControlInvalidContext;
         g_MenuCommandPending = false;
         g_LocalMenuCommandConsumed = true;
         g_RemoteMenuCommandConsumed = true;
@@ -2518,16 +2563,14 @@ void Online::Leave()
     g_LastRemoteMenuSequence = 0;
     g_LocalMenuSequence = 0;
     g_MenuCommandButtons = 0;
-    g_MenuCommandQueuedButtons = 0;
     g_MenuCommandCursor = -1;
-    g_LastPublishedMenuButtons = 0;
+    g_MenuCommandContext = kOnlineControlInvalidContext;
+    g_RemoteMenuCommandContext = kOnlineControlInvalidContext;
+    g_LastSampledMenuButtons = 0;
     g_MenuCommandPending = false;
     g_LocalMenuCommandConsumed = false;
     g_RemoteMenuCommandConsumed = true;
     g_LocalControlMenuState = -1;
-    g_RemoteControlMenuState = -1;
-    g_MenuPulseGeneration = g_MenuCommandPulseGeneration = 0;
-    g_MenuCursorGeneration = g_MenuCommandCursorGeneration = 0;
     g_LocalBackgrounded = false;
     g_PeerBackgrounded = false;
     g_AwaitingResumeAck = false;
@@ -2612,7 +2655,6 @@ void Online::QueueInputPulse(u16 buttons)
     // Menu gestures are momentary edges.  Keep only the newest unsent edge so
     // a stalled frame cannot combine an old tap with a later swipe.
     g_QueuedInputButtons = buttons;
-    ++g_MenuPulseGeneration;
     if ((buttons & TH_BUTTON_SELECTMENU) == 0) g_LocalMenuCursor = -1;
 }
 void Online::ReportMenuState(i32 gameState)
@@ -2623,7 +2665,6 @@ void Online::QueueMenuCursor(i32 cursor)
 {
     if (!IsNetworkSession()) return;
     g_LocalMenuCursor = std::max(-1, cursor);
-    if (cursor >= 0) ++g_MenuCursorGeneration;
 }
 bool Online::ConsumeMenuCursorTarget(i32 *cursor)
 {

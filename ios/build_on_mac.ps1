@@ -6,7 +6,7 @@ param(
     [string]$RemoteFolder = "th07-build",
     [string]$XcodeApp = "/Applications/Xcode.app",
     [string]$IosVersion = "0.4.0",
-    [int]$IosBuild = 30,
+    [int]$IosBuild = 31,
     [string]$GitHubRepo = "https://github.com/Ymgjdsh/th07-ios-port.git",
     [switch]$SkipGitHubBackup
 )
@@ -32,7 +32,6 @@ $uploadDirectory = Join-Path $root "dist\remote-upload"
 $codeArchive = Join-Path $uploadDirectory "th07-code-build${IosBuild}.zip"
 $resultDirectory = Join-Path $root "dist\mac-build"
 $logDirectory = Join-Path $resultDirectory "logs-build${IosBuild}"
-$localIpa = Join-Path $resultDirectory "th07-ios-${IosVersion}-${IosBuild}.ipa"
 
 if ($RemoteFolder -notmatch '^[A-Za-z0-9._/-]+$' -or
     $RemoteFolder.StartsWith("/") -or $RemoteFolder.Contains("..")) {
@@ -89,8 +88,16 @@ if ($LASTEXITCODE -ne 0) { throw "Source packaging failed." }
 if ($LASTEXITCODE -ne 0) { throw "Could not create the remote build directory." }
 
 Write-Host "Uploading source archive ..."
-& scp @scpOptions $codeArchive "${target}:${RemoteFolder}/incoming/source.zip"
-if ($LASTEXITCODE -ne 0) { throw "Source upload failed." }
+try {
+    & scp @scpOptions $codeArchive "${target}:${RemoteFolder}/incoming/source.zip"
+    $sourceUploadExit = $LASTEXITCODE
+}
+finally {
+    # This archive is transport-only. Do not leave another source package on
+    # the space-constrained Windows machine after the Mac has received it.
+    Remove-Item -Force -LiteralPath $codeArchive -ErrorAction SilentlyContinue
+}
+if ($sourceUploadExit -ne 0) { throw "Source upload failed." }
 
 $assets = @("th07.dat", "thbgm.dat", "msgothic.ttc")
 foreach ($asset in $assets) {
@@ -141,24 +148,23 @@ if ($buildExit -ne 0) {
     throw "Remote build failed with exit code $buildExit. Logs were requested into $logDirectory"
 }
 
-Write-Host "Downloading IPA ..."
-& scp @scpOptions `
-    "${target}:${RemoteFolder}/th07-ios14-port/build-ios/th07-ios-${IosVersion}-${IosBuild}.ipa" `
-    $localIpa
-if ($LASTEXITCODE -ne 0) { throw "IPA download failed." }
-
-Write-Host "Checking IPA copied to Mac Desktop ..."
+Write-Host "Checking the built IPA and Mac Desktop copy ..."
+$builtCommand = 'shasum -a 256 "$HOME/' + $RemoteFolder + '/th07-ios14-port/build-ios/' + $remoteIpaName + '" | cut -d '' '' -f 1'
+$builtHashOutput = & ssh @sshOptions $target $builtCommand
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace(($builtHashOutput | Out-String).Trim())) {
+    throw "IPA build completed, but the build output could not be verified."
+}
 $desktopCommand = 'shasum -a 256 "$HOME/Desktop/' + $remoteIpaName + '" | cut -d '' '' -f 1'
 $desktopHashOutput = & ssh @sshOptions $target `
     $desktopCommand
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace(($desktopHashOutput | Out-String).Trim())) {
-    throw "IPA was built and downloaded, but the Mac Desktop copy could not be verified."
+    throw "IPA was built, but the Mac Desktop copy could not be verified."
 }
 
-$ipaHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $localIpa).Hash
+$ipaHash = (($builtHashOutput | Out-String).Trim()).ToLowerInvariant()
 $desktopHash = (($desktopHashOutput | Out-String).Trim()).ToLowerInvariant()
-if ($desktopHash -ne $ipaHash.ToLowerInvariant()) {
-    throw "Mac Desktop IPA hash differs from downloaded IPA."
+if ($desktopHash -ne $ipaHash) {
+    throw "Mac Desktop IPA hash differs from the verified build output."
 }
 if (-not $SkipGitHubBackup) {
     $publishScript = Join-Path $root "tools\publish_github.ps1"
@@ -168,10 +174,10 @@ if (-not $SkipGitHubBackup) {
     Write-Host "Publishing the verified source snapshot to GitHub ..."
     & $publishScript -Version $IosVersion -Build $IosBuild -RepoUrl $GitHubRepo
     if ($LASTEXITCODE -ne 0) {
-        throw "IPA was built, but the GitHub source backup failed. IPA: $localIpa"
+        throw "IPA was built, but the GitHub source backup failed. Mac Desktop: $remoteIpaName"
     }
 }
 Write-Host ""
-Write-Host "SUCCESS: $localIpa"
+Write-Host "SUCCESS: Mac Desktop/$remoteIpaName"
 Write-Host "SHA256: $ipaHash"
 Write-Host "Mac Desktop: $remoteIpaName (SHA256 $desktopHash)"
