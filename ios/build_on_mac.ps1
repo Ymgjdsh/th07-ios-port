@@ -123,6 +123,7 @@ set -eu
 BASE=$remoteBase
 rm -rf "`$BASE/th07-ios14-port"
 python3 -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' "`$BASE/incoming/source.zip" "`$BASE"
+rm -f "`$BASE/incoming/source.zip"
 mkdir -p "`$BASE/th07-ios14-port/assets"
 ln -sfn "`$BASE/assets/th07.dat" "`$BASE/th07-ios14-port/assets/th07.dat"
 ln -sfn "`$BASE/assets/thbgm.dat" "`$BASE/th07-ios14-port/assets/thbgm.dat"
