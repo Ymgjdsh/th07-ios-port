@@ -5,7 +5,7 @@ ROOT_DIR=$(cd "$(dirname "$0")/.." && pwd)
 BUILD_DIR=${BUILD_DIR:-"$ROOT_DIR/build-ios"}
 CONFIG=${CONFIG:-Release}
 IOS_VERSION=${IOS_VERSION:-0.4.0}
-IOS_BUILD=${IOS_BUILD:-31}
+IOS_BUILD=${IOS_BUILD:-32}
 OUTPUT_IPA=${OUTPUT_IPA:-"$BUILD_DIR/th07-ios-${IOS_VERSION}-${IOS_BUILD}.ipa"}
 LOG_DIR="$BUILD_DIR/logs"
 mkdir -p "$LOG_DIR"

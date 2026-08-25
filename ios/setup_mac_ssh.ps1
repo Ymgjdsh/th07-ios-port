@@ -45,10 +45,16 @@ and allow user '$MacUser'. Then run this script again.
 $keyDirectory = Split-Path -Parent $KeyPath
 New-Item -ItemType Directory -Force -Path $keyDirectory | Out-Null
 if (-not (Test-Path -LiteralPath $KeyPath)) {
-    # Windows PowerShell 5.1 drops a native empty-string argument. The quoted
-    # empty value keeps ssh-keygen's -N argument in the generated command line.
-    & ssh-keygen -q -t ed25519 -f $KeyPath -N '""' -C "th07-build@$env:COMPUTERNAME"
-    if ($LASTEXITCODE -ne 0) { throw "ssh-keygen failed with exit code $LASTEXITCODE" }
+    # Windows PowerShell 5.1 drops an empty native argument when invoking a
+    # command with &, which makes ssh-keygen report "Too many arguments" for
+    # -N "" (the old direct form was -N '""'). Start-Process preserves the
+    # quoted empty passphrase reliably.
+    $keygenArguments = @(
+        '-q', '-t', 'ed25519', '-f', ('"' + $KeyPath + '"'),
+        '-N', '""', '-C', ("th07-build@$env:COMPUTERNAME")
+    )
+    $keygen = Start-Process -FilePath 'ssh-keygen.exe' -ArgumentList $keygenArguments -Wait -NoNewWindow -PassThru
+    if ($keygen.ExitCode -ne 0) { throw "ssh-keygen failed with exit code $($keygen.ExitCode)" }
 }
 
 $target = "${MacUser}@${MacHost}"

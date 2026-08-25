@@ -68,6 +68,7 @@ const char *g_ShooterTableFocus[6] = {
 
 Player g_Players[2];
 bool g_PlayerActive[2] = {true, false};
+Player *g_CurrentItemCollector = nullptr;
 
 Player *GetPlayerById(u8 playerId)
 {
@@ -1232,7 +1233,7 @@ i32 Player::CalcKillboxCollision(ZunVec3 *center, ZunVec3 *size)
         return 1;
     }
 
-    if (MobileUi::IsAutoBombEnabled() && !g_GameManager.replay && TryActivateBomb(true))
+    if (MobileUi::IsAutoBombEnabledForPlayer(this->initParam) && !g_GameManager.replay && TryActivateBomb(true))
     {
         return 2;
     }
@@ -1361,7 +1362,7 @@ LASER_COLLISION:
         return 0;
     }
 
-    if (MobileUi::IsAutoBombEnabled() && !g_GameManager.replay && TryActivateBomb(true))
+    if (MobileUi::IsAutoBombEnabledForPlayer(this->initParam) && !g_GameManager.replay && TryActivateBomb(true))
     {
         return 2;
     }

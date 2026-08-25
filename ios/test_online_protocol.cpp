@@ -281,6 +281,6 @@ int main()
     sender.Acknowledge(6, 0);
     for (u32 frame = 0; frame < 7; ++frame) assert(sender.Find(frame)->acknowledged);
 
-    std::puts("online protocol 12 phased menu, reconnect and frame history tests passed");
+    std::puts("online protocol 13 phased menu, reconnect and frame history tests passed");
     return 0;
 }

@@ -40,6 +40,7 @@ bool IsStageBackgroundDisabled();
 f32 GetDragSensitivity();
 bool IsPerformanceTelemetryEnabled();
 bool IsAutoBombEnabled();
+bool IsAutoBombEnabledForPlayer(u8 playerId);
 bool IsPortraitGameplayLayout();
 struct PortraitLayout
 {

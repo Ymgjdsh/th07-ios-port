@@ -354,6 +354,9 @@ struct Player
 
 extern Player g_Players[2];
 extern bool g_PlayerActive[2];
+// Set transiently by item collection so shared Cherry/Border updates can be
+// attributed to the player who actually picked the item.
+extern Player *g_CurrentItemCollector;
 #define g_Player (g_Players[0])
 #define g_Player2 (g_Players[1])
 

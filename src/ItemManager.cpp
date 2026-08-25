@@ -23,6 +23,18 @@ u8 g_ItemDropTable[32] = {0, 0, 1, 0, 1, 0, 0, 7, 1, 1, 0, 0, 7, 1, 1, 0,
 
 ItemManager g_ItemManager;
 
+static bool AllActivePlayersAtMaxPower()
+{
+    bool found = false;
+    for (u8 playerId = 0; playerId < 2; ++playerId)
+    {
+        if (!IsPlayerSlotActive(playerId)) continue;
+        found = true;
+        if (GetPlayerPower(playerId) < 128) return false;
+    }
+    return found;
+}
+
 void AngleToVector(ZunVec3 *vec, f32 angle, f32 speed)
 {
     vec->x = cosf(angle) * speed;
@@ -53,7 +65,10 @@ Item *ItemManager::SpawnItem(ZunVec3 *heading, i32 itemType, i32 state)
     i32 i;
 
     item = &this->items[this->nextIndex];
-    if ((i32)g_GameManager.globals->currentPower >= 128)
+    // Power drops are shared world objects. Convert them to Cherry only after
+    // every active player has reached full power; checking the P1 global here
+    // strands P2 at zero power in co-op.
+    if (AllActivePlayersAtMaxPower())
     {
         if (itemType == ITEM_POWER_SMALL || itemType == ITEM_POWER_BIG)
         {
@@ -234,6 +249,7 @@ void ItemManager::OnUpdate()
         }
     check_collision:
         targetPlayer = NULL;
+        bestDistanceSq = 1.0e30f;
         for (i32 playerId = 0; playerId < 2; ++playerId)
         {
             if (!IsPlayerSlotActive((u8)playerId))
@@ -245,12 +261,17 @@ void ItemManager::OnUpdate()
                                candidatePlayer->shooterData->itemCollectRadius, 16.0f);
             if (candidatePlayer->CalcItemBoxCollision(&item->currentPosition, &local_20))
             {
-                targetPlayer = candidatePlayer;
-                break;
+                distanceSq = (candidatePlayer->positionCenter - item->currentPosition).LengthSq();
+                if (distanceSq < bestDistanceSq)
+                {
+                    targetPlayer = candidatePlayer;
+                    bestDistanceSq = distanceSq;
+                }
             }
         }
         if (targetPlayer)
         {
+            g_CurrentItemCollector = targetPlayer;
             g_ReplayManager->replayEventFlags |= 0x40;
             switch (item->itemType)
             {
@@ -542,6 +563,7 @@ void ItemManager::OnUpdate()
             }
             item->isInUse = 0;
             itemAcquired = 1;
+            g_CurrentItemCollector = nullptr;
             continue;
         }
         else

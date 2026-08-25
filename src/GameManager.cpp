@@ -925,7 +925,13 @@ void GameManager::AddCherryPlus(i32 amount)
     {
         this->cherry = this->cherryMax;
     }
-    Player *borderPlayer = GetPrimaryActivePlayer();
+    // Item collection sets this transient owner before calling into the
+    // shared Cherry meter. Falling back to the nearest/primary player keeps
+    // enemy and graze rewards compatible with the single-player path.
+    Player *borderPlayer = g_CurrentItemCollector &&
+                                   IsPlayerSlotActive(g_CurrentItemCollector->initParam)
+                               ? g_CurrentItemCollector
+                               : GetPrimaryActivePlayer();
     if (0 < amount && borderPlayer->hasBorder == BORDER_NONE)
     {
         this->cherryPlus = this->cherryPlus + amount;

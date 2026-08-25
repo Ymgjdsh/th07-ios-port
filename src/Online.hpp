@@ -102,6 +102,8 @@ u32 GetRoundTripMs();
 bool IsMultiplayerSession();
 bool IsNetworkSession();
 int GetLocalPlayerSlot();
+// Returns the remote player's auto-bomb setting after it has been received.
+bool IsRemoteAutoBombEnabled();
 
 // Returns false while the matching peer frame is still in flight. P1 is
 // always the host and P2 is always the guest, independent of local device.

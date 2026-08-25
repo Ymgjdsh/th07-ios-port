@@ -936,25 +936,25 @@ void ActivateDeveloperRow(i32 row)
                                IsGameplay(), g_GameManager.globals != nullptr);
         return;
     }
+    const u8 playerId = (u8)Online::GetLocalPlayerSlot();
     switch (row)
     {
     case 0:
-        g_GameManager.SetLivesRemaining(std::min(8, (i32)g_GameManager.globals->livesRemaining + 1));
+        SetPlayerLives(playerId, std::min(8, GetPlayerLives(playerId) + 1));
         g_Gui.lifeDisplayUpdateFrames = 2;
         break;
     case 1:
-        g_GameManager.SetBombsRemainingAndComputeCsum(
-            std::min(8, (i32)g_GameManager.globals->bombsRemaining + 1));
+        SetPlayerBombs(playerId, std::min(8, GetPlayerBombs(playerId) + 1));
         g_Gui.bombDisplayUpdateFrames = 2;
         break;
     case 2:
-        g_GameManager.SetCurrentPower(128);
+        SetPlayerPower(playerId, 128);
         g_Gui.powerDisplayUpdateFrames = 2;
         break;
     case 3:
-        g_GameManager.SetLivesRemaining(8);
-        g_GameManager.SetBombsRemainingAndComputeCsum(8);
-        g_GameManager.SetCurrentPower(128);
+        SetPlayerLives(playerId, 8);
+        SetPlayerBombs(playerId, 8);
+        SetPlayerPower(playerId, 128);
         g_Gui.lifeDisplayUpdateFrames = 2;
         g_Gui.bombDisplayUpdateFrames = 2;
         g_Gui.powerDisplayUpdateFrames = 2;
@@ -962,10 +962,9 @@ void ActivateDeveloperRow(i32 row)
     default: return;
     }
     g_GameManager.RegenerateGameIntegrityCsum();
-    MobileDiagnostics::Log("mobile/dev", "applied row=%d lives=%d bombs=%d power=%d", row,
-                           (i32)g_GameManager.globals->livesRemaining,
-                           (i32)g_GameManager.globals->bombsRemaining,
-                           (i32)g_GameManager.globals->currentPower);
+    MobileDiagnostics::Log("mobile/dev", "applied p=%d row=%d lives=%d bombs=%d power=%d", playerId,
+                           row, GetPlayerLives(playerId), GetPlayerBombs(playerId),
+                           GetPlayerPower(playerId));
 }
 
 GLuint CompileShader(GLenum type, const char *source)
@@ -2068,6 +2067,13 @@ bool MobileUi::IsPerformanceTelemetryEnabled()
 bool MobileUi::IsAutoBombEnabled()
 {
     return g_Config.autoBomb != 0;
+}
+
+bool MobileUi::IsAutoBombEnabledForPlayer(u8 playerId)
+{
+    if (!Online::IsNetworkSession() || playerId == (u8)Online::GetLocalPlayerSlot())
+        return IsAutoBombEnabled();
+    return Online::IsRemoteAutoBombEnabled();
 }
 
 f32 MobileUi::GetDragSensitivity()
