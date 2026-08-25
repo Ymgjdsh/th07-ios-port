@@ -1438,8 +1438,11 @@ void Player::Die()
     // that you can physically actuate the moment you need to deathbomb, so because im just such
     // a nice person there's a 5 frame leniency for touch users (ONLY FOR IF YOU BOMBED WITH
     // TOUCH!!!!!)
+    const bool touchUsed = Online::IsNetworkSession()
+                               ? Online::WasTouchUsedForPlayer(this->initParam)
+                               : Touch::WasUsedThisRun();
     this->respawnTimer = this->shooterData->initialRespawnTimer +
-                         (Touch::WasUsedThisRun() ? Touch::DEATHBOMB_TOLERANCE : 0);
+                         (touchUsed ? Touch::DEATHBOMB_TOLERANCE : 0);
 }
 
 i32 Player::HandlePlayerInputs()
@@ -2014,7 +2017,13 @@ bool Player::TryActivateBomb(bool automatic)
 
     if (this->playerState == PLAYER_STATE_DEAD)
     {
-        i32 minRequiredTimer = (Touch::WasUsedThisRun() && !Touch::UsedTouchToBomb())
+        const bool touchUsed = Online::IsNetworkSession()
+                                   ? Online::WasTouchUsedForPlayer(this->initParam)
+                                   : Touch::WasUsedThisRun();
+        const bool touchBomb = Online::IsNetworkSession()
+                                   ? Online::UsedTouchToBombForPlayer(this->initParam)
+                                   : Touch::UsedTouchToBomb();
+        i32 minRequiredTimer = (touchUsed && !touchBomb)
                                    ? Touch::DEATHBOMB_TOLERANCE
                                    : 0;
         if (this->respawnTimer <= minRequiredTimer)
@@ -2640,10 +2649,6 @@ WHY:
     if (isolateRng)
     {
         g_Rng = savedRng;
-    }
-    if (arg->initParam == 1 || !IsPlayerSlotActive(1))
-    {
-        Online::PublishAuthoritativeState();
     }
     return CHAIN_CALLBACK_RESULT_CONTINUE;
 }

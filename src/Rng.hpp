@@ -38,3 +38,6 @@ struct Rng
     u32 generationCount;
 };
 extern Rng g_Rng;
+// Visual scripts and particles must never advance the deterministic battle
+// sequence used by enemies, drops and collision consequences.
+extern Rng g_VisualRng;

@@ -63,7 +63,7 @@ with open(cmake_path, "r", encoding="utf-8") as stream:
     cmake_source = stream.read()
 
 for marker in (
-    'set(TH07_IOS_BUILD "34"',
+    'set(TH07_IOS_BUILD "35"',
     'XCODE_ATTRIBUTE_LLVM_LTO "YES_THIN"',
     'set(SDL_GPU OFF CACHE BOOL "" FORCE)',
     'set(SDL_RENDER ON CACHE BOOL "" FORCE)',
@@ -325,7 +325,7 @@ online_markers = {
         "remoteBuild=%08x",
         "partially initialized",
         "UpdateShellCloseComplete",
-        "g_RemoteAuthoritativeShellRevision",
+        "g_PlayerGameplayPolicy",
         "SHARED_CONFIRM_TITLE",
         "g_ShellConfirmAction",
         "kInputSendBudgetPerTick",
@@ -333,8 +333,8 @@ online_markers = {
         "OnlineIsImmediatelyPreviousEpoch",
         "resent menu commit epoch",
         "g_LastRemoteFrame == 0xffffffffu",
-        "Lockstep input owns ordinary movement",
-        "g_LastAuthoritativeFrame > g_InputFrame",
+        "OnlineBuildGameplayPolicy",
+        "GetInputRetransmitIntervalMs",
         "g_AsciiManager.pauseMenu.curState = 0",
     ),
     os.path.join("src", "MainMenu.cpp"): (
@@ -364,7 +364,7 @@ online_markers = {
     os.path.join("ios", "BluetoothPeerTransport.mm"): (
         "MultipeerConnectivity",
         'kServiceType = @"th07-peer"',
-        '@"protocol": @"15"',
+        '@"protocol": @"16"',
     ),
     os.path.join("ios", "OnlineLauncher.mm"): (
         "UITableViewStyleInsetGrouped",
@@ -398,14 +398,32 @@ for relative, markers in online_markers.items():
         source = stream.read()
     for marker in markers:
         if marker not in source:
-            print("error: build 34 Online marker missing:", relative, marker)
+            print("error: build 35 Online marker missing:", relative, marker)
             failed = True
 if "demoFramesCount++" in open(os.path.join(root, "src", "MainMenu.cpp"), encoding="utf-8").read():
     print("error: title idle demo trigger is still enabled")
     failed = True
 if failed:
     sys.exit(2)
-print("ok: Build 34 canonical input, ACK recovery and gameplay lockstep markers")
+with open(os.path.join(root, "src", "Player.cpp"), "r", encoding="utf-8") as stream:
+    player_source = stream.read()
+with open(os.path.join(root, "src", "Online.cpp"), "r", encoding="utf-8") as stream:
+    online_source = stream.read()
+if "Online::PublishAuthoritativeState();" in player_source or \
+        "ApplyPendingAuthoritativeState();" in online_source:
+    print("error: asynchronous authoritative state still mutates lockstep gameplay")
+    failed = True
+for relative in (os.path.join("src", "EffectManager.cpp"),
+                 os.path.join("src", "ScreenEffect.cpp"),
+                 os.path.join("src", "AnmManager.cpp")):
+    with open(os.path.join(root, relative), "r", encoding="utf-8") as stream:
+        visual_source = stream.read()
+    if "g_Rng" in visual_source:
+        print("error: visual code still advances deterministic battle RNG:", relative)
+        failed = True
+if failed:
+    sys.exit(2)
+print("ok: Build 35 frame policy, visual RNG isolation and gameplay lockstep markers")
 
 with open(os.path.join(root, "src", "ResultScreen.cpp"), "r", encoding="utf-8") as stream:
     result_source = stream.read()

@@ -1,6 +1,7 @@
 #include "Rng.hpp"
 
 Rng g_Rng;
+Rng g_VisualRng = {0x4d59, 0x4d59, 0};
 
 u16 Rng::GetRandomU16()
 {

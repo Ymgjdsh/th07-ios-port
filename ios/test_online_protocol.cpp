@@ -124,6 +124,18 @@ int main()
     assert(OnlineEncodeTouchDelta(-100000.0f) == -32768);
     assert(OnlineEncodeTouchDelta(std::numeric_limits<f32>::quiet_NaN()) == 0);
 
+    // Mobile preferences that alter collision/death behavior belong to the
+    // logical input frame, not to whichever device setting is live when a
+    // delayed packet is finally consumed.
+    const u8 touchAutoBomb = OnlineBuildGameplayPolicy(true, true, true);
+    assert(OnlineGameplayPolicyHas(touchAutoBomb, ONLINE_GAMEPLAY_AUTO_BOMB));
+    assert(OnlineGameplayPolicyHas(touchAutoBomb, ONLINE_GAMEPLAY_TOUCH_USED));
+    assert(OnlineGameplayPolicyHas(touchAutoBomb, ONLINE_GAMEPLAY_TOUCH_BOMB));
+    const u8 touchOnly = OnlineBuildGameplayPolicy(false, true, false);
+    assert(!OnlineGameplayPolicyHas(touchOnly, ONLINE_GAMEPLAY_AUTO_BOMB));
+    assert(OnlineGameplayPolicyHas(touchOnly, ONLINE_GAMEPLAY_TOUCH_USED));
+    assert(!OnlineGameplayPolicyHas(touchOnly, ONLINE_GAMEPLAY_TOUCH_BOMB));
+
     // The input-delay prefix is synthesized rather than sent. Receiving the
     // first real frame seeds that prefix into the cumulative ACK window even
     // after frames 0..7 have already been consumed from the ring.
@@ -309,6 +321,6 @@ int main()
     for (u32 frame = 0; frame <= 8; ++frame)
         assert(delayedSender.Find(frame)->acknowledged);
 
-    std::puts("online protocol 15 canonical input, ACK recovery and state diagnostics tests passed");
+    std::puts("online protocol 16 frame policy, canonical input and ACK recovery tests passed");
     return 0;
 }

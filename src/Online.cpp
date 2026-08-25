@@ -45,6 +45,7 @@ constexpr socket_t kInvalidSocket = -1;
 #include "Player.hpp"
 #include "Rng.hpp"
 #include "Supervisor.hpp"
+#include "Touch.hpp"
 #if defined(TH07_IOS)
 #include "../ios/BluetoothPeerTransport.hpp"
 #endif
@@ -52,11 +53,11 @@ constexpr socket_t kInvalidSocket = -1;
 namespace
 {
 constexpr u32 kMagic = 0x374f4e54; // TNO7
-// Build 34 canonicalizes gameplay input before simulation and repairs the
-// delayed-prefix ACK window. This is deliberately a new wire identity: an old
-// client must not join a session with different frame and hash semantics.
-constexpr u16 kVersion = 15;
-constexpr u32 kBuildIdentity = 0x0706000cu;
+// Build 35 carries every gameplay-affecting mobile preference in the exact
+// lockstep frame that consumes it. This is deliberately a new wire identity:
+// older clients use live device state and cannot simulate this protocol.
+constexpr u16 kVersion = 16;
+constexpr u32 kBuildIdentity = 0x0706000du;
 // XOR of the first SHA-256 words for th07.dat, thbgm.dat and msgothic.ttc.
 constexpr u32 kResourceIdentity = 0xf09a7ea3u;
 constexpr u16 kPort = 37707;
@@ -79,7 +80,8 @@ constexpr u32 kHeartbeatIntervalMs = 500;
 // converting it into a permanent session failure.
 constexpr u32 kPeerTimeoutMs = 15000;
 constexpr u32 kInputStallTimeoutMs = 30000;
-constexpr u32 kInputRetransmitIntervalMs = 24;
+constexpr u32 kInputRetransmitMinimumMs = 64;
+constexpr u32 kBluetoothRetransmitIntervalMs = 250;
 constexpr u32 kMenuInputIntervalMs = 32;
 // Bound recovery traffic after a delayed UDP packet. Without a budget, every
 // pending frame is resent in one tick and the resulting burst makes the
@@ -179,6 +181,7 @@ struct InputFrame
     bool present = false;
     u8 developerCommand = 0xff;
     u8 developerPlayer = 0;
+    u8 gameplayPolicy = 0;
 };
 
 enum StartupPhase
@@ -300,7 +303,17 @@ u32 g_LastLifecycleSend = 0;
 i32 g_LocalShellSelectionRequest = -1;
 i32 g_RemoteShellSelectionRequest = -1;
 u32 g_LastRemoteShellSelectionFrame = 0xffffffffu;
-bool g_RemoteAutoBomb = false;
+u8 g_PlayerGameplayPolicy[2] = {0, 0};
+
+static u32 GetInputRetransmitIntervalMs()
+{
+    // Multipeer input uses its reliable ordered channel, so application-level
+    // repeats are only a last-resort acknowledgement recovery. UDP adapts to
+    // measured RTT and avoids retransmitting every frame before its ACK could
+    // possibly return on a 50+ ms connection.
+    if (g_Mode == Online::MODE_BLUETOOTH) return kBluetoothRetransmitIntervalMs;
+    return std::clamp(g_LastRtt + 24u, kInputRetransmitMinimumMs, 250u);
+}
 
 static void ApplyTransportInputDelay(Online::Mode mode)
 {
@@ -719,7 +732,7 @@ void ResetSyncState()
     g_RemoteDivergedHashes = {};
     g_StateMismatchCount = 0;
     g_LastStateMismatchFrame = 0xffffffffu;
-    g_RemoteAutoBomb = false;
+    g_PlayerGameplayPolicy[0] = g_PlayerGameplayPolicy[1] = 0;
     g_LastAuthoritativeFrame = 0;
     g_RemoteP1State = {};
     g_RemoteP2State = {};
@@ -807,7 +820,7 @@ void ActivateMultiplayerSession(bool local)
     g_AwaitingResumeAck = false;
     g_LastLifecycleSend = 0;
     g_LocalShellSelectionRequest = g_RemoteShellSelectionRequest = -1;
-    g_RemoteAutoBomb = false;
+    g_PlayerGameplayPolicy[0] = g_PlayerGameplayPolicy[1] = 0;
     ResetSyncState();
     g_PlayerCharacters[0] = g_PlayerCharacters[1] = 0;
     g_PlayerShots[0] = g_PlayerShots[1] = 0;
@@ -839,10 +852,6 @@ void StoreRemoteInput(const Packet &packet)
         g_ShellCommitAcked = true;
     }
     ApplyRemoteSharedShellState(packet);
-    // The auto-bomb toggle is player-owned input configuration.  Replicate it
-    // with the input stream so each device simulates the same player's policy.
-    if (packet.role == 1 || packet.role == 2)
-        g_RemoteAutoBomb = (packet.menuReserved & 0x01) != 0;
     if (g_Host && packet.shellRequest != 0 && g_ShellKind == Online::SHARED_SHELL_NONE)
     {
         if (packet.shellRequest == (u8)Online::SHARED_SHELL_RETRY)
@@ -891,6 +900,7 @@ void StoreRemoteInput(const Packet &packet)
     if (packet.menuCursorValid) g_RemoteMenuCursor = packet.menuCursor;
     slot.developerCommand = packet.developerCommand;
     slot.developerPlayer = packet.developerPlayer;
+    slot.gameplayPolicy = packet.menuReserved;
     slot.present = true;
     // Selection requests are kept in the input frame itself.  Do not mirror
     // them into a live global here: a retransmitted packet would otherwise
@@ -1010,9 +1020,9 @@ void FillPacket(Packet &packet, u8 kind, u16 buttons, u32 frame = 0,
     packet.developerPlayer = 0;
     packet.menuCursor = (i16)std::clamp(g_LocalMenuCursor, -1, 32767);
     packet.menuCursorValid = g_LocalMenuCursor >= 0 ? 1 : 0;
-    // Bit 0 carries the local player's auto-bomb policy.  It is deliberately
-    // attached to every packet so a late join/reconnect quickly refreshes it.
-    packet.menuReserved = MobileUi::IsAutoBombEnabled() ? 0x01 : 0x00;
+    packet.menuReserved = OnlineBuildGameplayPolicy(
+        MobileUi::IsAutoBombEnabled(), Touch::WasUsedThisRun(),
+        Touch::UsedTouchToBomb());
     packet.stateHash = g_InputFrame ^ ((u32)g_GameDifficulty << 16) ^ (u32)g_GameStage;
     SDL_strlcpy(packet.name, g_Host ? "TH07 Host" : "TH07 Guest", sizeof(packet.name));
 }
@@ -1356,11 +1366,12 @@ bool SendStoredInput(u32 frame, InputFrame &input)
     packet.shellSelectionValid = input.shellSelectionValid ? 1 : 0;
     packet.developerCommand = input.developerCommand;
     packet.developerPlayer = input.developerPlayer;
+    packet.menuReserved = input.gameplayPolicy;
     bool sent = false;
     if (g_Mode == Online::MODE_BLUETOOTH)
     {
 #if defined(TH07_IOS)
-        sent = TH07_IOS_BluetoothSend(&packet, (int)sizeof(packet), 0) != 0;
+        sent = TH07_IOS_BluetoothSend(&packet, (int)sizeof(packet), 1) != 0;
 #endif
     }
     else if (g_Socket != kInvalidSocket)
@@ -1851,7 +1862,6 @@ void FailStartup(const char *reason)
 
 void HandleStartupPacket(const Packet &packet)
 {
-    g_RemoteAutoBomb = (packet.menuReserved & 0x01) != 0;
     if (packet.buildIdentity != kBuildIdentity || packet.resourceIdentity != kResourceIdentity)
     {
         FailStartup("Peer build or protocol mismatch");
@@ -2865,7 +2875,24 @@ u32 Online::GetRoundTripMs() { return g_LastRtt; }
 bool Online::IsMultiplayerSession() { return g_MultiplayerSession; }
 bool Online::IsNetworkSession() { return g_MultiplayerSession && !g_LocalSession; }
 int Online::GetLocalPlayerSlot() { return g_Host || g_LocalSession ? 0 : 1; }
-bool Online::IsRemoteAutoBombEnabled() { return g_RemoteAutoBomb; }
+bool Online::IsAutoBombEnabledForPlayer(u8 playerId)
+{
+    return playerId < 2 && OnlineGameplayPolicyHas(
+                               g_PlayerGameplayPolicy[playerId],
+                               ONLINE_GAMEPLAY_AUTO_BOMB);
+}
+bool Online::WasTouchUsedForPlayer(u8 playerId)
+{
+    return playerId < 2 && OnlineGameplayPolicyHas(
+                               g_PlayerGameplayPolicy[playerId],
+                               ONLINE_GAMEPLAY_TOUCH_USED);
+}
+bool Online::UsedTouchToBombForPlayer(u8 playerId)
+{
+    return playerId < 2 && OnlineGameplayPolicyHas(
+                               g_PlayerGameplayPolicy[playerId],
+                               ONLINE_GAMEPLAY_TOUCH_BOMB);
+}
 void Online::ResetInputSynchronization() { ResetSyncState(); }
 bool Online::IsSharedShellActive(SharedShellKind kind)
 {
@@ -3015,7 +3042,6 @@ bool Online::SynchronizeInputs(u16 localButtons, f32 localDx, f32 localDy,
     const u16 queuedShellButtons = g_QueuedShellButtons;
     const u16 queuedInputButtons = g_QueuedInputButtons;
     localButtons |= queuedShellButtons | queuedInputButtons;
-    ApplyPendingAuthoritativeState();
     if (!g_MultiplayerSession || (!g_LocalSession && !g_InputSynchronizationActive))
     {
         const bool guestLane = g_MultiplayerSession && !g_LocalSession && !g_Host;
@@ -3085,6 +3111,9 @@ bool Online::SynchronizeInputs(u16 localButtons, f32 localDx, f32 localDy,
         input.menuCursor = g_LocalMenuCursor >= 0 ? (i16)g_LocalMenuCursor : -1;
         input.developerCommand = g_QueuedDeveloperCommand;
         input.developerPlayer = g_QueuedDeveloperPlayer;
+        input.gameplayPolicy = OnlineBuildGameplayPolicy(
+            MobileUi::IsAutoBombEnabled(), Touch::WasUsedThisRun(),
+            Touch::UsedTouchToBomb());
         input.present = true;
         g_LocalInputHistory.Store(targetFrame, input);
         g_LocalInputSent = true;
@@ -3097,6 +3126,7 @@ bool Online::SynchronizeInputs(u16 localButtons, f32 localDx, f32 localDy,
     }
 
     const u32 now = SDL_GetTicks();
+    const u32 retransmitIntervalMs = GetInputRetransmitIntervalMs();
     const u32 firstFrame = g_InputFrame > 32 ? g_InputFrame - 32 : 0;
     const u32 lastFrame = g_InputFrame + (u32)g_InputDelay;
     u32 sendBudget = kInputSendBudgetPerTick;
@@ -3104,7 +3134,7 @@ bool Online::SynchronizeInputs(u16 localButtons, f32 localDx, f32 localDy,
         if (!sendBudget) return;
         auto *slot = g_LocalInputHistory.Find(frame);
         if (!slot || slot->acknowledged ||
-            (slot->lastSendMs && now - slot->lastSendMs < kInputRetransmitIntervalMs))
+            (slot->lastSendMs && now - slot->lastSendMs < retransmitIntervalMs))
             return;
         if (SendStoredInput(frame, slot->value))
         {
@@ -3204,6 +3234,10 @@ bool Online::SynchronizeInputs(u16 localButtons, f32 localDx, f32 localDy,
         *p1Dx = remote.touchDx; *p1Dy = remote.touchDy;
         *p2Dx = local.touchDx; *p2Dy = local.touchDy;
     }
+    const InputFrame &p1Input = g_Host ? local : remote;
+    const InputFrame &p2Input = g_Host ? remote : local;
+    g_PlayerGameplayPolicy[0] = p1Input.gameplayPolicy;
+    g_PlayerGameplayPolicy[1] = p2Input.gameplayPolicy;
     const u8 menuLane = g_SelectingPlayer2Loadout ? 1 : 0;
     const InputFrame &hostInput = g_Host ? local : remote;
     const InputFrame &guestInput = g_Host ? remote : local;
@@ -3235,19 +3269,6 @@ bool Online::SynchronizeInputs(u16 localButtons, f32 localDx, f32 localDy,
             local.stateHash);
     }
     return true;
-}
-void Online::PublishAuthoritativeState()
-{
-    // State packets are intentionally repeated. UDP loss must only delay a
-    // correction; it must never make the simulation wait for a second channel.
-    if (!g_Host || !g_MultiplayerSession || g_InputFrame == g_LastAuthoritativeSendFrame)
-    {
-        return;
-    }
-    if (SendAuthoritativeStatePacket())
-    {
-        g_LastAuthoritativeSendFrame = g_InputFrame;
-    }
 }
 void Online::ResetLoadouts()
 {

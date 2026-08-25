@@ -2084,9 +2084,8 @@ bool MobileUi::IsAutoBombEnabled()
 
 bool MobileUi::IsAutoBombEnabledForPlayer(u8 playerId)
 {
-    if (!Online::IsNetworkSession() || playerId == (u8)Online::GetLocalPlayerSlot())
-        return IsAutoBombEnabled();
-    return Online::IsRemoteAutoBombEnabled();
+    if (!Online::IsNetworkSession()) return IsAutoBombEnabled();
+    return Online::IsAutoBombEnabledForPlayer(playerId);
 }
 
 f32 MobileUi::GetDragSensitivity()

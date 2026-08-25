@@ -102,18 +102,18 @@ u32 GetRoundTripMs();
 bool IsMultiplayerSession();
 bool IsNetworkSession();
 int GetLocalPlayerSlot();
-// Returns the remote player's auto-bomb setting after it has been received.
-bool IsRemoteAutoBombEnabled();
+// Gameplay preferences that can affect collision/death logic are captured in
+// each lockstep frame. Reading live device settings here would let the two
+// simulations make different decisions for the same player.
+bool IsAutoBombEnabledForPlayer(u8 playerId);
+bool WasTouchUsedForPlayer(u8 playerId);
+bool UsedTouchToBombForPlayer(u8 playerId);
 
 // Returns false while the matching peer frame is still in flight. P1 is
 // always the host and P2 is always the guest, independent of local device.
 bool SynchronizeInputs(u16 localButtons, f32 localDx, f32 localDy,
                        u16 *p1Buttons, u16 *p2Buttons,
                        f32 *p1Dx, f32 *p1Dy, f32 *p2Dx, f32 *p2Dy);
-// The host periodically publishes the canonical player state. The guest
-// applies it before the next lockstep frame so small platform differences
-// cannot leave the two player scenes permanently divergent.
-void PublishAuthoritativeState();
 void ResetInputSynchronization();
 
 // Shared pause/retry shell. The host owns the state and both player lanes

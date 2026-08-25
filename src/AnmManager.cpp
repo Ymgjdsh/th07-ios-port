@@ -1816,10 +1816,10 @@ WHY_NOT_JUST_CONTINUE:
             *GET_FLOAT_PTR(0) = fmodf(GET_FLOAT_VALUE(0), GET_FLOAT_VALUE(1));
             break;
         case ANM_RAND:
-            *GET_INT_PTR(0) = g_Rng.GetRandomU32InRange(GET_INT_VALUE(1));
+            *GET_INT_PTR(0) = g_VisualRng.GetRandomU32InRange(GET_INT_VALUE(1));
             break;
         case ANM_RAND_FLOAT:
-            *GET_FLOAT_PTR(0) = g_Rng.GetRandomFloatInRange(GET_FLOAT_VALUE(1));
+            *GET_FLOAT_PTR(0) = g_VisualRng.GetRandomFloatInRange(GET_FLOAT_VALUE(1));
             break;
         case ANM_SIN:
             *GET_FLOAT_PTR(0) = sinf(GET_FLOAT_VALUE(1));

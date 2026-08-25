@@ -5,6 +5,26 @@
 
 #include "inttypes.hpp"
 
+enum OnlineGameplayPolicyFlag : u8
+{
+    ONLINE_GAMEPLAY_AUTO_BOMB = 1 << 0,
+    ONLINE_GAMEPLAY_TOUCH_USED = 1 << 1,
+    ONLINE_GAMEPLAY_TOUCH_BOMB = 1 << 2,
+};
+
+inline u8 OnlineBuildGameplayPolicy(bool autoBomb, bool touchUsed,
+                                    bool touchBomb)
+{
+    return (autoBomb ? ONLINE_GAMEPLAY_AUTO_BOMB : 0) |
+           (touchUsed ? ONLINE_GAMEPLAY_TOUCH_USED : 0) |
+           (touchBomb ? ONLINE_GAMEPLAY_TOUCH_BOMB : 0);
+}
+
+inline bool OnlineGameplayPolicyHas(u8 policy, OnlineGameplayPolicyFlag flag)
+{
+    return (policy & (u8)flag) != 0;
+}
+
 // Gameplay touch movement is serialized at 1/16-pixel precision. The sender
 // must simulate the decoded wire value too; otherwise each local player moves
 // by a slightly different amount on the two peers.

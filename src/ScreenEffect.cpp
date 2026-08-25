@@ -249,7 +249,7 @@ u32 BombEffects::OnUpdateScreenShake(BombEffects *arg)
     f32 fVar1 = (f32)(i32)(arg->args[1] - arg->args[0]) * arg->timer.AsFloat();
     fVar1 /= (f32)arg->duration;
     fVar1 += (f32)(i32)arg->args[0];
-    switch (g_Rng.GetRandomU32InRange(3))
+    switch (g_VisualRng.GetRandomU32InRange(3))
     {
     case 0:
         g_AnmManager->shakeOffset.x = 0.0f;
@@ -260,7 +260,7 @@ u32 BombEffects::OnUpdateScreenShake(BombEffects *arg)
     case 2:
         g_AnmManager->shakeOffset.x = -fVar1;
     }
-    switch (g_Rng.GetRandomU32InRange(3))
+    switch (g_VisualRng.GetRandomU32InRange(3))
     {
     case 0:
         g_AnmManager->shakeOffset.y = 0.0f;
