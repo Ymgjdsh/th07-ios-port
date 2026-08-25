@@ -136,6 +136,17 @@ int main()
     assert(OnlineGameplayPolicyHas(touchOnly, ONLINE_GAMEPLAY_TOUCH_USED));
     assert(!OnlineGameplayPolicyHas(touchOnly, ONLINE_GAMEPLAY_TOUCH_BOMB));
 
+    // A pause commit created while frame 241 is being consumed cannot target
+    // any of the already-captured frames through 249 at input delay 8.
+    assert(OnlineFirstUnsampledInputFrame(241, 8) == 250);
+    assert(OnlineFirstUnsampledInputFrame(77, 3) == 81);
+    // Controller.hpp values: UP, DOWN, SELECTMENU (ENTER|SHOOT), MENU and Q.
+    constexpr u16 shellActions = 0x0010 | 0x0020 | 0x1001 | 0x0008 | 0x0200;
+    assert(!OnlineShellInputCanArm(0x0001, shellActions, false));
+    assert(!OnlineShellInputCanArm(0x0010, shellActions, false));
+    assert(OnlineShellInputCanArm(0, shellActions, false));
+    assert(OnlineShellInputCanArm(0x0010, shellActions, true));
+
     // The input-delay prefix is synthesized rather than sent. Receiving the
     // first real frame seeds that prefix into the cumulative ACK window even
     // after frames 0..7 have already been consumed from the ring.
@@ -321,6 +332,6 @@ int main()
     for (u32 frame = 0; frame <= 8; ++frame)
         assert(delayedSender.Find(frame)->acknowledged);
 
-    std::puts("online protocol 16 frame policy, canonical input and ACK recovery tests passed");
+    std::puts("online protocol 17 pause handoff, frame policy and ACK recovery tests passed");
     return 0;
 }

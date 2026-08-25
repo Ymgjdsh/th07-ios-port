@@ -53,11 +53,11 @@ constexpr socket_t kInvalidSocket = -1;
 namespace
 {
 constexpr u32 kMagic = 0x374f4e54; // TNO7
-// Build 35 carries every gameplay-affecting mobile preference in the exact
-// lockstep frame that consumes it. This is deliberately a new wire identity:
-// older clients use live device state and cannot simulate this protocol.
-constexpr u16 kVersion = 16;
-constexpr u32 kBuildIdentity = 0x0706000du;
+// Build 36 makes shared-shell opening and resume transitions frame-scoped.
+// This is deliberately a new wire identity: older clients may resume a pause
+// on different stage frames and cannot safely participate in this protocol.
+constexpr u16 kVersion = 17;
+constexpr u32 kBuildIdentity = 0x0706000eu;
 // XOR of the first SHA-256 words for th07.dat, thbgm.dat and msgothic.ttc.
 constexpr u32 kResourceIdentity = 0xf09a7ea3u;
 constexpr u16 kPort = 37707;
@@ -94,11 +94,9 @@ constexpr int kDefaultInputDelay = 3;
 constexpr int kUdpSocketBufferBytes = 256 * 1024;
 constexpr u32 kBluetoothReconnectGraceMs = 10000;
 constexpr u32 kMaxPacketsPerUpdate = 128;
-// Shared menus are handed off on a logical input frame.  The close animation
-// itself is local, but the commit must not be exposed before both peers have
-// consumed the same logical frame.  Keeping a small lead also gives a lost
-// UDP packet a chance to be retransmitted before the shell is closed.
-constexpr u32 kSharedShellLeadFrames = 6;
+// Shared menus are handed off on a logical input frame. The close animation
+// itself is local, but a transition may only target an input frame that had
+// not yet been sampled when the commit was created.
 constexpr u8 kShellAckDelivered = 0x01;
 constexpr u8 kShellConfirmShift = 4;
 constexpr u8 kShellConfirmMask = 0x30;
@@ -256,6 +254,8 @@ u32 g_ShellHandoffFrame = 0;
 u32 g_ShellCommitRevision = 0;
 u8 g_ShellRequest = 0;
 u32 g_ShellOpenedFrame = 0xffffffffu;
+u32 g_ShellInputStartFrame = 0xffffffffu;
+bool g_ShellInputArmed[2] = {false, false};
 u16 g_QueuedShellButtons = 0;
 u16 g_QueuedInputButtons = 0;
 u8 g_QueuedDeveloperCommand = 0xff;
@@ -408,6 +408,9 @@ static void OpenSharedShellOnHost(Online::SharedShellKind kind)
     g_ShellHandoffReady = false;
     g_ShellHandoffFrame = 0;
     g_ShellOpenedFrame = g_InputFrame;
+    g_ShellInputStartFrame = OnlineFirstUnsampledInputFrame(
+        g_InputFrame, (u32)g_InputDelay);
+    g_ShellInputArmed[0] = g_ShellInputArmed[1] = false;
     g_ShellCommitRevision = 0;
     g_RemoteShellSelectionRequest = -1;
     g_ShellRequest = 0;
@@ -420,8 +423,9 @@ static void OpenSharedShellOnHost(Online::SharedShellKind kind)
     g_LastShellButtons[0] = g_LastShellButtons[1] = 0;
     ++g_ShellRevision;
     PresentSharedShell(kind);
-    MobileDiagnostics::Log("online/shell", "open kind=%d revision=%u", (int)kind,
-                           g_ShellRevision);
+    MobileDiagnostics::Log("online/shell",
+                           "open kind=%d revision=%u inputStart=%u",
+                           (int)kind, g_ShellRevision, g_ShellInputStartFrame);
 }
 
 static bool ShellButtonEdge(u16 buttons, u16 button, u8 playerId)
@@ -446,9 +450,11 @@ static void CommitSharedShell(Online::SharedShellCommit commit)
     g_LastAuthoritativeSendFrame = 0xffffffffu;
     ++g_ShellRevision;
     g_ShellCommitRevision = g_ShellRevision;
-    g_ShellHandoffFrame = g_InputFrame + kSharedShellLeadFrames;
-    MobileDiagnostics::Log("online/shell", "commit=%d revision=%u", (int)commit,
-                           g_ShellRevision);
+    g_ShellHandoffFrame = OnlineFirstUnsampledInputFrame(
+        g_InputFrame, (u32)g_InputDelay);
+    MobileDiagnostics::Log("online/shell",
+                           "commit=%d revision=%u handoff=%u",
+                           (int)commit, g_ShellRevision, g_ShellHandoffFrame);
 }
 
 static void ProcessSharedShellFrame(u16 p1Buttons, u16 p2Buttons,
@@ -459,10 +465,11 @@ static void ProcessSharedShellFrame(u16 p1Buttons, u16 p2Buttons,
         g_ShellCommit != Online::SHARED_COMMIT_NONE)
         return;
     const u16 buttons[2] = {p1Buttons, p2Buttons};
-    if (g_ShellOpenedFrame == g_InputFrame)
+    if (g_InputFrame < g_ShellInputStartFrame)
     {
-        // The opening MENU edge belongs to gameplay, not to the first menu
-        // page. Record it as the previous state and wait for a fresh tap.
+        // Input-delay frames already sampled before the shell opened still
+        // contain gameplay MENU/SHOOT state. Drain all of them before the
+        // pause page accepts navigation or confirmation.
         g_LastShellButtons[0] = buttons[0];
         g_LastShellButtons[1] = buttons[1];
         return;
@@ -487,6 +494,11 @@ static void ProcessSharedShellFrame(u16 p1Buttons, u16 p2Buttons,
     const i32 remoteSelectionRequest = p2Input.shellSelectionValid
                                            ? p2Input.shellSelectionRequest
                                            : -1;
+    const bool explicitSelection[2] = {localSelectionRequest >= 0,
+                                       remoteSelectionRequest >= 0};
+    const u16 shellActionMask = TH_BUTTON_UP | TH_BUTTON_DOWN |
+                                TH_BUTTON_SELECTMENU | TH_BUTTON_MENU |
+                                TH_BUTTON_Q;
     if (localSelectionRequest >= 0)
     {
         g_ShellSelection[0] = (u8)std::clamp(localSelectionRequest, 0, (int)shellMaxSelection);
@@ -499,6 +511,16 @@ static void ProcessSharedShellFrame(u16 p1Buttons, u16 p2Buttons,
     }
     for (u8 playerId = 0; playerId < 2; ++playerId)
     {
+        if (!g_ShellInputArmed[playerId])
+        {
+            if (!OnlineShellInputCanArm(buttons[playerId], shellActionMask,
+                                        explicitSelection[playerId]))
+                continue;
+            g_ShellInputArmed[playerId] = true;
+            // A neutral frame only arms the lane. A touch selection is an
+            // explicit pause-page action and may be consumed immediately.
+            if (!explicitSelection[playerId]) continue;
+        }
         if (ShellButtonEdge(buttons[playerId], TH_BUTTON_UP, playerId))
         {
             const u8 maxSelection = confirmingPause ? 1 :
@@ -644,7 +666,8 @@ static void ApplyRemoteSharedShellState(const Packet &packet)
         // Derive a conservative one from the first input frame that carried
         // the commit instead of falling back to a wall-clock timeout.
         if (g_ShellHandoffFrame == 0)
-            g_ShellHandoffFrame = packet.frame + kSharedShellLeadFrames;
+            g_ShellHandoffFrame = OnlineFirstUnsampledInputFrame(
+                packet.frame, (u32)g_InputDelay);
         g_ShellHandoffReady = g_InputFrame >= g_ShellHandoffFrame;
         // Any queued authoritative state is from before the retry/reset.
         g_RemoteAuthoritativeStatePresent = false;
@@ -687,6 +710,8 @@ static void ApplyRemoteSharedShellState(const Packet &packet)
         g_ShellVote[0] = g_ShellVote[1] = 0;
         g_ShellConfirmAction = Online::SHARED_CONFIRM_NONE;
         g_LastShellButtons[0] = g_LastShellButtons[1] = 0;
+        g_ShellInputStartFrame = 0xffffffffu;
+        g_ShellInputArmed[0] = g_ShellInputArmed[1] = false;
         g_LocalShellSelectionRequest = g_RemoteShellSelectionRequest = -1;
         // A terminal shell packet is the boundary between gameplay epochs.
         // Clear every one-shot lifecycle flag even when the guest had already
@@ -740,6 +765,8 @@ void ResetSyncState()
     g_RemoteAuthoritativeShellRevision = 0;
     g_LastAuthoritativeSendFrame = 0xffffffffu;
     g_ShellCloseComplete = false;
+    g_ShellInputStartFrame = 0xffffffffu;
+    g_ShellInputArmed[0] = g_ShellInputArmed[1] = false;
     if (g_ShellKind == Online::SHARED_SHELL_NONE)
         g_ShellOpenedFrame = 0xffffffffu;
     for (int frame = 0; frame < g_InputDelay; ++frame)
@@ -792,6 +819,8 @@ void ActivateMultiplayerSession(bool local)
     g_QueuedDeveloperCommand = 0xff;
     g_QueuedDeveloperPlayer = 0;
     g_LastShellButtons[0] = g_LastShellButtons[1] = 0;
+    g_ShellInputStartFrame = 0xffffffffu;
+    g_ShellInputArmed[0] = g_ShellInputArmed[1] = false;
     g_LocalMenuCursor = g_RemoteMenuCursor = g_MenuCursorTarget = -1;
     g_RemoteMenuButtons = 0;
     g_LastRemoteMenuSequence = 0;
@@ -3032,6 +3061,8 @@ bool Online::SynchronizeInputs(u16 localButtons, f32 localDx, f32 localDy,
         g_LocalShellSelectionRequest = g_RemoteShellSelectionRequest = -1;
         g_LastShellButtons[0] = g_LastShellButtons[1] = 0;
         g_ShellOpenedFrame = 0xffffffffu;
+        g_ShellInputStartFrame = 0xffffffffu;
+        g_ShellInputArmed[0] = g_ShellInputArmed[1] = false;
         ++g_ShellRevision;
         g_GameManager.isInPauseMenu = 0;
         g_GameManager.isInRetryMenu = 0;

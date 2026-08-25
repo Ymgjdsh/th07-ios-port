@@ -25,6 +25,21 @@ inline bool OnlineGameplayPolicyHas(u8 policy, OnlineGameplayPolicyFlag flag)
     return (policy & (u8)flag) != 0;
 }
 
+// The local input for currentFrame + inputDelay has already been captured
+// before shell actions are processed. A synchronized transition must target
+// the following frame so the packet required to consume that frame is also
+// guaranteed to carry the transition.
+inline u32 OnlineFirstUnsampledInputFrame(u32 currentFrame, u32 inputDelay)
+{
+    return currentFrame + inputDelay + 1;
+}
+
+inline bool OnlineShellInputCanArm(u16 buttons, u16 actionMask,
+                                   bool explicitSelection)
+{
+    return explicitSelection || (buttons & actionMask) == 0;
+}
+
 // Gameplay touch movement is serialized at 1/16-pixel precision. The sender
 // must simulate the decoded wire value too; otherwise each local player moves
 // by a slightly different amount on the two peers.
