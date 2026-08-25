@@ -63,7 +63,7 @@ with open(cmake_path, "r", encoding="utf-8") as stream:
     cmake_source = stream.read()
 
 for marker in (
-    'set(TH07_IOS_BUILD "33"',
+    'set(TH07_IOS_BUILD "34"',
     'XCODE_ATTRIBUTE_LLVM_LTO "YES_THIN"',
     'set(SDL_GPU OFF CACHE BOOL "" FORCE)',
     'set(SDL_RENDER ON CACHE BOOL "" FORCE)',
@@ -304,6 +304,9 @@ online_markers = {
         "ackFrame",
         "ackMask",
         "OnlineFrameHistory",
+        "OnlineCanonicalTouchDelta",
+        "OnlineSeedDelayedAckPrefix",
+        "kStateMismatchConfirmations",
         "EnterStateDivergence",
         "g_StateDiverged",
         "Online synchronization timed out",
@@ -361,7 +364,7 @@ online_markers = {
     os.path.join("ios", "BluetoothPeerTransport.mm"): (
         "MultipeerConnectivity",
         'kServiceType = @"th07-peer"',
-        '@"protocol": @"14"',
+        '@"protocol": @"15"',
     ),
     os.path.join("ios", "OnlineLauncher.mm"): (
         "UITableViewStyleInsetGrouped",
@@ -395,14 +398,14 @@ for relative, markers in online_markers.items():
         source = stream.read()
     for marker in markers:
         if marker not in source:
-            print("error: build 33 Online marker missing:", relative, marker)
+            print("error: build 34 Online marker missing:", relative, marker)
             failed = True
 if "demoFramesCount++" in open(os.path.join(root, "src", "MainMenu.cpp"), encoding="utf-8").read():
     print("error: title idle demo trigger is still enabled")
     failed = True
 if failed:
     sys.exit(2)
-print("ok: Build 33 phased menu channel, reconnect freeze and gameplay lockstep markers")
+print("ok: Build 34 canonical input, ACK recovery and gameplay lockstep markers")
 
 with open(os.path.join(root, "src", "ResultScreen.cpp"), "r", encoding="utf-8") as stream:
     result_source = stream.read()

@@ -37,6 +37,7 @@ constexpr socket_t kInvalidSocket = -1;
 #include "MobileDiagnostics.hpp"
 #include "MobileUi.hpp"
 #include "OnlineFrameHistory.hpp"
+#include "OnlineGameplayProtocol.hpp"
 #include "OnlineControlProtocol.hpp"
 #include "OnlineStartupProtocol.hpp"
 #include "OnlineLauncherIOS.hpp"
@@ -51,12 +52,11 @@ constexpr socket_t kInvalidSocket = -1;
 namespace
 {
 constexpr u32 kMagic = 0x374f4e54; // TNO7
-// Build 33 sends setup input as reliable, one-shot commands bound to both the
-// menu page and the active P1/P2 selection phase. This is deliberately a new
-// wire identity: an old client must not join a session with different command
-// ownership and retransmission rules.
-constexpr u16 kVersion = 14;
-constexpr u32 kBuildIdentity = 0x0706000bu;
+// Build 34 canonicalizes gameplay input before simulation and repairs the
+// delayed-prefix ACK window. This is deliberately a new wire identity: an old
+// client must not join a session with different frame and hash semantics.
+constexpr u16 kVersion = 15;
+constexpr u32 kBuildIdentity = 0x0706000cu;
 // XOR of the first SHA-256 words for th07.dat, thbgm.dat and msgothic.ttc.
 constexpr u32 kResourceIdentity = 0xf09a7ea3u;
 constexpr u16 kPort = 37707;
@@ -85,6 +85,8 @@ constexpr u32 kMenuInputIntervalMs = 32;
 // pending frame is resent in one tick and the resulting burst makes the
 // lockstep renderer appear to stutter on iOS Wi-Fi.
 constexpr u32 kInputSendBudgetPerTick = 8;
+constexpr u32 kStateHashIntervalFrames = 30;
+constexpr u32 kStateMismatchConfirmations = 3;
 constexpr int kLanInputDelayFloor = 8;
 constexpr int kDefaultInputDelay = 3;
 constexpr int kUdpSocketBufferBytes = 256 * 1024;
@@ -116,6 +118,15 @@ struct PlayerStatePacket
     u8 reserved;
 };
 
+struct SynchronizationHashes
+{
+    u32 timeline;
+    u32 rng;
+    u32 world;
+    u32 players;
+    u32 playerBullets;
+};
+
 struct Packet
 {
     u32 magic; u16 version; u8 kind; u8 role; u32 sequence; u32 timestamp;
@@ -125,6 +136,7 @@ struct Packet
     u32 ackFrame; u32 ackMask; u32 buildIdentity; u32 resourceIdentity;
     u16 difficulty; u8 stage; u8 menuState;
     u8 p1Character; u8 p1Shot; u8 p2Character; u8 p2Shot; u32 stateHash;
+    SynchronizationHashes stateHashes;
     u32 authoritativeFrame;
     PlayerStatePacket p1State;
     PlayerStatePacket p2State;
@@ -160,6 +172,7 @@ struct InputFrame
     f32 touchDx = 0.0f;
     f32 touchDy = 0.0f;
     u32 stateHash = 0;
+    SynchronizationHashes stateHashes = {};
     i8 shellSelectionRequest = -1;
     bool shellSelectionValid = false;
     i16 menuCursor = -1;
@@ -278,6 +291,10 @@ bool g_StateDiverged = false;
 u32 g_DivergedFrame = 0xffffffffu;
 u32 g_LocalDivergedHash = 0;
 u32 g_RemoteDivergedHash = 0;
+SynchronizationHashes g_LocalDivergedHashes = {};
+SynchronizationHashes g_RemoteDivergedHashes = {};
+u32 g_StateMismatchCount = 0;
+u32 g_LastStateMismatchFrame = 0xffffffffu;
 bool g_AwaitingResumeAck = false;
 u32 g_LastLifecycleSend = 0;
 i32 g_LocalShellSelectionRequest = -1;
@@ -698,6 +715,10 @@ void ResetSyncState()
     g_DivergedFrame = 0xffffffffu;
     g_LocalDivergedHash = 0;
     g_RemoteDivergedHash = 0;
+    g_LocalDivergedHashes = {};
+    g_RemoteDivergedHashes = {};
+    g_StateMismatchCount = 0;
+    g_LastStateMismatchFrame = 0xffffffffu;
     g_RemoteAutoBomb = false;
     g_LastAuthoritativeFrame = 0;
     g_RemoteP1State = {};
@@ -779,6 +800,10 @@ void ActivateMultiplayerSession(bool local)
     g_DivergedFrame = 0xffffffffu;
     g_LocalDivergedHash = 0;
     g_RemoteDivergedHash = 0;
+    g_LocalDivergedHashes = {};
+    g_RemoteDivergedHashes = {};
+    g_StateMismatchCount = 0;
+    g_LastStateMismatchFrame = 0xffffffffu;
     g_AwaitingResumeAck = false;
     g_LastLifecycleSend = 0;
     g_LocalShellSelectionRequest = g_RemoteShellSelectionRequest = -1;
@@ -838,6 +863,11 @@ void StoreRemoteInput(const Packet &packet)
         g_ShellRequest = 0;
     }
     StoreLocalAcknowledgement(packet);
+    // The neutral input-delay prefix is generated locally and never arrives as
+    // packets. Seed it into the cumulative ACK boundary on the first real
+    // frame, even if the local game has already consumed and erased it.
+    g_LastRemoteFrame = OnlineSeedDelayedAckPrefix(g_LastRemoteFrame,
+                                                    (u32)g_InputDelay);
     if (packet.frame < g_InputFrame || packet.frame >= g_InputFrame + kInputHistorySize) return;
     InputFrame &slot = g_RemoteInputs[packet.frame % kInputHistorySize];
     if (slot.present && slot.frame == packet.frame)
@@ -849,9 +879,10 @@ void StoreRemoteInput(const Packet &packet)
     if (packet.frame != expected) ++g_InputOutOfOrder;
     slot.frame = packet.frame;
     slot.buttons = packet.buttons;
-    slot.touchDx = (f32)packet.touchDx16 / 16.0f;
-    slot.touchDy = (f32)packet.touchDy16 / 16.0f;
+    slot.touchDx = OnlineDecodeTouchDelta(packet.touchDx16);
+    slot.touchDy = OnlineDecodeTouchDelta(packet.touchDy16);
     slot.stateHash = packet.stateHash;
+    slot.stateHashes = packet.stateHashes;
     slot.shellSelectionRequest = packet.shellSelectionValid
                                      ? (i8)std::clamp((int)packet.shellSelectionRequest, 0, 2)
                                      : -1;
@@ -941,8 +972,8 @@ void FillPacket(Packet &packet, u8 kind, u16 buttons, u32 frame = 0,
     memset(&packet, 0, sizeof(packet)); packet.magic = kMagic; packet.version = kVersion;
     packet.kind = kind; packet.role = g_Host ? 1 : 2; packet.sequence = ++g_Sequence;
     packet.timestamp = SDL_GetTicks(); packet.frame = frame; packet.buttons = buttons;
-    packet.touchDx16 = (i16)std::clamp((i32)lroundf(touchDx * 16.0f), -32768, 32767);
-    packet.touchDy16 = (i16)std::clamp((i32)lroundf(touchDy * 16.0f), -32768, 32767);
+    packet.touchDx16 = OnlineEncodeTouchDelta(touchDx);
+    packet.touchDy16 = OnlineEncodeTouchDelta(touchDy);
     packet.port = kPort; packet.session = g_MultiplayerSession ? g_LaunchNonce : g_Session;
     packet.barrierEpoch = g_BarrierEpoch;
     packet.lifeCount = g_Supervisor.cfg.lifeCount;
@@ -1213,68 +1244,98 @@ static bool SendAuthoritativeStatePacket()
                   (const sockaddr *)&g_Peer, sizeof(g_Peer)) == (int)sizeof(packet);
 }
 
-u32 ComputeSynchronizationHash(u32 frame)
+struct SynchronizationHashBuilder
+{
+    u32 value = 2166136261u;
+
+    void Mix(u32 next)
+    {
+        value ^= next;
+        value *= 16777619u;
+    }
+
+    void MixGameplayFloat(f32 next)
+    {
+        if (!std::isfinite(next))
+        {
+            Mix(0xffffffffu);
+            return;
+        }
+        Mix((u32)(i32)lroundf(next * 16.0f));
+    }
+};
+
+SynchronizationHashes ComputeSynchronizationHashes(u32 frame)
 {
     // A device can still be loading the stage while the lockstep input
     // history is already advancing. Do not compare a partially initialized
     // menu/loading state against a live gameplay state.
     if (!g_GameManager.globals || !g_GameManager.notInMenu || g_Supervisor.curState != 2)
-        return 0;
+        return {};
 
-    u32 hash = 2166136261u;
-    const auto mix = [&hash](u32 value)
+    SynchronizationHashBuilder timeline;
+    SynchronizationHashBuilder rng;
+    SynchronizationHashBuilder world;
+    SynchronizationHashBuilder players;
+    SynchronizationHashBuilder playerBullets;
+    timeline.Mix(0x54494d45u); // TIME
+    timeline.Mix(frame);
+    timeline.Mix((u32)(g_GameReadySent ? g_GameDifficulty
+                                       : g_Supervisor.cfg.defaultDifficulty));
+    timeline.Mix((u32)(g_GameReadySent ? g_GameStage : 0));
+    timeline.Mix((u32)g_GameManager.framesThisStage);
+    rng.Mix(0x524e4720u); // RNG
+    rng.Mix(g_Rng.seed);
+    rng.Mix(g_Rng.generationCount);
+    world.Mix(0x574f524cu); // WORL
+    world.Mix((u32)g_GameManager.cherry);
+    world.Mix((u32)g_GameManager.cherryPlus);
+    world.Mix((u32)g_GameManager.rank.rank);
+    world.Mix(g_GameManager.globals->score);
+    world.Mix((u32)g_GameManager.globals->grazeInTotal);
+    players.Mix(0x504c5952u); // PLYR
+    playerBullets.Mix(0x5042554cu); // PBUL
+    for (u32 playerId = 0; playerId < 2; ++playerId)
     {
-        hash ^= value;
-        hash *= 16777619u;
-    };
-    const auto mixGameplayFloat = [&mix](f32 value)
-    {
-        // Keep the check useful across iOS releases where a few simulation
-        // operations can differ by a fraction of a pixel.
-        if (!std::isfinite(value)) { mix(0xffffffffu); return; }
-        mix((u32)(i32)lroundf(value * 16.0f));
-    };
-    mix(frame);
-    mix(g_Rng.seed);
-    mix(g_Rng.generationCount);
-    mix((u32)(g_GameReadySent ? g_GameDifficulty : g_Supervisor.cfg.defaultDifficulty));
-    mix((u32)(g_GameReadySent ? g_GameStage : 0));
-    if (g_GameManager.globals && g_GameManager.notInMenu && g_Supervisor.curState == 2)
-    {
-        mix((u32)g_GameManager.framesThisStage);
-        mix((u32)g_GameManager.cherry);
-        mix((u32)g_GameManager.cherryPlus);
-        mix((u32)g_GameManager.rank.rank);
-        mix(g_GameManager.globals->score);
-        mix((u32)g_GameManager.globals->grazeInTotal);
-        for (u32 playerId = 0; playerId < 2; ++playerId)
+        players.Mix(playerId);
+        players.Mix((u32)g_PlayerCharacters[playerId]);
+        players.Mix((u32)g_PlayerShots[playerId]);
+        players.Mix((u32)GetPlayerLives((u8)playerId));
+        players.Mix((u32)GetPlayerBombs((u8)playerId));
+        players.Mix((u32)GetPlayerPower((u8)playerId));
+        players.Mix(g_PlayerActive[playerId] ? 1u : 0u);
+        if (!g_PlayerActive[playerId]) continue;
+        const Player &player = g_Players[playerId];
+        players.MixGameplayFloat(player.positionCenter.x);
+        players.MixGameplayFloat(player.positionCenter.y);
+        players.Mix((u32)(u8)player.playerState);
+        players.Mix((u32)player.respawnTimer);
+        players.Mix((u32)player.bombInfo.isInUse);
+        players.Mix((u32)player.bombInfo.bombTimer.current);
+        players.Mix((u32)(u8)player.isFocus);
+        playerBullets.Mix(playerId);
+        for (const PlayerBullet &bullet : player.bullets)
         {
-            mix((u32)g_PlayerCharacters[playerId]);
-            mix((u32)g_PlayerShots[playerId]);
-            mix((u32)GetPlayerLives((u8)playerId));
-            mix((u32)GetPlayerBombs((u8)playerId));
-            mix((u32)GetPlayerPower((u8)playerId));
-            mix(g_PlayerActive[playerId] ? 1u : 0u);
-            if (!g_PlayerActive[playerId]) continue;
-            const Player &player = g_Players[playerId];
-            mixGameplayFloat(player.positionCenter.x);
-            mixGameplayFloat(player.positionCenter.y);
-            mix((u32)(u8)player.playerState);
-            mix((u32)player.respawnTimer);
-            mix((u32)player.bombInfo.isInUse);
-            mix((u32)player.bombInfo.bombTimer.current);
-            mix((u32)(u8)player.isFocus);
-            for (const PlayerBullet &bullet : player.bullets)
-            {
-                if (!bullet.bulletState) continue;
-                mix((u32)(u16)bullet.bulletState);
-                mixGameplayFloat(bullet.pos.x);
-                mixGameplayFloat(bullet.pos.y);
-                mix((u32)(u16)bullet.damage);
-            }
+            if (!bullet.bulletState) continue;
+            playerBullets.Mix((u32)(u16)bullet.bulletState);
+            playerBullets.MixGameplayFloat(bullet.pos.x);
+            playerBullets.MixGameplayFloat(bullet.pos.y);
+            playerBullets.Mix((u32)(u16)bullet.damage);
         }
     }
-    return hash;
+    return {timeline.value, rng.value, world.value, players.value,
+            playerBullets.value};
+}
+
+u32 CombineSynchronizationHashes(const SynchronizationHashes &hashes)
+{
+    SynchronizationHashBuilder combined;
+    combined.Mix(hashes.timeline);
+    combined.Mix(hashes.rng);
+    combined.Mix(hashes.world);
+    combined.Mix(hashes.players);
+    combined.Mix(hashes.playerBullets);
+    return combined.value;
 }
 
 bool SendStoredInput(u32 frame, InputFrame &input)
@@ -1282,6 +1343,7 @@ bool SendStoredInput(u32 frame, InputFrame &input)
     Packet packet;
     FillPacket(packet, kInput, input.buttons, frame, input.touchDx, input.touchDy);
     packet.stateHash = input.stateHash;
+    packet.stateHashes = input.stateHashes;
     // Serialize the cursor captured with this frame. FillPacket normally
     // reads the current pending cursor, which may belong to a later frame or
     // may already have been cleared after the first send. Retransmits must
@@ -1667,6 +1729,7 @@ bool SendDesyncPacket()
     Packet packet;
     FillPacket(packet, kDesync, 0, g_DivergedFrame);
     packet.stateHash = g_LocalDivergedHash;
+    packet.stateHashes = g_LocalDivergedHashes;
     packet.authoritativeFrame = g_DivergedFrame;
     if (g_Mode == Online::MODE_BLUETOOTH)
     {
@@ -1681,20 +1744,44 @@ bool SendDesyncPacket()
                   (const sockaddr *)&g_Peer, sizeof(g_Peer)) == (int)sizeof(packet);
 }
 
-void EnterStateDivergence(u32 frame, u32 localHash, u32 remoteHash)
+void EnterStateDivergence(u32 frame, u32 localHash, u32 remoteHash,
+                          const SynchronizationHashes &localHashes,
+                          const SynchronizationHashes &remoteHashes)
 {
     if (g_StateDiverged) return;
     g_StateDiverged = true;
     g_DivergedFrame = frame;
     g_LocalDivergedHash = localHash;
     g_RemoteDivergedHash = remoteHash;
+    g_LocalDivergedHashes = localHashes;
+    g_RemoteDivergedHashes = remoteHashes;
     g_PeerBackgrounded = true;
     g_AwaitingResumeAck = false;
     SetStatus("Synchronization lost; restart online game");
     MobileDiagnostics::Log("online/sync",
-                           "DIVERGED frame=%u local=%08x remote=%08x; both peers frozen",
-                           frame, localHash, remoteHash);
+        "DIVERGED frame=%u local=%08x remote=%08x "
+        "timeline=%08x/%08x rng=%08x/%08x world=%08x/%08x "
+        "players=%08x/%08x bullets=%08x/%08x; both peers frozen",
+        frame, localHash, remoteHash,
+        localHashes.timeline, remoteHashes.timeline,
+        localHashes.rng, remoteHashes.rng,
+        localHashes.world, remoteHashes.world,
+        localHashes.players, remoteHashes.players,
+        localHashes.playerBullets, remoteHashes.playerBullets);
     SendDesyncPacket();
+}
+
+void EnterRemoteStateDivergence(const Packet &packet)
+{
+    u32 localHash = 0;
+    SynchronizationHashes localHashes = {};
+    if (const auto *slot = g_LocalInputHistory.Find(packet.frame))
+    {
+        localHash = slot->value.stateHash;
+        localHashes = slot->value.stateHashes;
+    }
+    EnterStateDivergence(packet.frame, localHash, packet.stateHash,
+                         localHashes, packet.stateHashes);
 }
 
 void StoreRemoteMenuInput(const Packet &packet)
@@ -2161,7 +2248,7 @@ void UpdateBluetooth()
         else if (packet.kind == kDesync && g_State == Online::STATE_CONNECTED)
         {
             g_RemoteDivergedHash = packet.stateHash;
-            EnterStateDivergence(packet.frame, g_LocalDivergedHash, packet.stateHash);
+            EnterRemoteStateDivergence(packet);
         }
         else if (packet.kind == kHeartbeat)
         {
@@ -2357,7 +2444,7 @@ void Online::Update()
         else if (packet.kind == kDesync && g_State == STATE_CONNECTED && IsExpectedPeer(from))
         {
             g_RemoteDivergedHash = packet.stateHash;
-            EnterStateDivergence(packet.frame, g_LocalDivergedHash, packet.stateHash);
+            EnterRemoteStateDivergence(packet);
         }
         else if (packet.kind == kHeartbeat && g_State == STATE_CONNECTED && IsExpectedPeer(from))
         {
@@ -2977,12 +3064,20 @@ bool Online::SynchronizeInputs(u16 localButtons, f32 localDx, f32 localDy,
         InputFrame input = {};
         input.frame = targetFrame;
         input.buttons = localButtons;
-        input.touchDx = localDx;
-        input.touchDy = localDy;
+        // Store exactly the value that will be decoded by the peer. Keeping
+        // the sender's higher-precision touch delta here made movement, item
+        // collision and every dependent resource update diverge immediately.
+        input.touchDx = OnlineCanonicalTouchDelta(localDx);
+        input.touchDy = OnlineCanonicalTouchDelta(localDy);
         // Check often enough to catch a split during a boss/bonus burst, but
         // keep the hash off the majority of frames so it cannot add to the
         // same main-thread pressure that caused the original stalls.
-        input.stateHash = targetFrame % 30 == 0 ? ComputeSynchronizationHash(targetFrame) : 0;
+        if (targetFrame % kStateHashIntervalFrames == 0)
+        {
+            input.stateHashes = ComputeSynchronizationHashes(targetFrame);
+            if (input.stateHashes.timeline != 0)
+                input.stateHash = CombineSynchronizationHashes(input.stateHashes);
+        }
         input.shellSelectionRequest = g_LocalShellSelectionRequest >= 0
                                           ? (i8)std::clamp(g_LocalShellSelectionRequest, -1, 2)
                                           : -1;
@@ -3066,8 +3161,36 @@ bool Online::SynchronizeInputs(u16 localButtons, f32 localDx, f32 localDy,
     const InputFrame local = localSlot->value;
     if (local.stateHash && remote.stateHash && local.stateHash != remote.stateHash)
     {
-        EnterStateDivergence(g_InputFrame, local.stateHash, remote.stateHash);
-        return false;
+        if (g_LastStateMismatchFrame != 0xffffffffu &&
+            g_InputFrame == g_LastStateMismatchFrame + kStateHashIntervalFrames)
+            ++g_StateMismatchCount;
+        else
+            g_StateMismatchCount = 1;
+        g_LastStateMismatchFrame = g_InputFrame;
+        MobileDiagnostics::Log("online/sync",
+            "state mismatch frame=%u count=%u local=%08x remote=%08x "
+            "timeline=%08x/%08x rng=%08x/%08x world=%08x/%08x "
+            "players=%08x/%08x bullets=%08x/%08x",
+            g_InputFrame, g_StateMismatchCount, local.stateHash, remote.stateHash,
+            local.stateHashes.timeline, remote.stateHashes.timeline,
+            local.stateHashes.rng, remote.stateHashes.rng,
+            local.stateHashes.world, remote.stateHashes.world,
+            local.stateHashes.players, remote.stateHashes.players,
+            local.stateHashes.playerBullets, remote.stateHashes.playerBullets);
+        if (g_StateMismatchCount >= kStateMismatchConfirmations)
+        {
+            EnterStateDivergence(g_InputFrame, local.stateHash, remote.stateHash,
+                                 local.stateHashes, remote.stateHashes);
+            return false;
+        }
+    }
+    else if (local.stateHash && remote.stateHash && g_StateMismatchCount != 0)
+    {
+        MobileDiagnostics::Log("online/sync",
+                               "state recovered frame=%u after=%u mismatches hash=%08x",
+                               g_InputFrame, g_StateMismatchCount, local.stateHash);
+        g_StateMismatchCount = 0;
+        g_LastStateMismatchFrame = 0xffffffffu;
     }
     if (g_Host)
     {
@@ -3102,7 +3225,8 @@ bool Online::SynchronizeInputs(u16 localButtons, f32 localDx, f32 localDy,
     g_InputFrame++;
     g_LocalInputSent = false;
     g_LastSyncProgress = now;
-    if (g_InputFrame > 1 && (g_InputFrame - 1) % 30 == 0)
+    if (g_InputFrame > 1 &&
+        (g_InputFrame - 1) % kStateHashIntervalFrames == 0)
     {
         MobileDiagnostics::Log("online/frame",
             "frame=%u ack=%u mask=%08x rtt=%u retransmit=%u duplicate=%u outOfOrder=%u hash=%08x",

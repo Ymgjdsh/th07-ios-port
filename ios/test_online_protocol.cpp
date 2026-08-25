@@ -1,9 +1,11 @@
 #include "OnlineFrameHistory.hpp"
+#include "OnlineGameplayProtocol.hpp"
 #include "OnlineControlProtocol.hpp"
 #include "OnlineStartupProtocol.hpp"
 
 #include <cassert>
 #include <cstdio>
+#include <limits>
 
 struct TestInput
 {
@@ -109,6 +111,25 @@ int main()
     assert(!OnlineUsesGameplayLockstep(true, false, false));
     assert(OnlineUsesGameplayLockstep(true, false, true));
     assert(!OnlineUsesGameplayLockstep(true, true, true));
+
+    // Both peers must simulate the exact value carried on the wire. Build 33
+    // kept the sender's unquantized touch delta and decoded 1/16-pixel values
+    // on the receiver, so player position diverged as soon as touch movement
+    // began.
+    assert(OnlineEncodeTouchDelta(0.1f) == 2);
+    assert(OnlineCanonicalTouchDelta(0.1f) == 0.125f);
+    assert(OnlineDecodeTouchDelta(OnlineEncodeTouchDelta(-1.03f)) ==
+           OnlineCanonicalTouchDelta(-1.03f));
+    assert(OnlineEncodeTouchDelta(100000.0f) == 32767);
+    assert(OnlineEncodeTouchDelta(-100000.0f) == -32768);
+    assert(OnlineEncodeTouchDelta(std::numeric_limits<f32>::quiet_NaN()) == 0);
+
+    // The input-delay prefix is synthesized rather than sent. Receiving the
+    // first real frame seeds that prefix into the cumulative ACK window even
+    // after frames 0..7 have already been consumed from the ring.
+    assert(OnlineSeedDelayedAckPrefix(0xffffffffu, 8) == 7);
+    assert(OnlineSeedDelayedAckPrefix(0xffffffffu, 0) == 0xffffffffu);
+    assert(OnlineSeedDelayedAckPrefix(12, 8) == 12);
 
     // Simulate the reliable one-shot menu channel. The first difficulty
     // tap packet and its first ACK are lost; retransmission applies the tap
@@ -281,6 +302,13 @@ int main()
     sender.Acknowledge(6, 0);
     for (u32 frame = 0; frame < 7; ++frame) assert(sender.Find(frame)->acknowledged);
 
-    std::puts("online protocol 14 phased menu, reconnect, desync and frame history tests passed");
+    OnlineFrameHistory<TestInput, 16> delayedSender;
+    for (u32 frame = 0; frame <= 8; ++frame)
+        delayedSender.Store(frame, {(u16)frame});
+    delayedSender.Acknowledge(OnlineSeedDelayedAckPrefix(0xffffffffu, 8), 1u);
+    for (u32 frame = 0; frame <= 8; ++frame)
+        assert(delayedSender.Find(frame)->acknowledged);
+
+    std::puts("online protocol 15 canonical input, ACK recovery and state diagnostics tests passed");
     return 0;
 }
