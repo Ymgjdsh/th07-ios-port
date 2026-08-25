@@ -131,6 +131,10 @@ void QueueSharedShellSelection(u8 selection);
 // Unlike the mobile UI pulse queue, this survives a lockstep stall until the
 // frame has actually been stored and transmitted.
 void QueueInputPulse(u16 buttons);
+// Queue a developer action for the next synchronized gameplay frame. In a
+// network session the action is carried with the input frame and applied on
+// both devices; offline sessions may continue to apply it locally.
+void QueueDeveloperCommand(u8 row);
 void ReportMenuState(i32 gameState);
 void QueueMenuCursor(i32 cursor);
 bool ConsumeMenuCursorTarget(i32 *cursor);

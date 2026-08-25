@@ -936,6 +936,19 @@ void ActivateDeveloperRow(i32 row)
                                IsGameplay(), g_GameManager.globals != nullptr);
         return;
     }
+    if (Online::IsNetworkSession())
+    {
+        // DEV is a gameplay mutation. Queue it into the same delayed input
+        // frame as movement so both peers apply it once at the same point.
+        // A local write here would be overwritten by the host snapshot on
+        // the next tick, which is the source of the visible flash/revert.
+        if (row <= 3)
+        {
+            Online::QueueDeveloperCommand((u8)row);
+            g_DeveloperOpen = false;
+        }
+        return;
+    }
     const u8 playerId = (u8)Online::GetLocalPlayerSlot();
     switch (row)
     {

@@ -61,7 +61,7 @@ static NSString *const kServiceType = @"th07-peer";
     }
     if (role) {
         advertiser = [[MCNearbyServiceAdvertiser alloc] initWithPeer:peerId
-            discoveryInfo:@{@"role": @"host", @"protocol": @"13"} serviceType:kServiceType];
+            discoveryInfo:@{@"role": @"host", @"protocol": @"14"} serviceType:kServiceType];
         advertiser.delegate = self;
         [advertiser startAdvertisingPeer];
     } else {
@@ -99,7 +99,7 @@ static NSString *const kServiceType = @"th07-peer";
 - (void)browser:(MCNearbyServiceBrowser *)source foundPeer:(MCPeerID *)peer
  withDiscoveryInfo:(NSDictionary<NSString *, NSString *> *)info {
     if (source != browser || hostRole || ![info[@"role"] isEqualToString:@"host"] ||
-        ![info[@"protocol"] isEqualToString:@"13"]) return;
+        ![info[@"protocol"] isEqualToString:@"14"]) return;
     [source invitePeer:peer toSession:session withContext:nil timeout:10.0];
 }
 - (void)browser:(MCNearbyServiceBrowser *)source lostPeer:(MCPeerID *)peer { (void)source; (void)peer; }

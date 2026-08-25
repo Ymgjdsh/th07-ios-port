@@ -2,7 +2,7 @@
 
 #include "inttypes.hpp"
 
-// Platform-neutral rules for protocol 13's reliable setup/lifecycle channel.
+// Platform-neutral rules for protocol 14's reliable setup/lifecycle channel.
 // The wire transport may duplicate or reorder snapshots; only the newest
 // sequence changes the replicated state.
 inline bool OnlineControlSequenceIsNewer(u32 candidate, u32 current)

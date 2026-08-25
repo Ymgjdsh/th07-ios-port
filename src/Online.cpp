@@ -51,12 +51,12 @@ constexpr socket_t kInvalidSocket = -1;
 namespace
 {
 constexpr u32 kMagic = 0x374f4e54; // TNO7
-// Build 32 sends setup input as reliable, one-shot commands bound to both the
+// Build 33 sends setup input as reliable, one-shot commands bound to both the
 // menu page and the active P1/P2 selection phase. This is deliberately a new
 // wire identity: an old client must not join a session with different command
 // ownership and retransmission rules.
-constexpr u16 kVersion = 13;
-constexpr u32 kBuildIdentity = 0x0706000au;
+constexpr u16 kVersion = 14;
+constexpr u32 kBuildIdentity = 0x0706000bu;
 // XOR of the first SHA-256 words for th07.dat, thbgm.dat and msgothic.ttc.
 constexpr u32 kResourceIdentity = 0xf09a7ea3u;
 constexpr u16 kPort = 37707;
@@ -69,7 +69,7 @@ constexpr u8 kGameReady = 13, kGameCommit = 14;
 constexpr u8 kMenuInput = 15;
 // Lifecycle messages keep a running game frozen while one device is in the
 // background. They are control messages, never gameplay frames.
-constexpr u8 kPeerBackground = 16, kPeerForeground = 17;
+constexpr u8 kPeerBackground = 16, kPeerForeground = 17, kDesync = 19;
 constexpr u8 kMenuInputAck = 18;
 constexpr u32 kDiscoveryIntervalMs = 450;
 constexpr u32 kHandshakeIntervalMs = 300;
@@ -136,6 +136,11 @@ struct Packet
     u8 shellCommit;
     u8 shellRequest;
     u8 shellReserved;
+    // Developer actions are frame-scoped reliable commands. They are kept
+    // separate from menuReserved (which carries auto-bomb) so a retransmit
+    // cannot be mistaken for a gameplay configuration update.
+    u8 developerCommand;
+    u8 developerPlayer;
     u32 shellRevision;
     u32 shellHandoffFrame;
     i8 shellSelectionRequest;
@@ -159,6 +164,8 @@ struct InputFrame
     bool shellSelectionValid = false;
     i16 menuCursor = -1;
     bool present = false;
+    u8 developerCommand = 0xff;
+    u8 developerPlayer = 0;
 };
 
 enum StartupPhase
@@ -235,6 +242,8 @@ u8 g_ShellRequest = 0;
 u32 g_ShellOpenedFrame = 0xffffffffu;
 u16 g_QueuedShellButtons = 0;
 u16 g_QueuedInputButtons = 0;
+u8 g_QueuedDeveloperCommand = 0xff;
+u8 g_QueuedDeveloperPlayer = 0;
 u16 g_LastShellButtons[2] = {0, 0};
 bool g_ShellCommitDelivered = false;
 bool g_ShellCommitAcked = false;
@@ -261,6 +270,14 @@ bool g_PeerBackgrounded = false;
 // Set only when the peer became silent without an explicit background packet.
 // The first valid packet after a stall clears this flag and resumes lockstep.
 bool g_PeerSilenceDetected = false;
+// A hash mismatch means the simulations no longer describe the same world.
+// Keep both peers stopped until a new synchronized game is started; silently
+// clearing the transport stall would otherwise let the two timelines diverge
+// forever while appearing connected.
+bool g_StateDiverged = false;
+u32 g_DivergedFrame = 0xffffffffu;
+u32 g_LocalDivergedHash = 0;
+u32 g_RemoteDivergedHash = 0;
 bool g_AwaitingResumeAck = false;
 u32 g_LastLifecycleSend = 0;
 i32 g_LocalShellSelectionRequest = -1;
@@ -673,8 +690,14 @@ void ResetSyncState()
     g_RemoteFrameMask = 0;
     g_LastSyncProgress = SDL_GetTicks();
     g_InputRetransmits = g_InputDuplicates = g_InputOutOfOrder = 0;
+    g_QueuedDeveloperCommand = 0xff;
+    g_QueuedDeveloperPlayer = 0;
     g_InputStalled = false;
     g_PeerSilenceDetected = false;
+    g_StateDiverged = false;
+    g_DivergedFrame = 0xffffffffu;
+    g_LocalDivergedHash = 0;
+    g_RemoteDivergedHash = 0;
     g_RemoteAutoBomb = false;
     g_LastAuthoritativeFrame = 0;
     g_RemoteP1State = {};
@@ -732,6 +755,8 @@ void ActivateMultiplayerSession(bool local)
     g_ShellRequest = 0;
     g_QueuedShellButtons = 0;
     g_QueuedInputButtons = 0;
+    g_QueuedDeveloperCommand = 0xff;
+    g_QueuedDeveloperPlayer = 0;
     g_LastShellButtons[0] = g_LastShellButtons[1] = 0;
     g_LocalMenuCursor = g_RemoteMenuCursor = g_MenuCursorTarget = -1;
     g_RemoteMenuButtons = 0;
@@ -750,6 +775,10 @@ void ActivateMultiplayerSession(bool local)
     g_LocalBackgrounded = false;
     g_PeerBackgrounded = false;
     g_PeerSilenceDetected = false;
+    g_StateDiverged = false;
+    g_DivergedFrame = 0xffffffffu;
+    g_LocalDivergedHash = 0;
+    g_RemoteDivergedHash = 0;
     g_AwaitingResumeAck = false;
     g_LastLifecycleSend = 0;
     g_LocalShellSelectionRequest = g_RemoteShellSelectionRequest = -1;
@@ -829,6 +858,8 @@ void StoreRemoteInput(const Packet &packet)
     slot.shellSelectionValid = packet.shellSelectionValid != 0;
     slot.menuCursor = packet.menuCursorValid ? packet.menuCursor : -1;
     if (packet.menuCursorValid) g_RemoteMenuCursor = packet.menuCursor;
+    slot.developerCommand = packet.developerCommand;
+    slot.developerPlayer = packet.developerPlayer;
     slot.present = true;
     // Selection requests are kept in the input frame itself.  Do not mirror
     // them into a live global here: a retransmitted packet would otherwise
@@ -944,6 +975,8 @@ void FillPacket(Packet &packet, u8 kind, u16 buttons, u32 frame = 0,
     packet.shellHandoffFrame = g_ShellHandoffFrame;
     packet.shellSelectionRequest = (i8)std::clamp(g_LocalShellSelectionRequest, -1, 2);
     packet.shellSelectionValid = g_LocalShellSelectionRequest >= 0 ? 1 : 0;
+    packet.developerCommand = 0xff;
+    packet.developerPlayer = 0;
     packet.menuCursor = (i16)std::clamp(g_LocalMenuCursor, -1, 32767);
     packet.menuCursorValid = g_LocalMenuCursor >= 0 ? 1 : 0;
     // Bit 0 carries the local player's auto-bomb policy.  It is deliberately
@@ -997,9 +1030,18 @@ static void ApplyPlayerStatePacket(const PlayerStatePacket &state, u8 playerId)
     const bool bombChanged = (player.bombInfo.isInUse != 0) !=
                              (state.bombActive != 0);
     g_PlayerActive[playerId] = active;
-    SetPlayerLives(playerId, state.lives);
-    SetPlayerBombs(playerId, state.bombs);
-    SetPlayerPower(playerId, state.power);
+    // Ordinary resources are deterministic lockstep state. Applying a late
+    // host snapshot here used to overwrite a guest DEV action (and could
+    // race a bonus/power pickup), making the value flash and then revert.
+    // Only lifecycle transitions are corrected by this best-effort channel;
+    // normal lives/bombs/power changes arrive through the synchronized input
+    // frame and are therefore identical on both devices.
+    if (lifecycleChanged || !active)
+    {
+        SetPlayerLives(playerId, state.lives);
+        SetPlayerBombs(playerId, state.bombs);
+        SetPlayerPower(playerId, state.power);
+    }
 
     // Lockstep input owns ordinary movement. Replacing the guest position
     // with a 1/16-pixel snapshot every frame introduces a new rounding error
@@ -1028,6 +1070,40 @@ static void ApplyPlayerStatePacket(const PlayerStatePacket &state, u8 playerId)
         player.bombInfo.isInUse = 0;
         player.isBombing = 0;
     }
+}
+
+static void ApplyDeveloperCommand(u8 command, u8 playerId)
+{
+    if (command > 3 || playerId >= 2 || !g_GameManager.globals ||
+        !g_PlayerActive[playerId])
+        return;
+    switch (command)
+    {
+    case 0:
+        SetPlayerLives(playerId, std::min(8, GetPlayerLives(playerId) + 1));
+        g_Gui.lifeDisplayUpdateFrames = 2;
+        break;
+    case 1:
+        SetPlayerBombs(playerId, std::min(8, GetPlayerBombs(playerId) + 1));
+        g_Gui.bombDisplayUpdateFrames = 2;
+        break;
+    case 2:
+        SetPlayerPower(playerId, 128);
+        g_Gui.powerDisplayUpdateFrames = 2;
+        break;
+    case 3:
+        SetPlayerLives(playerId, 8);
+        SetPlayerBombs(playerId, 8);
+        SetPlayerPower(playerId, 128);
+        g_Gui.lifeDisplayUpdateFrames = 2;
+        g_Gui.bombDisplayUpdateFrames = 2;
+        g_Gui.powerDisplayUpdateFrames = 2;
+        break;
+    }
+    g_GameManager.RegenerateGameIntegrityCsum();
+    MobileDiagnostics::Log("online/dev", "applied frame=%u p=%u row=%u lives=%d bombs=%d power=%d",
+                           g_InputFrame, playerId, command, GetPlayerLives(playerId),
+                           GetPlayerBombs(playerId), GetPlayerPower(playerId));
 }
 
 static void StoreRemoteAuthoritativeState(const Packet &packet)
@@ -1216,6 +1292,8 @@ bool SendStoredInput(u32 frame, InputFrame &input)
     // them from the live queue here would lose the choice on retransmit.
     packet.shellSelectionRequest = input.shellSelectionRequest;
     packet.shellSelectionValid = input.shellSelectionValid ? 1 : 0;
+    packet.developerCommand = input.developerCommand;
+    packet.developerPlayer = input.developerPlayer;
     bool sent = false;
     if (g_Mode == Online::MODE_BLUETOOTH)
     {
@@ -1582,6 +1660,43 @@ bool SendLifecyclePacket(u8 kind)
                   (const sockaddr *)&g_Peer, sizeof(g_Peer)) == (int)sizeof(packet);
 }
 
+bool SendDesyncPacket()
+{
+    if (!g_MultiplayerSession || g_LocalSession || g_State != Online::STATE_CONNECTED)
+        return false;
+    Packet packet;
+    FillPacket(packet, kDesync, 0, g_DivergedFrame);
+    packet.stateHash = g_LocalDivergedHash;
+    packet.authoritativeFrame = g_DivergedFrame;
+    if (g_Mode == Online::MODE_BLUETOOTH)
+    {
+#if defined(TH07_IOS)
+        return TH07_IOS_BluetoothSend(&packet, (int)sizeof(packet), 1) != 0;
+#else
+        return false;
+#endif
+    }
+    if (g_Socket == kInvalidSocket || g_Peer.sin_addr.s_addr == 0) return false;
+    return sendto(g_Socket, (const char *)&packet, sizeof(packet), 0,
+                  (const sockaddr *)&g_Peer, sizeof(g_Peer)) == (int)sizeof(packet);
+}
+
+void EnterStateDivergence(u32 frame, u32 localHash, u32 remoteHash)
+{
+    if (g_StateDiverged) return;
+    g_StateDiverged = true;
+    g_DivergedFrame = frame;
+    g_LocalDivergedHash = localHash;
+    g_RemoteDivergedHash = remoteHash;
+    g_PeerBackgrounded = true;
+    g_AwaitingResumeAck = false;
+    SetStatus("Synchronization lost; restart online game");
+    MobileDiagnostics::Log("online/sync",
+                           "DIVERGED frame=%u local=%08x remote=%08x; both peers frozen",
+                           frame, localHash, remoteHash);
+    SendDesyncPacket();
+}
+
 void StoreRemoteMenuInput(const Packet &packet)
 {
     if (!g_MultiplayerSession || g_LocalSession || packet.session != g_LaunchNonce)
@@ -1937,6 +2052,11 @@ void UpdateLifecycleReliability(u32 now)
     if (!g_MultiplayerSession || g_LocalSession || g_State != Online::STATE_CONNECTED)
         return;
     if (now - g_LastLifecycleSend < kHandshakeIntervalMs) return;
+    if (g_StateDiverged)
+    {
+        if (SendDesyncPacket()) g_LastLifecycleSend = now;
+        return;
+    }
     if (g_LocalBackgrounded)
     {
         if (SendLifecyclePacket(kPeerBackground)) g_LastLifecycleSend = now;
@@ -1952,6 +2072,7 @@ void UpdateLifecycleReliability(u32 now)
 void MarkPeerActivity(u32 now)
 {
     g_LastPeer = now;
+    if (g_StateDiverged) return;
     if (!g_PeerSilenceDetected) return;
     g_PeerSilenceDetected = false;
     // An explicit PEER_BACKGROUND state is cleared only by PEER_FOREGROUND.
@@ -2027,6 +2148,7 @@ void UpdateBluetooth()
         }
         else if (packet.kind == kPeerForeground && g_State == Online::STATE_CONNECTED)
         {
+            if (g_StateDiverged) continue;
             const bool wasWaiting = g_PeerBackgrounded;
             g_PeerBackgrounded = false;
             g_AwaitingResumeAck = false;
@@ -2035,6 +2157,11 @@ void UpdateBluetooth()
             g_LastPeer = now;
             SetStatus("Peer returned; synchronizing...");
             if (wasWaiting) SendBluetooth(kPeerForeground);
+        }
+        else if (packet.kind == kDesync && g_State == Online::STATE_CONNECTED)
+        {
+            g_RemoteDivergedHash = packet.stateHash;
+            EnterStateDivergence(packet.frame, g_LocalDivergedHash, packet.stateHash);
         }
         else if (packet.kind == kHeartbeat)
         {
@@ -2217,6 +2344,7 @@ void Online::Update()
         }
         else if (packet.kind == kPeerForeground && g_State == STATE_CONNECTED && IsExpectedPeer(from))
         {
+            if (g_StateDiverged) continue;
             const bool wasWaiting = g_PeerBackgrounded;
             g_PeerBackgrounded = false;
             g_AwaitingResumeAck = false;
@@ -2225,6 +2353,11 @@ void Online::Update()
             g_LastPeer = now;
             SetStatus("Peer returned; synchronizing...");
             if (wasWaiting) SendPacket(from, kPeerForeground);
+        }
+        else if (packet.kind == kDesync && g_State == STATE_CONNECTED && IsExpectedPeer(from))
+        {
+            g_RemoteDivergedHash = packet.stateHash;
+            EnterStateDivergence(packet.frame, g_LocalDivergedHash, packet.stateHash);
         }
         else if (packet.kind == kHeartbeat && g_State == STATE_CONNECTED && IsExpectedPeer(from))
         {
@@ -2700,6 +2833,15 @@ void Online::QueueInputPulse(u16 buttons)
     g_QueuedInputButtons = buttons;
     if ((buttons & TH_BUTTON_SELECTMENU) == 0) g_LocalMenuCursor = -1;
 }
+void Online::QueueDeveloperCommand(u8 row)
+{
+    if (row > 3 || !IsNetworkSession()) return;
+    g_QueuedDeveloperCommand = row;
+    g_QueuedDeveloperPlayer = (u8)std::clamp(GetLocalPlayerSlot(), 0, 1);
+    MobileDiagnostics::Log("online/dev", "queued row=%u player=%u frame=%u",
+                           row, g_QueuedDeveloperPlayer,
+                           g_InputFrame + (u32)g_InputDelay);
+}
 void Online::ReportMenuState(i32 gameState)
 {
     if (IsNetworkSession()) g_LocalControlMenuState = std::clamp(gameState, 0, 255);
@@ -2721,6 +2863,13 @@ bool Online::SynchronizeInputs(u16 localButtons, f32 localDx, f32 localDy,
                                f32 *p1Dx, f32 *p1Dy, f32 *p2Dx, f32 *p2Dy)
 {
     if (!p1Buttons || !p2Buttons || !p1Dx || !p1Dy || !p2Dx || !p2Dy) return false;
+    if (g_StateDiverged)
+    {
+        // A hash mismatch is not recoverable by simply clearing the network
+        // stall. Keep rendering the last frame while both peers wait for an
+        // explicit restart, so progress can never silently split again.
+        return false;
+    }
     // Lifecycle has priority over both channels. Returning false makes the
     // Supervisor keep the last rendered frame while Online::Update continues
     // exchanging reconnect control packets.
@@ -2830,12 +2979,17 @@ bool Online::SynchronizeInputs(u16 localButtons, f32 localDx, f32 localDy,
         input.buttons = localButtons;
         input.touchDx = localDx;
         input.touchDy = localDy;
-        input.stateHash = targetFrame % 120 == 0 ? ComputeSynchronizationHash(targetFrame) : 0;
+        // Check often enough to catch a split during a boss/bonus burst, but
+        // keep the hash off the majority of frames so it cannot add to the
+        // same main-thread pressure that caused the original stalls.
+        input.stateHash = targetFrame % 30 == 0 ? ComputeSynchronizationHash(targetFrame) : 0;
         input.shellSelectionRequest = g_LocalShellSelectionRequest >= 0
                                           ? (i8)std::clamp(g_LocalShellSelectionRequest, -1, 2)
                                           : -1;
         input.shellSelectionValid = input.shellSelectionRequest >= 0;
         input.menuCursor = g_LocalMenuCursor >= 0 ? (i16)g_LocalMenuCursor : -1;
+        input.developerCommand = g_QueuedDeveloperCommand;
+        input.developerPlayer = g_QueuedDeveloperPlayer;
         input.present = true;
         g_LocalInputHistory.Store(targetFrame, input);
         g_LocalInputSent = true;
@@ -2844,6 +2998,7 @@ bool Online::SynchronizeInputs(u16 localButtons, f32 localDx, f32 localDy,
         // queued so a touch confirmation cannot disappear between frames.
         g_QueuedShellButtons &= (u16)~queuedShellButtons;
         g_QueuedInputButtons &= (u16)~queuedInputButtons;
+        g_QueuedDeveloperCommand = 0xff;
     }
 
     const u32 now = SDL_GetTicks();
@@ -2911,12 +3066,8 @@ bool Online::SynchronizeInputs(u16 localButtons, f32 localDx, f32 localDy,
     const InputFrame local = localSlot->value;
     if (local.stateHash && remote.stateHash && local.stateHash != remote.stateHash)
     {
-        // State hashes are diagnostics, not a transport failure condition.
-        // The input stream remains authoritative and continues to advance;
-        // transient cross-version state differences must not drop the peer.
-        MobileDiagnostics::Log("online/sync",
-            "state hash warning frame=%u local=%08x remote=%08x; continuing",
-            g_InputFrame, local.stateHash, remote.stateHash);
+        EnterStateDivergence(g_InputFrame, local.stateHash, remote.stateHash);
+        return false;
     }
     if (g_Host)
     {
@@ -2935,6 +3086,13 @@ bool Online::SynchronizeInputs(u16 localButtons, f32 localDx, f32 localDy,
     const InputFrame &guestInput = g_Host ? remote : local;
     const InputFrame &activeMenuInput = menuLane == 0 ? hostInput : guestInput;
     g_MenuCursorTarget = activeMenuInput.menuCursor;
+    // Apply the command at the same logical frame on both devices. The local
+    // and remote lanes each carry their own command, so a guest action is
+    // never a local-only resource write that a later host snapshot can undo.
+    if (local.developerCommand != 0xff)
+        ApplyDeveloperCommand(local.developerCommand, local.developerPlayer);
+    if (remote.developerCommand != 0xff)
+        ApplyDeveloperCommand(remote.developerCommand, remote.developerPlayer);
     ProcessSharedShellFrame(*p1Buttons, *p2Buttons,
                             g_Host ? local : remote,
                             g_Host ? remote : local);
@@ -2944,7 +3102,7 @@ bool Online::SynchronizeInputs(u16 localButtons, f32 localDx, f32 localDy,
     g_InputFrame++;
     g_LocalInputSent = false;
     g_LastSyncProgress = now;
-    if (g_InputFrame > 1 && (g_InputFrame - 1) % 120 == 0)
+    if (g_InputFrame > 1 && (g_InputFrame - 1) % 30 == 0)
     {
         MobileDiagnostics::Log("online/frame",
             "frame=%u ack=%u mask=%08x rtt=%u retransmit=%u duplicate=%u outOfOrder=%u hash=%08x",
