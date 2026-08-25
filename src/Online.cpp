@@ -53,11 +53,11 @@ constexpr socket_t kInvalidSocket = -1;
 namespace
 {
 constexpr u32 kMagic = 0x374f4e54; // TNO7
-// Build 36 makes shared-shell opening and resume transitions frame-scoped.
+// Build 37 makes shared-shell opening and resume transitions frame-scoped.
 // This is deliberately a new wire identity: older clients may resume a pause
 // on different stage frames and cannot safely participate in this protocol.
-constexpr u16 kVersion = 17;
-constexpr u32 kBuildIdentity = 0x0706000eu;
+constexpr u16 kVersion = 18;
+constexpr u32 kBuildIdentity = 0x0706000fu;
 // XOR of the first SHA-256 words for th07.dat, thbgm.dat and msgothic.ttc.
 constexpr u32 kResourceIdentity = 0xf09a7ea3u;
 constexpr u16 kPort = 37707;
@@ -154,6 +154,7 @@ struct Packet
     u8 developerCommand;
     u8 developerPlayer;
     u32 shellRevision;
+    u32 shellOpenedFrame;
     u32 shellHandoffFrame;
     i8 shellSelectionRequest;
     u8 shellSelectionValid;
@@ -407,7 +408,12 @@ static void OpenSharedShellOnHost(Online::SharedShellKind kind)
     g_ShellCloseComplete = false;
     g_ShellHandoffReady = false;
     g_ShellHandoffFrame = 0;
-    g_ShellOpenedFrame = g_InputFrame;
+    // Freeze both peers on the first input frame that neither side could have
+    // sampled before this request was observed. The shell state packet is
+    // sent immediately, giving the guest time to receive it before this
+    // logical opening frame.
+    g_ShellOpenedFrame = OnlineFirstUnsampledInputFrame(
+        g_InputFrame, (u32)g_InputDelay);
     g_ShellInputStartFrame = OnlineFirstUnsampledInputFrame(
         g_InputFrame, (u32)g_InputDelay);
     g_ShellInputArmed[0] = g_ShellInputArmed[1] = false;
@@ -422,10 +428,10 @@ static void OpenSharedShellOnHost(Online::SharedShellKind kind)
     // not let that old bit suppress the first shell confirmation edge.
     g_LastShellButtons[0] = g_LastShellButtons[1] = 0;
     ++g_ShellRevision;
-    PresentSharedShell(kind);
     MobileDiagnostics::Log("online/shell",
-                           "open kind=%d revision=%u inputStart=%u",
-                           (int)kind, g_ShellRevision, g_ShellInputStartFrame);
+                           "open kind=%d revision=%u openFrame=%u inputStart=%u",
+                           (int)kind, g_ShellRevision, g_ShellOpenedFrame,
+                           g_ShellInputStartFrame);
 }
 
 static bool ShellButtonEdge(u16 buttons, u16 button, u8 playerId)
@@ -640,10 +646,13 @@ static void ApplyRemoteSharedShellState(const Packet &packet)
     if (previousKind == Online::SHARED_SHELL_NONE &&
         incomingKind != Online::SHARED_SHELL_NONE)
     {
-        // The packet that announces a shell may arrive in the same update
-        // tick as the local input frame. Do not let that frame's old MENU edge
-        // be interpreted as a shell action on the guest.
-        g_ShellOpenedFrame = g_InputFrame;
+        // The host publishes the logical opening frame, rather than asking
+        // the guest to pause as soon as an asynchronous packet arrives. This
+        // prevents network latency from advancing only the guest timeline.
+        g_ShellOpenedFrame = packet.shellOpenedFrame;
+        if (g_ShellOpenedFrame == 0 || g_ShellOpenedFrame == 0xffffffffu)
+            g_ShellOpenedFrame = OnlineFirstUnsampledInputFrame(
+                packet.frame, (u32)g_InputDelay);
     }
     g_ShellConfirmAction = incomingConfirmAction;
     const u8 maxSelection = g_ShellConfirmAction != Online::SHARED_CONFIRM_NONE ? 1 :
@@ -699,10 +708,13 @@ static void ApplyRemoteSharedShellState(const Packet &packet)
     if (g_ShellRequest != 0 && g_ShellKind == (Online::SharedShellKind)g_ShellRequest)
         g_ShellRequest = 0;
 
-    const bool shellChanged = previousKind != g_ShellKind || previousCommit != g_ShellCommit;
-    if (g_ShellKind != Online::SHARED_SHELL_NONE &&
-        (shellChanged || (!hadPause && !hadRetry)))
-        PresentSharedShell(g_ShellKind);
+    // Presentation is performed from SynchronizeInputs on the shared logical
+    // opening frame. Do not present immediately here: this function runs when
+    // the UDP/Bluetooth packet arrives, which is not deterministic.
+    (void)previousKind;
+    (void)previousCommit;
+    (void)hadPause;
+    (void)hadRetry;
     if (g_ShellKind == Online::SHARED_SHELL_NONE &&
         g_ShellCommit == Online::SHARED_COMMIT_NONE)
     {
@@ -1042,6 +1054,7 @@ void FillPacket(Packet &packet, u8 kind, u16 buttons, u32 frame = 0,
     packet.shellReserved = (u8)((u8)g_ShellConfirmAction << kShellConfirmShift);
     if (!g_Host && g_ShellCloseComplete) packet.shellReserved |= kShellAckDelivered;
     packet.shellRevision = g_ShellRevision;
+    packet.shellOpenedFrame = g_ShellOpenedFrame;
     packet.shellHandoffFrame = g_ShellHandoffFrame;
     packet.shellSelectionRequest = (i8)std::clamp(g_LocalShellSelectionRequest, -1, 2);
     packet.shellSelectionValid = g_LocalShellSelectionRequest >= 0 ? 1 : 0;
@@ -3031,6 +3044,16 @@ bool Online::SynchronizeInputs(u16 localButtons, f32 localDx, f32 localDy,
                                      p1Buttons, p2Buttons, p1Dx, p1Dy, p2Dx, p2Dy);
     }
     UpdateShellCloseComplete();
+    if (g_ShellKind != Online::SHARED_SHELL_NONE &&
+        g_ShellCommit == SHARED_COMMIT_NONE &&
+        g_ShellOpenedFrame != 0xffffffffu &&
+        g_InputFrame >= g_ShellOpenedFrame &&
+        !g_GameManager.isInPauseMenu && !g_GameManager.isInRetryMenu)
+    {
+        PresentSharedShell(g_ShellKind);
+        MobileDiagnostics::Log("online/shell", "present kind=%d frame=%u",
+                               (int)g_ShellKind, g_InputFrame);
+    }
     if (g_ShellCommit != SHARED_COMMIT_NONE && g_ShellHandoffFrame != 0 &&
         g_InputFrame >= g_ShellHandoffFrame)
     {

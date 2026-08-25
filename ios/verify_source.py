@@ -63,7 +63,7 @@ with open(cmake_path, "r", encoding="utf-8") as stream:
     cmake_source = stream.read()
 
 for marker in (
-    'set(TH07_IOS_BUILD "36"',
+    'set(TH07_IOS_BUILD "37"',
     'XCODE_ATTRIBUTE_LLVM_LTO "YES_THIN"',
     'set(SDL_GPU OFF CACHE BOOL "" FORCE)',
     'set(SDL_RENDER ON CACHE BOOL "" FORCE)',
@@ -336,6 +336,7 @@ online_markers = {
         "OnlineBuildGameplayPolicy",
         "GetInputRetransmitIntervalMs",
         "g_ShellInputStartFrame",
+        "shellOpenedFrame",
         "OnlineFirstUnsampledInputFrame",
         "OnlineShellInputCanArm",
         "g_AsciiManager.pauseMenu.curState = 0",
@@ -367,7 +368,7 @@ online_markers = {
     os.path.join("ios", "BluetoothPeerTransport.mm"): (
         "MultipeerConnectivity",
         'kServiceType = @"th07-peer"',
-        '@"protocol": @"17"',
+        '@"protocol": @"18"',
     ),
     os.path.join("ios", "OnlineLauncher.mm"): (
         "UITableViewStyleInsetGrouped",
@@ -401,7 +402,7 @@ for relative, markers in online_markers.items():
         source = stream.read()
     for marker in markers:
         if marker not in source:
-            print("error: build 36 Online marker missing:", relative, marker)
+            print("error: build 37 Online marker missing:", relative, marker)
             failed = True
 if "demoFramesCount++" in open(os.path.join(root, "src", "MainMenu.cpp"), encoding="utf-8").read():
     print("error: title idle demo trigger is still enabled")
@@ -426,7 +427,7 @@ for relative in (os.path.join("src", "EffectManager.cpp"),
         failed = True
 if failed:
     sys.exit(2)
-print("ok: Build 36 synchronized pause handoff and gameplay lockstep markers")
+print("ok: Build 37 synchronized shell opening, resume handoff and gameplay lockstep markers")
 
 with open(os.path.join(root, "src", "ResultScreen.cpp"), "r", encoding="utf-8") as stream:
     result_source = stream.read()

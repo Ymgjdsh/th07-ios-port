@@ -332,6 +332,6 @@ int main()
     for (u32 frame = 0; frame <= 8; ++frame)
         assert(delayedSender.Find(frame)->acknowledged);
 
-    std::puts("online protocol 17 pause handoff, frame policy and ACK recovery tests passed");
+    std::puts("online protocol 18 shell opening, pause handoff, frame policy and ACK recovery tests passed");
     return 0;
 }
