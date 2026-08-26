@@ -167,7 +167,11 @@ u32 Supervisor::OnUpdate(Supervisor *arg)
         g_CurFrameTouchDy[0] = p1TouchDy;
         g_CurFrameTouchDx[1] = p2TouchDx;
         g_CurFrameTouchDy[1] = p2TouchDy;
-        Touch::SetPlayerDelta(0.0f, 0.0f);
+        // Network gameplay consumes the exact touch sample when it is assigned
+        // to a future lockstep frame. Clearing here would also erase newer
+        // motion accumulated while that frame was waiting for the peer.
+        if (!Online::IsNetworkSession() || !Online::IsInputSynchronizationActive())
+            Touch::SetPlayerDelta(0.0f, 0.0f);
         g_LastFrameRawInput = g_CurFrameRawInput;
         // The public menu is one state machine, so give it one authoritative
         // lane: the host configures P1, then the guest configures P2. Both

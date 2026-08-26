@@ -53,7 +53,8 @@ constexpr socket_t kInvalidSocket = -1;
 namespace
 {
 constexpr u32 kMagic = 0x374f4e54; // TNO7
-// Build 37 makes shared-shell opening and resume transitions frame-scoped.
+// Build 38 retains protocol 18 while adding presentation-only local touch
+// prediction. The wire format and deterministic simulation are unchanged.
 // This is deliberately a new wire identity: older clients may resume a pause
 // on different stage frames and cannot safely participate in this protocol.
 constexpr u16 kVersion = 18;
@@ -747,6 +748,7 @@ static void ApplyRemoteSharedShellState(const Packet &packet)
 
 void ResetSyncState()
 {
+    Touch::ResetLocalPrediction();
     g_InputFrame = 0;
     g_LocalInputSent = false;
     for (InputFrame &input : g_RemoteInputs) input = {};
@@ -3149,6 +3151,11 @@ bool Online::SynchronizeInputs(u16 localButtons, f32 localDx, f32 localDy,
         // collision and every dependent resource update diverge immediately.
         input.touchDx = OnlineCanonicalTouchDelta(localDx);
         input.touchDy = OnlineCanonicalTouchDelta(localDy);
+        Touch::QueueLocalPrediction(targetFrame, input.touchDx, input.touchDy);
+        // Consume only the sample assigned to this concrete input frame. Any
+        // finger movement arriving while this frame waits for the peer remains
+        // accumulated for the next frame instead of being cleared on resume.
+        Touch::ConsumePlayerDelta(localDx, localDy);
         // Check often enough to catch a split during a boss/bonus burst, but
         // keep the hash off the majority of frames so it cannot add to the
         // same main-thread pressure that caused the original stalls.
@@ -3309,6 +3316,7 @@ bool Online::SynchronizeInputs(u16 localButtons, f32 localDx, f32 localDy,
                             g_Host ? remote : local);
     g_LastShellButtons[0] = *p1Buttons;
     g_LastShellButtons[1] = *p2Buttons;
+    Touch::ConsumeLocalPrediction(g_InputFrame);
     remote = {};
     g_InputFrame++;
     g_LocalInputSent = false;

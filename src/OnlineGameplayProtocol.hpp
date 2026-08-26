@@ -59,6 +59,85 @@ inline f32 OnlineCanonicalTouchDelta(f32 value)
     return OnlineDecodeTouchDelta(OnlineEncodeTouchDelta(value));
 }
 
+// Local touch prediction is presentation-only. It keeps the exact canonical
+// deltas already assigned to future lockstep frames so the local renderer can
+// show where those same inputs will move the player once input delay expires.
+// Nothing in this buffer is serialized or included in synchronization hashes.
+class OnlineLocalTouchPrediction
+{
+public:
+    static constexpr u32 kCapacity = 32;
+
+    void Reset()
+    {
+        head = 0;
+        count = 0;
+    }
+
+    bool Queue(u32 frame, f32 dx, f32 dy)
+    {
+        if (count != 0)
+        {
+            Entry &last = entries[(head + count - 1) % kCapacity];
+            if (last.frame == frame)
+            {
+                // SynchronizeInputs may be polled repeatedly while a peer
+                // frame is missing. A frame must never be predicted twice.
+                return true;
+            }
+        }
+        if (count == kCapacity) return false;
+        entries[(head + count) % kCapacity] = {frame, dx, dy};
+        ++count;
+        return true;
+    }
+
+    bool Consume(u32 frame)
+    {
+        // Discard an impossible stale entry defensively. Normal lockstep
+        // consumption reaches every queued frame in exact order.
+        while (count != 0 && (i32)(entries[head].frame - frame) < 0)
+        {
+            head = (head + 1) % kCapacity;
+            --count;
+        }
+        if (count == 0 || entries[head].frame != frame) return false;
+        head = (head + 1) % kCapacity;
+        --count;
+        return true;
+    }
+
+    void Predict(f32 baseX, f32 baseY, f32 minX, f32 maxX,
+                 f32 minY, f32 maxY, f32 *predictedX,
+                 f32 *predictedY) const
+    {
+        f32 x = baseX;
+        f32 y = baseY;
+        for (u32 i = 0; i < count; ++i)
+        {
+            const Entry &entry = entries[(head + i) % kCapacity];
+            x = std::clamp(x + entry.dx, minX, maxX);
+            y = std::clamp(y + entry.dy, minY, maxY);
+        }
+        if (predictedX) *predictedX = x;
+        if (predictedY) *predictedY = y;
+    }
+
+    u32 Count() const { return count; }
+
+private:
+    struct Entry
+    {
+        u32 frame = 0;
+        f32 dx = 0.0f;
+        f32 dy = 0.0f;
+    };
+
+    Entry entries[kCapacity] = {};
+    u32 head = 0;
+    u32 count = 0;
+};
+
 // Frames before inputDelay are deterministic neutral input and never cross
 // the network. Once the first real packet arrives, they form the cumulative
 // prefix of the receiver's ACK window.

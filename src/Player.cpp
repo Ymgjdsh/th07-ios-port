@@ -2711,12 +2711,39 @@ u32 Player::OnDrawHighPrio(Player *arg)
         ZunVec3 drawOptionsPos[2] = {
             arg->prevOptionsPosition[0].Lerp(arg->optionsPosition[0], g_RenderAlpha),
             arg->prevOptionsPosition[1].Lerp(arg->optionsPosition[1], g_RenderAlpha)};
+        const i32 localSlot = Online::GetLocalPlayerSlot();
+        if (Online::IsNetworkSession() && arg->initParam == localSlot)
+        {
+            const f32 minX = g_GameManager.playerMovementAreaTopLeftPos.x;
+            const f32 maxX = minX + g_GameManager.playerMovementAreaSize.x;
+            const f32 minY = g_GameManager.playerMovementAreaTopLeftPos.y;
+            const f32 maxY = minY + g_GameManager.playerMovementAreaSize.y;
+            f32 predictedX = arg->positionCenter.x;
+            f32 predictedY = arg->positionCenter.y;
+            if (Touch::GetLocalPredictedPlayerPosition(
+                    arg->positionCenter.x, arg->positionCenter.y,
+                    minX, maxX, minY, maxY, &predictedX, &predictedY))
+            {
+                const f32 predictionDx = predictedX - arg->positionCenter.x;
+                const f32 predictionDy = predictedY - arg->positionCenter.y;
+                // Use the current simulation position as the presentation
+                // base. When a delayed input becomes real, its queued offset
+                // disappears in the same update, so the sprite never jumps.
+                drawPlayerPos.x = predictedX;
+                drawPlayerPos.y = predictedY;
+                drawOptionsPos[0] = arg->optionsPosition[0];
+                drawOptionsPos[1] = arg->optionsPosition[1];
+                drawOptionsPos[0].x += predictionDx;
+                drawOptionsPos[0].y += predictionDy;
+                drawOptionsPos[1].x += predictionDx;
+                drawOptionsPos[1].y += predictionDy;
+            }
+        }
         arg->playerSprite.pos.x = g_GameManager.arcadeRegionTopLeftPos.x + drawPlayerPos.x;
         arg->playerSprite.pos.y = g_GameManager.arcadeRegionTopLeftPos.y + drawPlayerPos.y;
         arg->playerSprite.pos.z = 0.0f;
         if (arg->playerState != PLAYER_STATE_DEAD)
         {
-            const i32 localSlot = Online::GetLocalPlayerSlot();
             const bool remotePlayer = Online::IsNetworkSession() &&
                 arg->initParam != localSlot && g_PlayerActive[localSlot];
             if (remotePlayer)
@@ -2739,7 +2766,6 @@ u32 Player::OnDrawHighPrio(Player *arg)
             (arg->playerState == PLAYER_STATE_ALIVE || arg->playerState == PLAYER_STATE_BORDER ||
              arg->playerState == PLAYER_STATE_INVULNERABLE))
         {
-            const i32 localSlot = Online::GetLocalPlayerSlot();
             const bool remotePlayer = Online::IsNetworkSession() &&
                 arg->initParam != localSlot && g_PlayerActive[localSlot];
             if (remotePlayer)

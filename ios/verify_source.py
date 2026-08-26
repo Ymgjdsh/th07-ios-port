@@ -63,7 +63,7 @@ with open(cmake_path, "r", encoding="utf-8") as stream:
     cmake_source = stream.read()
 
 for marker in (
-    'set(TH07_IOS_BUILD "37"',
+    'set(TH07_IOS_BUILD "38"',
     'XCODE_ATTRIBUTE_LLVM_LTO "YES_THIN"',
     'set(SDL_GPU OFF CACHE BOOL "" FORCE)',
     'set(SDL_RENDER ON CACHE BOOL "" FORCE)',
@@ -305,6 +305,8 @@ online_markers = {
         "ackMask",
         "OnlineFrameHistory",
         "OnlineCanonicalTouchDelta",
+        "QueueLocalPrediction",
+        "ConsumeLocalPrediction",
         "OnlineSeedDelayedAckPrefix",
         "kStateMismatchConfirmations",
         "EnterStateDivergence",
@@ -427,7 +429,7 @@ for relative in (os.path.join("src", "EffectManager.cpp"),
         failed = True
 if failed:
     sys.exit(2)
-print("ok: Build 37 synchronized shell opening, resume handoff and gameplay lockstep markers")
+print("ok: Build 38 local touch prediction and gameplay lockstep markers")
 
 with open(os.path.join(root, "src", "ResultScreen.cpp"), "r", encoding="utf-8") as stream:
     result_source = stream.read()

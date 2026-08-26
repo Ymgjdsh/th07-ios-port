@@ -124,6 +124,27 @@ int main()
     assert(OnlineEncodeTouchDelta(-100000.0f) == -32768);
     assert(OnlineEncodeTouchDelta(std::numeric_limits<f32>::quiet_NaN()) == 0);
 
+    // Local prediction follows the same canonical, frame-ordered path that
+    // lockstep will later simulate. Boundary clamps are applied after every
+    // queued frame, so reversing away from an edge matches the peer trajectory.
+    OnlineLocalTouchPrediction prediction;
+    assert(prediction.Queue(8, 10.0f, 0.0f));
+    assert(prediction.Queue(9, -3.0f, 2.0f));
+    assert(prediction.Queue(9, -3.0f, 2.0f)); // repeated poll is idempotent
+    assert(prediction.Count() == 2);
+    f32 predictedX = 0.0f, predictedY = 0.0f;
+    prediction.Predict(380.0f, 200.0f, 0.0f, 384.0f, 0.0f, 448.0f,
+                       &predictedX, &predictedY);
+    assert(predictedX == 381.0f && predictedY == 202.0f);
+    assert(!prediction.Consume(7));
+    assert(prediction.Consume(8));
+    prediction.Predict(384.0f, 200.0f, 0.0f, 384.0f, 0.0f, 448.0f,
+                       &predictedX, &predictedY);
+    assert(predictedX == 381.0f && predictedY == 202.0f);
+    assert(prediction.Consume(9));
+    assert(prediction.Count() == 0);
+    prediction.Reset();
+
     // Mobile preferences that alter collision/death behavior belong to the
     // logical input frame, not to whichever device setting is live when a
     // delayed packet is finally consumed.
@@ -332,6 +353,6 @@ int main()
     for (u32 frame = 0; frame <= 8; ++frame)
         assert(delayedSender.Find(frame)->acknowledged);
 
-    std::puts("online protocol 18 shell opening, pause handoff, frame policy and ACK recovery tests passed");
+    std::puts("online protocol 18 local touch prediction, shell handoff and ACK recovery tests passed");
     return 0;
 }

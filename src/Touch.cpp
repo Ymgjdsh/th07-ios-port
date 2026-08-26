@@ -1,6 +1,7 @@
 #include "Touch.hpp"
 
 #include <SDL3/SDL_events.h>
+#include <algorithm>
 #include <cmath>
 
 #include "Controller.hpp"
@@ -9,6 +10,7 @@
 #include "Gui.hpp"
 #include "MobileDiagnostics.hpp"
 #include "MobileUi.hpp"
+#include "OnlineGameplayProtocol.hpp"
 #include "Supervisor.hpp"
 
 struct FingerSlot
@@ -42,6 +44,10 @@ MenuGestureTracker g_MenuGesture;
 
 f32 g_AccumDx = 0.0f;
 f32 g_AccumDy = 0.0f;
+OnlineLocalTouchPrediction g_LocalTouchPrediction;
+bool g_LocalTouchPredictionActive = false;
+f32 g_UnqueuedPredictionDx = 0.0f;
+f32 g_UnqueuedPredictionDy = 0.0f;
 
 bool g_UsedThisRun = false;
 
@@ -73,6 +79,15 @@ constexpr u64 DIALOGUE_SKIP_HOLD_MS = 500;
 void ReleaseFinger(FingerSlot *slot);
 void ClearGameplayFingers();
 
+static void AccumulatePlayerDelta(f32 dx, f32 dy)
+{
+    g_AccumDx += dx;
+    g_AccumDy += dy;
+    g_UnqueuedPredictionDx += dx;
+    g_UnqueuedPredictionDy += dy;
+    if (dx != 0.0f || dy != 0.0f) g_LocalTouchPredictionActive = true;
+}
+
 static u64 BuildTouchSceneKey()
 {
     u64 key = 0;
@@ -98,6 +113,7 @@ static void ClearTouchStateForSceneChange()
     ReleaseFinger(&g_DialogueHoldFinger);
     g_AccumDx = 0.0f;
     g_AccumDy = 0.0f;
+    Touch::ResetLocalPrediction();
     ClearGameplayFingers();
     g_PausePending = false;
     g_BombPending = false;
@@ -300,6 +316,7 @@ void Touch::ResetRunUsage()
     g_ReplayDeltaPending = false;
     g_MenuGesture = {};
     g_TouchSceneKeyInitialized = false;
+    ResetLocalPrediction();
 }
 
 bool Touch::WasUsedThisRun()
@@ -320,6 +337,7 @@ void Touch::CancelTouches()
 
     g_AccumDx = 0.0f;
     g_AccumDy = 0.0f;
+    ResetLocalPrediction();
 
     ClearGameplayFingers();
     g_PausePending = false;
@@ -480,8 +498,9 @@ void Touch::FingerUp(const SDL_TouchFingerEvent &f)
         if (IsFinger(g_MoveFinger, f.fingerID))
         {
             ReleaseFinger(&g_MoveFinger);
-            g_AccumDx = 0.0f;
-            g_AccumDy = 0.0f;
+            // Preserve the final motion until it is sampled. A finger can be
+            // released while lockstep is waiting for the peer; clearing here
+            // used to lose that tail completely when the connection resumed.
         }
         if (IsFinger(g_FocusFinger, f.fingerID))
         {
@@ -538,8 +557,8 @@ void Touch::FingerMotion(const SDL_TouchFingerEvent &f)
                 const f32 scale = (f32)layout.gameWidth / 384.0f;
                 if (scale > 0.0f)
                 {
-                    g_AccumDx += dxPx / scale * sensitivity;
-                    g_AccumDy += dyPx / scale * sensitivity;
+                    AccumulatePlayerDelta(dxPx / scale * sensitivity,
+                                          dyPx / scale * sensitivity);
                 }
             }
             else
@@ -548,8 +567,8 @@ void Touch::FingerMotion(const SDL_TouchFingerEvent &f)
                 GetContainedRenderRect(&rx, &ry, &rw, &rh, &scale);
                 if (scale > 0.0f)
                 {
-                    g_AccumDx += dxPx / scale * sensitivity;
-                    g_AccumDy += dyPx / scale * sensitivity;
+                    AccumulatePlayerDelta(dxPx / scale * sensitivity,
+                                          dyPx / scale * sensitivity);
                 }
             }
             g_MoveFinger.lastPxX = px;
@@ -696,7 +715,7 @@ bool Touch::GetPlayerDelta(f32 *dx, f32 *dy)
         return true;
     }
 
-    if (!g_MoveFinger.active)
+    if (!g_MoveFinger.active && g_AccumDx == 0.0f && g_AccumDy == 0.0f)
     {
         *dx = 0.0f;
         *dy = 0.0f;
@@ -713,12 +732,56 @@ void Touch::SetPlayerDelta(f32 dx, f32 dy)
 {
     g_AccumDx = dx;
     g_AccumDy = dy;
+    g_UnqueuedPredictionDx = dx;
+    g_UnqueuedPredictionDy = dy;
 }
 
 void Touch::ConsumePlayerDelta(f32 dx, f32 dy)
 {
     g_AccumDx -= dx;
     g_AccumDy -= dy;
+    g_UnqueuedPredictionDx -= dx;
+    g_UnqueuedPredictionDy -= dy;
+}
+
+void Touch::QueueLocalPrediction(u32 frame, f32 dx, f32 dy)
+{
+    if (dx == 0.0f && dy == 0.0f) return;
+    if (!g_LocalTouchPrediction.Queue(frame, dx, dy))
+    {
+        // The queue is substantially larger than the supported input delay.
+        // Resetting presentation is safer than showing a stale future path.
+        ResetLocalPrediction();
+        MobileDiagnostics::Log("online/prediction", "queue overflow frame=%u", frame);
+        return;
+    }
+    g_LocalTouchPredictionActive = true;
+}
+
+void Touch::ConsumeLocalPrediction(u32 frame)
+{
+    g_LocalTouchPrediction.Consume(frame);
+}
+
+bool Touch::GetLocalPredictedPlayerPosition(f32 baseX, f32 baseY,
+                                            f32 minX, f32 maxX,
+                                            f32 minY, f32 maxY,
+                                            f32 *predictedX, f32 *predictedY)
+{
+    if (!g_LocalTouchPredictionActive || !predictedX || !predictedY) return false;
+    g_LocalTouchPrediction.Predict(baseX, baseY, minX, maxX, minY, maxY,
+                                   predictedX, predictedY);
+    *predictedX = std::clamp(*predictedX + g_UnqueuedPredictionDx, minX, maxX);
+    *predictedY = std::clamp(*predictedY + g_UnqueuedPredictionDy, minY, maxY);
+    return true;
+}
+
+void Touch::ResetLocalPrediction()
+{
+    g_LocalTouchPrediction.Reset();
+    g_LocalTouchPredictionActive = false;
+    g_UnqueuedPredictionDx = 0.0f;
+    g_UnqueuedPredictionDy = 0.0f;
 }
 
 void Touch::RecordAppliedPlayerDelta(f32 dx, f32 dy)
