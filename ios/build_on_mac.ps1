@@ -6,7 +6,7 @@ param(
     [string]$RemoteFolder = "th07-build",
     [string]$XcodeApp = "/Applications/Xcode.app",
     [string]$IosVersion = "0.4.0",
-    [int]$IosBuild = 38,
+    [int]$IosBuild = 39,
     [string]$GitHubRepo = "https://github.com/Ymgjdsh/th07-ios-port.git",
     [switch]$SkipGitHubBackup
 )
@@ -121,9 +121,13 @@ foreach ($asset in $assets) {
 $remotePrepare = @"
 set -eu
 BASE=$remoteBase
+BUILD_CACHE="`$BASE/build-ios-cache"
+rm -rf "`$BUILD_CACHE"
+if [ -d "`$BASE/th07-ios14-port/build-ios" ]; then mv "`$BASE/th07-ios14-port/build-ios" "`$BUILD_CACHE"; fi
 rm -rf "`$BASE/th07-ios14-port"
 python3 -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' "`$BASE/incoming/source.zip" "`$BASE"
 rm -f "`$BASE/incoming/source.zip"
+if [ -d "`$BUILD_CACHE" ]; then mv "`$BUILD_CACHE" "`$BASE/th07-ios14-port/build-ios"; fi
 mkdir -p "`$BASE/th07-ios14-port/assets"
 ln -sfn "`$BASE/assets/th07.dat" "`$BASE/th07-ios14-port/assets/th07.dat"
 ln -sfn "`$BASE/assets/thbgm.dat" "`$BASE/th07-ios14-port/assets/thbgm.dat"

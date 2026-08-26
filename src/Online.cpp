@@ -53,12 +53,11 @@ constexpr socket_t kInvalidSocket = -1;
 namespace
 {
 constexpr u32 kMagic = 0x374f4e54; // TNO7
-// Build 38 retains protocol 18 while adding presentation-only local touch
-// prediction. The wire format and deterministic simulation are unchanged.
-// This is deliberately a new wire identity: older clients may resume a pause
-// on different stage frames and cannot safely participate in this protocol.
-constexpr u16 kVersion = 18;
-constexpr u32 kBuildIdentity = 0x0706000fu;
+// Build 39 requires the same local-touch-prediction build on both devices.
+// Build 38 accidentally retained Build 37's identity, allowing an old guest
+// with delayed local presentation to connect silently to a new host.
+constexpr u16 kVersion = 19;
+constexpr u32 kBuildIdentity = 0x07060010u;
 // XOR of the first SHA-256 words for th07.dat, thbgm.dat and msgothic.ttc.
 constexpr u32 kResourceIdentity = 0xf09a7ea3u;
 constexpr u16 kPort = 37707;
@@ -306,6 +305,7 @@ i32 g_LocalShellSelectionRequest = -1;
 i32 g_RemoteShellSelectionRequest = -1;
 u32 g_LastRemoteShellSelectionFrame = 0xffffffffu;
 u8 g_PlayerGameplayPolicy[2] = {0, 0};
+bool g_LocalPredictionLogged = false;
 
 static u32 GetInputRetransmitIntervalMs()
 {
@@ -749,6 +749,7 @@ static void ApplyRemoteSharedShellState(const Packet &packet)
 void ResetSyncState()
 {
     Touch::ResetLocalPrediction();
+    g_LocalPredictionLogged = false;
     g_InputFrame = 0;
     g_LocalInputSent = false;
     for (InputFrame &input : g_RemoteInputs) input = {};
@@ -2918,7 +2919,10 @@ const char *Online::GetPeerAddress() { return g_PeerAddress; }
 u32 Online::GetRoundTripMs() { return g_LastRtt; }
 bool Online::IsMultiplayerSession() { return g_MultiplayerSession; }
 bool Online::IsNetworkSession() { return g_MultiplayerSession && !g_LocalSession; }
-int Online::GetLocalPlayerSlot() { return g_Host || g_LocalSession ? 0 : 1; }
+int Online::GetLocalPlayerSlot()
+{
+    return OnlineLocalPlayerSlot(g_Host, g_LocalSession);
+}
 bool Online::IsAutoBombEnabledForPlayer(u8 playerId)
 {
     return playerId < 2 && OnlineGameplayPolicyHas(
@@ -3152,6 +3156,16 @@ bool Online::SynchronizeInputs(u16 localButtons, f32 localDx, f32 localDy,
         input.touchDx = OnlineCanonicalTouchDelta(localDx);
         input.touchDy = OnlineCanonicalTouchDelta(localDy);
         Touch::QueueLocalPrediction(targetFrame, input.touchDx, input.touchDy);
+        if (!g_LocalPredictionLogged &&
+            (input.touchDx != 0.0f || input.touchDy != 0.0f))
+        {
+            g_LocalPredictionLogged = true;
+            MobileDiagnostics::Log("online/prediction",
+                                   "enabled role=%s slot=%u frame=%u delay=%d",
+                                   g_Host ? "host" : "guest",
+                                   OnlineLocalPlayerSlot(g_Host, g_LocalSession),
+                                   targetFrame, g_InputDelay);
+        }
         // Consume only the sample assigned to this concrete input frame. Any
         // finger movement arriving while this frame waits for the peer remains
         // accumulated for the next frame instead of being cleared on resume.

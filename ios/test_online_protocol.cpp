@@ -123,6 +123,9 @@ int main()
     assert(OnlineEncodeTouchDelta(100000.0f) == 32767);
     assert(OnlineEncodeTouchDelta(-100000.0f) == -32768);
     assert(OnlineEncodeTouchDelta(std::numeric_limits<f32>::quiet_NaN()) == 0);
+    assert(OnlineLocalPlayerSlot(true, false) == 0);   // network host is P1
+    assert(OnlineLocalPlayerSlot(false, false) == 1);  // network guest is P2
+    assert(OnlineLocalPlayerSlot(false, true) == 0);   // local co-op owns P1
 
     // Local prediction follows the same canonical, frame-ordered path that
     // lockstep will later simulate. Boundary clamps are applied after every
@@ -353,6 +356,6 @@ int main()
     for (u32 frame = 0; frame <= 8; ++frame)
         assert(delayedSender.Find(frame)->acknowledged);
 
-    std::puts("online protocol 18 local touch prediction, shell handoff and ACK recovery tests passed");
+    std::puts("online protocol 19 host/guest touch prediction and ACK recovery tests passed");
     return 0;
 }

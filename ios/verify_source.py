@@ -63,7 +63,7 @@ with open(cmake_path, "r", encoding="utf-8") as stream:
     cmake_source = stream.read()
 
 for marker in (
-    'set(TH07_IOS_BUILD "38"',
+    'set(TH07_IOS_BUILD "39"',
     'XCODE_ATTRIBUTE_LLVM_LTO "YES_THIN"',
     'set(SDL_GPU OFF CACHE BOOL "" FORCE)',
     'set(SDL_RENDER ON CACHE BOOL "" FORCE)',
@@ -99,6 +99,7 @@ for marker in (
         failed = True
 for marker in (
     'rm -rf "`$BASE/th07-ios14-port"',
+    'BUILD_CACHE="`$BASE/build-ios-cache"',
     "remoteHashOutput | Out-String",
     "First run: configuring passwordless Mac login",
 ):
@@ -305,6 +306,7 @@ online_markers = {
         "ackMask",
         "OnlineFrameHistory",
         "OnlineCanonicalTouchDelta",
+        "OnlineLocalPlayerSlot",
         "QueueLocalPrediction",
         "ConsumeLocalPrediction",
         "OnlineSeedDelayedAckPrefix",
@@ -370,7 +372,7 @@ online_markers = {
     os.path.join("ios", "BluetoothPeerTransport.mm"): (
         "MultipeerConnectivity",
         'kServiceType = @"th07-peer"',
-        '@"protocol": @"18"',
+        '@"protocol": @"19"',
     ),
     os.path.join("ios", "OnlineLauncher.mm"): (
         "UITableViewStyleInsetGrouped",
@@ -429,7 +431,7 @@ for relative in (os.path.join("src", "EffectManager.cpp"),
         failed = True
 if failed:
     sys.exit(2)
-print("ok: Build 38 local touch prediction and gameplay lockstep markers")
+print("ok: Build 39 host/guest local touch prediction and gameplay lockstep markers")
 
 with open(os.path.join(root, "src", "ResultScreen.cpp"), "r", encoding="utf-8") as stream:
     result_source = stream.read()

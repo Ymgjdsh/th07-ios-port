@@ -59,6 +59,11 @@ inline f32 OnlineCanonicalTouchDelta(f32 value)
     return OnlineDecodeTouchDelta(OnlineEncodeTouchDelta(value));
 }
 
+inline u8 OnlineLocalPlayerSlot(bool host, bool localSession)
+{
+    return host || localSession ? 0 : 1;
+}
+
 // Local touch prediction is presentation-only. It keeps the exact canonical
 // deltas already assigned to future lockstep frames so the local renderer can
 // show where those same inputs will move the player once input delay expires.
