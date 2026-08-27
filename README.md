@@ -1,4 +1,8 @@
-# th07
+<p align="center">
+  <img src="ios/Assets.xcassets/AppIcon.appiconset/Icon-180.png" alt="Touhou 7 icon" width="180">
+</p>
+
+# TH07 iOS Port
 
 A cross-platform port of 東方妖々夢　～ Perfect Cherry Blossom 1.00b by Team Shanghai Alice using SDL3 and OpenGL ES.
 
