@@ -8,6 +8,8 @@ namespace MobileUi
 void Initialize();
 void Shutdown();
 void Update();
+// Handles text submitted by the native iOS cheat-code prompt.
+void HandleCheatCode(const char *code);
 void Draw(i32 drawableWidth, i32 drawableHeight);
 
 bool FingerDown(const SDL_TouchFingerEvent &event);

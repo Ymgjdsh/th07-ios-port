@@ -2391,10 +2391,14 @@ void Online::Update()
     int textField = 0; char textValue[128] = {};
     if (TH07_IOS_PollOnlineText(&textField, textValue, sizeof(textValue)))
     {
-        if (textField == 1) SDL_strlcpy(g_DirectAddress, textValue, sizeof(g_DirectAddress));
+        if (textField == 4)
+        {
+            MobileUi::HandleCheatCode(textValue);
+        }
+        else if (textField == 1) SDL_strlcpy(g_DirectAddress, textValue, sizeof(g_DirectAddress));
         else if (textField == 2) SDL_strlcpy(g_RelayEndpoint, textValue, sizeof(g_RelayEndpoint));
         else if (textField == 3) SDL_strlcpy(g_RelayRoom, textValue, sizeof(g_RelayRoom));
-        SetStatus("Setting updated");
+        else SetStatus("Setting updated");
     }
     if (g_Mode == MODE_BLUETOOTH)
     {

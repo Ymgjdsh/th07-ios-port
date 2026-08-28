@@ -30,6 +30,9 @@ extern "C" void TH07_IOS_RequestOnlineText(int field, const char *title, const c
         [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
             textField.text = initial;
             textField.clearButtonMode = UITextFieldViewModeWhileEditing;
+            textField.autocapitalizationType = UITextAutocapitalizationTypeNone;
+            textField.autocorrectionType = UITextAutocorrectionTypeNo;
+            textField.spellCheckingType = UITextSpellCheckingTypeNo;
             // Direct accepts DNS names as well as IPv4 literals; keep the
             // period and alphabetic keys available in the fallback prompt.
             if (field == 1) textField.keyboardType = UIKeyboardTypeURL;

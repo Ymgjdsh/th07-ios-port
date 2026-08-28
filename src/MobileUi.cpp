@@ -14,6 +14,8 @@
 #include "Gui.hpp"
 #include "MobileDiagnostics.hpp"
 #include "Online.hpp"
+#include "OnlineTextInputIOS.hpp"
+#include "ResultScreen.hpp"
 #include "SoundPlayer.hpp"
 #include "Supervisor.hpp"
 #include "Touch.hpp"
@@ -262,6 +264,8 @@ Rect g_LayoutResetButton = {};
 Rect g_LayoutCancelButton = {};
 NormalizedLayout g_LayoutEditBackup = {};
 u8 g_LayoutCustomizedBackup = 0;
+const char *g_CheatFeedback = nullptr;
+u64 g_CheatFeedbackUntil = 0;
 GLuint g_Program = 0;
 GLuint g_Vao = 0;
 GLuint g_Vbo = 0;
@@ -803,7 +807,7 @@ i32 SettingsRowAt(f32 x, f32 y)
 {
     const Rect panel = PanelRect();
     const f32 top = panel.y + panel.h * 0.145f;
-    const i32 count = g_SettingsPerformancePage ? 7 : 10;
+    const i32 count = g_SettingsPerformancePage ? 8 : 10;
     const f32 rowHeight = panel.h * (g_SettingsPerformancePage ? 0.104f : 0.084f);
     if (x < panel.x || x > panel.x + panel.w || y < top || y >= top + rowHeight * count)
     {
@@ -878,7 +882,10 @@ void ActivateSettingsRow(i32 row, f32 x)
             g_Config.developerDisabled = !g_Config.developerDisabled;
             if (g_Config.developerDisabled) g_DeveloperOpen = false;
             break;
-        case 6: g_SettingsOpen = false; break;
+        case 6:
+            TH07_IOS_RequestOnlineText(4, "Enter Cheat Code", "");
+            return;
+        case 7: g_SettingsOpen = false; break;
         default: return;
         }
         MarkConfigDirty();
@@ -1237,13 +1244,14 @@ void DrawSettingsPanel()
     static const char *controlLabels[10] = {"CONTROL", "BUTTONS", "BUTTON SIZE", "DRAG SENS",
                                              "OPACITY", "Z TOGGLE", "S TOGGLE", "AUTO BOMB",
                                              "EDIT LAYOUT", "CLOSE"};
-    static const char *performanceLabels[7] = {"LOW EFFECTS", "NO BACKGROUND", "SHOW FPS",
-                                               "BGM", "SFX", "DEVELOPER MODE", "CLOSE"};
+    static const char *performanceLabels[8] = {"LOW EFFECTS", "NO BACKGROUND", "SHOW FPS",
+                                               "BGM", "SFX", "DEVELOPER MODE",
+                                               "INPUT CHEAT CODE", "CLOSE"};
     const Rect panel = PanelRect();
     DrawPanelBackground(panel, g_SettingsPerformancePage ? "PERFECT CHERRY PERFORMANCE" :
                                                           "PERFECT CHERRY CONTROLS");
     const f32 top = panel.y + panel.h * 0.145f;
-    const i32 count = g_SettingsPerformancePage ? 7 : 10;
+    const i32 count = g_SettingsPerformancePage ? 8 : 10;
     const f32 rowHeight = panel.h * (g_SettingsPerformancePage ? 0.104f : 0.084f);
     const f32 textScale = std::max(1.2f, std::min(panel.w, panel.h) * 0.0045f);
     for (i32 row = 0; row < count; ++row)
@@ -1267,6 +1275,7 @@ void DrawSettingsPanel()
             case 3: SDL_strlcpy(value, g_Config.bgmEnabled ? "ON" : "OFF", sizeof(value)); break;
             case 4: SDL_strlcpy(value, g_Config.sfxEnabled ? "ON" : "OFF", sizeof(value)); break;
             case 5: SDL_strlcpy(value, g_Config.developerDisabled ? "OFF" : "ON", sizeof(value)); break;
+            case 6: SDL_strlcpy(value, "OPEN", sizeof(value)); break;
             }
         }
         else
@@ -1306,6 +1315,14 @@ void DrawSettingsPanel()
             DrawCircleAt(track.x + track.w * amount, track.y + track.h * 0.5f,
                          std::max(6.0f, line.h * 0.13f), 0.96f, 0.82f, 0.94f, 1.0f);
         }
+    }
+    if (g_SettingsPerformancePage && g_CheatFeedback && SDL_GetTicks() < g_CheatFeedbackUntil)
+    {
+        const f32 feedbackScale = std::max(0.95f, textScale * 0.78f);
+        const f32 feedbackWidth = strlen(g_CheatFeedback) * feedbackScale * 6.0f;
+        DrawText(g_CheatFeedback, panel.x + (panel.w - feedbackWidth) * 0.5f,
+                 panel.y + panel.h * 0.955f, feedbackScale,
+                 0.96f, 0.84f, 0.48f, 0.98f);
     }
 }
 
@@ -1458,6 +1475,24 @@ void MobileUi::Update()
         g_DeveloperOpen = false;
         CancelTouches();
     }
+}
+
+void MobileUi::HandleCheatCode(const char *code)
+{
+    const bool accepted = code && SDL_strcasecmp(code, "ymgjdsh") == 0;
+    if (accepted)
+    {
+        const bool saved = ResultScreen::UnlockAllContent();
+        g_CheatFeedback = saved ? "ALL CONTENT UNLOCKED" : "UNLOCKED, SAVE FAILED";
+        MobileDiagnostics::Log("mobile/cheat", "all content unlocked save=%d", saved);
+        g_SoundPlayer.PlaySoundByIdx(SOUND_EXTEND, 0);
+    }
+    else
+    {
+        g_CheatFeedback = "INVALID CHEAT CODE";
+        MobileDiagnostics::Log("mobile/cheat", "rejected");
+    }
+    g_CheatFeedbackUntil = SDL_GetTicks() + 4000;
 }
 
 void MobileUi::Draw(i32 drawableWidth, i32 drawableHeight)

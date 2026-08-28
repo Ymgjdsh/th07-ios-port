@@ -63,7 +63,7 @@ with open(cmake_path, "r", encoding="utf-8") as stream:
     cmake_source = stream.read()
 
 for marker in (
-    'set(TH07_IOS_BUILD "40"',
+    'set(TH07_IOS_BUILD "41"',
     'XCODE_ATTRIBUTE_LLVM_LTO "YES_THIN"',
     'set(SDL_GPU OFF CACHE BOOL "" FORCE)',
     'set(SDL_RENDER ON CACHE BOOL "" FORCE)',
@@ -252,6 +252,9 @@ mobile_markers = {
     ),
     os.path.join("src", "ResultScreen.cpp"): (
         "touch run eligible for replay save",
+        "UnlockAllContent",
+        "WriteCurrentScore",
+        "numAttemptsPerShot[shot] = 1",
     ),
     os.path.join("src", "Controller.cpp"): (
         "Start must always pause on mobile controllers",
@@ -370,6 +373,9 @@ online_markers = {
         "IsValidBattleOverlayScene",
         "QueueButtonPulse",
         "g_GameManager.currentStage <= 8",
+        "INPUT CHEAT CODE",
+        "HandleCheatCode",
+        "ymgjdsh",
     ),
     os.path.join("src", "GameManager.cpp"): (
         "battlePauseAllowed",
@@ -405,6 +411,7 @@ online_markers = {
     os.path.join("ios", "OnlineTextInput.mm"): (
         "UIKeyboardTypeURL",
         "TH07_IOS_RequestOnlineText",
+        "UITextAutocapitalizationTypeNone",
     ),
     os.path.join("ios", "LocalNetworkPermission.mm"): (
         '_th07-online._udp.',
@@ -441,7 +448,7 @@ for relative in (os.path.join("src", "EffectManager.cpp"),
         failed = True
 if failed:
     sys.exit(2)
-print("ok: Build 40 host/guest local touch prediction and EX/PH touch controls markers")
+print("ok: Build 41 host/guest local touch prediction, EX/PH touch controls and cheat code markers")
 
 with open(os.path.join(root, "src", "ResultScreen.cpp"), "r", encoding="utf-8") as stream:
     result_source = stream.read()

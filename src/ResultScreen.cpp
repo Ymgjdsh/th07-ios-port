@@ -520,7 +520,90 @@ ResultScreen::~ResultScreen()
     }
 }
 
-void ResultScreen::WriteScore()
+bool ResultScreen::WriteCurrentScore()
+{
+    ResultScreen snapshot;
+    snapshot.scoreDat = OpenScore(FileSystem::GetPrefPath("score.dat").c_str());
+    if (!snapshot.scoreDat)
+    {
+        return false;
+    }
+
+    for (i32 difficulty = 0; difficulty < 6; ++difficulty)
+    {
+        for (i32 character = 0; character < 6; ++character)
+        {
+            GetHighScore(snapshot.scoreDat, &snapshot.scoreLists[difficulty][character],
+                         (u32)character, (u32)difficulty, nullptr);
+        }
+    }
+
+    snapshot.lsnmHeader.base.magic = LSNM_MAGIC;
+    snapshot.lsnmHeader.base.version = 1;
+    snapshot.lsnmHeader.base.th7kLen2 = sizeof(Lsnm);
+    snapshot.lsnmHeader.base.th7kLen = sizeof(Lsnm);
+    strcpy(snapshot.lsnmHeader.name, "        ");
+    ParseLsnm(snapshot.scoreDat, &snapshot.lsnmHeader);
+
+    const bool written = snapshot.WriteScore();
+    const bool result = FileSystem::CheckFileExists("score.dat") != 0;
+    for (i32 difficulty = 0; difficulty < 6; ++difficulty)
+    {
+        for (i32 character = 0; character < 6; ++character)
+        {
+            snapshot.FreeScore(difficulty, character);
+        }
+    }
+    return written && result;
+}
+
+bool ResultScreen::UnlockAllContent()
+{
+    for (i32 shotType = 0; shotType < 6; ++shotType)
+    {
+        Clrd &clears = g_GameManager.clrd[shotType];
+        clears.base.magic = CLRD_MAGIC;
+        clears.base.th7kLen2 = sizeof(Clrd);
+        clears.base.th7kLen = sizeof(Clrd);
+        clears.base.version = 1;
+        clears.characterShotType = (u8)shotType;
+        for (i32 difficulty = 0; difficulty < 6; ++difficulty)
+        {
+            clears.difficultyClearedWithRetries[difficulty] = 99;
+            clears.difficultyClearedWithoutRetries[difficulty] = 99;
+        }
+    }
+
+    for (i32 spellcard = 0; spellcard < 141; ++spellcard)
+    {
+        Catk &record = g_GameManager.catk[spellcard];
+        record.base.magic = CATK_MAGIC;
+        record.base.th7kLen2 = sizeof(Catk);
+        record.base.th7kLen = sizeof(Catk);
+        record.base.version = 1;
+        record.idx = (u16)spellcard;
+        u32 checksum = 0;
+        for (size_t nameIndex = 0; nameIndex < sizeof(record.name) && record.name[nameIndex];
+             ++nameIndex)
+        {
+            checksum += (u8)record.name[nameIndex];
+        }
+        for (i32 shot = 0; shot < 7; ++shot)
+        {
+            if (record.numAttemptsPerShot[shot] == 0) record.numAttemptsPerShot[shot] = 1;
+            if (record.numSuccessesPerShot[shot] == 0) record.numSuccessesPerShot[shot] = 1;
+            checksum += record.numSuccessesPerShot[shot];
+            checksum += record.numAttemptsPerShot[shot];
+            checksum += record.highScorePerShot[shot];
+        }
+        record.nameCsum = (u8)checksum;
+    }
+
+    g_GameManager.phantasmUnlocked = 1;
+    return WriteCurrentScore();
+}
+
+bool ResultScreen::WriteScore()
 {
     ScoreDat *sd;
     u8 *bytes;
@@ -701,8 +784,9 @@ void ResultScreen::WriteScore()
         bytes++;
         remainingSize--;
     }
-    FileSystem::WriteDataToFile("score.dat", fileBuffer, sizeOfFile);
+    const bool written = FileSystem::WriteDataToFile("score.dat", fileBuffer, sizeOfFile) == 0;
     free(fileBuffer);
+    return written;
 }
 
 i32 ResultScreen::MoveCursor(ResultScreen *screen, i32 max)
