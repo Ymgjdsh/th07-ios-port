@@ -63,7 +63,7 @@ with open(cmake_path, "r", encoding="utf-8") as stream:
     cmake_source = stream.read()
 
 for marker in (
-    'set(TH07_IOS_BUILD "39"',
+    'set(TH07_IOS_BUILD "40"',
     'XCODE_ATTRIBUTE_LLVM_LTO "YES_THIN"',
     'set(SDL_GPU OFF CACHE BOOL "" FORCE)',
     'set(SDL_RENDER ON CACHE BOOL "" FORCE)',
@@ -363,11 +363,21 @@ online_markers = {
         "ObserveTouchScene",
         "IsGameplayPauseGestureAllowed",
         "ClearTouchStateForSceneChange",
+        "g_GameManager.currentStage <= 8",
     ),
     os.path.join("src", "MobileUi.cpp"): (
         "g_PulseContextSet",
         "IsValidBattleOverlayScene",
         "QueueButtonPulse",
+        "g_GameManager.currentStage <= 8",
+    ),
+    os.path.join("src", "GameManager.cpp"): (
+        "battlePauseAllowed",
+        "arg->currentStage <= 8",
+    ),
+    os.path.join("src", "Online.cpp"): (
+        "IsBattlePauseInputAllowed",
+        "g_GameManager.currentStage <= 8",
     ),
     os.path.join("ios", "BluetoothPeerTransport.mm"): (
         "MultipeerConnectivity",
@@ -431,7 +441,7 @@ for relative in (os.path.join("src", "EffectManager.cpp"),
         failed = True
 if failed:
     sys.exit(2)
-print("ok: Build 39 host/guest local touch prediction and gameplay lockstep markers")
+print("ok: Build 40 host/guest local touch prediction and EX/PH touch controls markers")
 
 with open(os.path.join(root, "src", "ResultScreen.cpp"), "r", encoding="utf-8") as stream:
     result_source = stream.read()

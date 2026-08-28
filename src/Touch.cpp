@@ -155,7 +155,7 @@ bool Touch::IsGameplayActive()
     // not treat that transient viewport as a live playfield: a two-finger
     // gesture there must not become a pause edge.
     return g_GameManager.notInMenu && g_GameManager.globals &&
-           g_GameManager.currentStage >= 1 && g_GameManager.currentStage <= 6 &&
+           g_GameManager.currentStage >= 1 && g_GameManager.currentStage <= 8 &&
            g_GameManager.framesThisStage > 0 && g_Supervisor.curState == 2 &&
            !g_GameManager.isInPauseMenu && !g_GameManager.isInRetryMenu &&
            !g_GameManager.replay && !g_GameManager.finished;

@@ -199,7 +199,7 @@ u32 GameManager::OnUpdate(GameManager *arg)
 
     const bool battlePauseAllowed =
         arg->notInMenu && arg->globals && arg->currentStage >= 1 &&
-        arg->currentStage <= 6 && arg->framesThisStage > 0 &&
+        arg->currentStage <= 8 && arg->framesThisStage > 0 &&
         g_Supervisor.curState == 2 &&
         !arg->finished && !arg->replay && !g_Gui.HasCurrentMsgIdx();
     if (arg->isInRetryMenu == 0 && arg->isInPauseMenu == 0 && arg->demo == 0 &&

@@ -372,7 +372,7 @@ static bool IsBattlePauseInputAllowed()
     // pause shell; dialogue and loading remain controlled by their own lanes.
     return g_MultiplayerSession && g_GameManager.notInMenu &&
            g_GameManager.globals && g_GameManager.currentStage >= 1 &&
-           g_GameManager.currentStage <= 6 && g_GameManager.framesThisStage > 0 &&
+           g_GameManager.currentStage <= 8 && g_GameManager.framesThisStage > 0 &&
            g_Supervisor.curState == 2 &&
            !g_GameManager.demo && !g_GameManager.replay &&
            !g_GameManager.finished && !g_Gui.HasCurrentMsgIdx();
