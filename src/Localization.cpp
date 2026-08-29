@@ -5,7 +5,6 @@
 #include <string>
 
 #include "FileSystem.hpp"
-#include "TextHelper.hpp"
 
 namespace
 {
@@ -145,9 +144,8 @@ bool SetLanguage(Language language)
             static_cast<unsigned char>(Language::English) ||
         language == g_Language)
         return false;
-    g_Language = language;
     LanguageConfig config = {kConfigMagic, kConfigVersion,
-                             static_cast<unsigned char>(g_Language), {0, 0}};
+                             static_cast<unsigned char>(language), {0, 0}};
     const std::string path = FileSystem::GetPrefPath("language.cfg");
     FILE *file = std::fopen(path.c_str(), "wb");
     if (!file || std::fwrite(&config, sizeof(config), 1, file) != 1)
@@ -155,8 +153,13 @@ bool SetLanguage(Language language)
         if (file) std::fclose(file);
         return false;
     }
-    std::fclose(file);
-    TextHelper::ReloadFont();
+    if (std::fclose(file) != 0)
+        return false;
+
+    // Only publish the new language after its config is safely persisted.
+    // The next SDL iteration performs a full engine restart and Initialize()
+    // reads this value back before any localized resource is recreated.
+    g_Language = language;
     g_RestartRequested = true;
     return true;
 }
@@ -190,10 +193,14 @@ void SetTitlePageActive(bool active)
     g_TitlePageActive = active;
 }
 
-std::string Translate(const char *text)
+std::string Translate(const char *text, bool *translated)
 {
+    if (translated) *translated = false;
     if (g_TitlePageActive || g_Language == Language::Japanese)
         return text ? text : "";
-    return TranslateKnownPhrases(text, g_Language);
+    const std::string original = text ? text : "";
+    std::string localized = TranslateKnownPhrases(text, g_Language);
+    if (translated) *translated = localized != original;
+    return localized;
 }
 } // namespace Localization

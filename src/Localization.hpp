@@ -21,5 +21,8 @@ bool ConsumeRestartRequest();
 // translation disabled while that screen is active so no second text layer
 // is written over the original texture.
 void SetTitlePageActive(bool active);
-std::string Translate(const char *text);
+// Returns the original string when it is outside the explicit translation
+// table. `translated` lets the renderer select a localized font only for text
+// that was actually replaced, preserving stock English and stage text.
+std::string Translate(const char *text, bool *translated = nullptr);
 } // namespace Localization

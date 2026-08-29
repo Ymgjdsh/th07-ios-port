@@ -64,7 +64,7 @@ with open(cmake_path, "r", encoding="utf-8") as stream:
     cmake_source = stream.read()
 
 for marker in (
-    'set(TH07_IOS_BUILD "44"',
+    'set(TH07_IOS_BUILD "45"',
     'XCODE_ATTRIBUTE_LLVM_LTO "YES_THIN"',
     'set(SDL_GPU OFF CACHE BOOL "" FORCE)',
     'set(SDL_RENDER ON CACHE BOOL "" FORCE)',
@@ -380,6 +380,25 @@ online_markers = {
         "HandleCheatCode",
         "ymgjdsh",
     ),
+    os.path.join("src", "Localization.cpp"): (
+        "g_RestartRequested = true",
+        "Only publish the new language after its config is safely persisted",
+        "localized != original",
+    ),
+    os.path.join("src", "TextHelper.cpp"): (
+        "g_LocalizedRegions",
+        "InvalidateTexture",
+        "NotoSansSC.ttf",
+    ),
+    os.path.join("src", "AsciiManager.cpp"): (
+        "asciiSafe",
+        "Feeding UTF-8 Chinese into this",
+    ),
+    os.path.join("src", "main.cpp"): (
+        "RestartEngineForLanguage",
+        "ResetSimulationInputState",
+        "full restart complete",
+    ),
     os.path.join("src", "GameManager.cpp"): (
         "battlePauseAllowed",
         "arg->currentStage <= 8",
@@ -415,6 +434,8 @@ online_markers = {
         "UIKeyboardTypeURL",
         "TH07_IOS_RequestOnlineText",
         "UITextAutocapitalizationTypeNone",
+        "TH07ActiveWindow",
+        "gPromptVisible",
     ),
     os.path.join("ios", "LocalNetworkPermission.mm"): (
         '_th07-online._udp.',
@@ -451,7 +472,7 @@ for relative in (os.path.join("src", "EffectManager.cpp"),
         failed = True
 if failed:
     sys.exit(2)
-print("ok: Build 44 host/guest local touch prediction, EX/PH touch controls, cheat code and title texture markers")
+print("ok: Build 45 language restart, localization safety, DEV input and online markers")
 
 with open(os.path.join(root, "src", "ResultScreen.cpp"), "r", encoding="utf-8") as stream:
     result_source = stream.read()

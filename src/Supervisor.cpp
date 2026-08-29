@@ -688,6 +688,7 @@ ZunResult Supervisor::DeletedCallback(Supervisor *arg)
     if (arg->controller)
     {
         SDL_CloseGamepad(arg->controller);
+        arg->controller = nullptr;
     }
     SAFE_DELETE(g_GameManager.globals);
     SAFE_DELETE(g_GameManager.defaultCfg);

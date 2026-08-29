@@ -2925,7 +2925,10 @@ bool Online::IsMultiplayerSession() { return g_MultiplayerSession; }
 bool Online::IsNetworkSession() { return g_MultiplayerSession && !g_LocalSession; }
 int Online::GetLocalPlayerSlot()
 {
-    return OnlineLocalPlayerSlot(g_Host, g_LocalSession);
+    // Outside a network guest session the local player is always P1. The old
+    // host/local-only test returned P2 while offline, so DEV actions and touch
+    // bookkeeping were silently applied to an inactive player slot.
+    return g_MultiplayerSession && !g_LocalSession && !g_Host ? 1 : 0;
 }
 bool Online::IsAutoBombEnabledForPlayer(u8 playerId)
 {

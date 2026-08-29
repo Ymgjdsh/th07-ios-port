@@ -507,6 +507,7 @@ void AnmManager::ReleaseTexture(i32 textureIdx)
         return;
     }
 
+    TextHelper::InvalidateTexture(this->textures[textureIdx]);
     g_Supervisor.gfxDevice->DeleteTexture(this->textures[textureIdx]);
     this->textures[textureIdx].id = 0;
     this->textureWidths[textureIdx] = 0;
@@ -2086,7 +2087,8 @@ stop:
 
 void AnmManager::DrawTextToSprite(u32 spriteDstIdx, i32 x, i32 y, i32 width, i32 height,
                                   i32 fontWidth, i32 fontHeight, u32 textColor, u32 outlineType,
-                                  char *strToPrint, f32 scaleY, f32 scaleX)
+                                  char *strToPrint, f32 scaleY, f32 scaleX,
+                                  bool localizedFont)
 {
     if (fontWidth <= 0)
     {
@@ -2098,11 +2100,11 @@ void AnmManager::DrawTextToSprite(u32 spriteDstIdx, i32 x, i32 y, i32 width, i32
     }
     TextHelper::RenderTextToTextureBold(x, y, width, height, (f32)fontWidth * scaleY,
                                         (f32)fontHeight * scaleX, textColor, outlineType,
-                                        strToPrint, this->textures[spriteDstIdx]);
+                                        strToPrint, this->textures[spriteDstIdx], localizedFont);
 }
 
 void AnmManager::DrawTextToSpriteRegion(AnmVm *vm, u32 textColor, u32 outlineType,
-                                        const char *strToPrint)
+                                        const char *strToPrint, bool localizedFont)
 {
     if (!vm || !vm->sprite || !strToPrint)
         return;
@@ -2113,13 +2115,19 @@ void AnmManager::DrawTextToSpriteRegion(AnmVm *vm, u32 textColor, u32 outlineTyp
                             vm->sprite->startPixelInclusive.x);
     const i32 height = (i32)(vm->sprite->endPixelInclusive.y -
                              vm->sprite->startPixelInclusive.y);
-    if (width <= 0 || height <= 0 || vm->sprite->sourceFileIndex < 0)
+    const i32 source = vm->sprite->sourceFileIndex;
+    const i32 textureWidth = (i32)vm->sprite->textureWidth;
+    const i32 textureHeight = (i32)vm->sprite->textureHeight;
+    if (source < 0 || source >= 264 || !this->textures[source] ||
+        x < 0 || y < 0 || width <= 0 || height <= 0 ||
+        x + width > textureWidth || y + height > textureHeight ||
+        width > 2048 || height > 256)
         return;
 
     TextHelper::RenderTextToTextureRegion(
         x, y, width, height, vm->fontWidth > 0 ? vm->fontWidth : 15,
         vm->fontHeight > 0 ? vm->fontHeight : 15, textColor, outlineType, strToPrint,
-        this->textures[vm->sprite->sourceFileIndex]);
+        this->textures[source], localizedFont);
     vm->visible = 1;
 }
 
@@ -2136,13 +2144,14 @@ void AnmManager::DrawVmTextFmt(AnmManager *manager, AnmVm *vm, u32 textColor, u3
     vsnprintf(text, sizeof(text), str, args);
     va_end(args);
 
-    const std::string localized = Localization::Translate(text);
+    bool translated = false;
+    const std::string localized = Localization::Translate(text, &translated);
 
     manager->DrawTextToSprite(vm->sprite->sourceFileIndex, vm->sprite->startPixelInclusive.x,
                               vm->sprite->startPixelInclusive.y, vm->sprite->textureWidth,
-                              vm->sprite->textureHeight, fontWidth, vm->fontHeight, textColor,
-                              outlineType, const_cast<char *>(localized.c_str()),
-                              vm->sprite->cols, vm->sprite->rows);
+                               vm->sprite->textureHeight, fontWidth, vm->fontHeight, textColor,
+                               outlineType, const_cast<char *>(localized.c_str()),
+                               vm->sprite->cols, vm->sprite->rows, translated);
 
     vm->visible = 1;
 }
@@ -2159,7 +2168,8 @@ void AnmManager::DrawStringFormat(AnmVm *vm, u32 textColor, u32 outlineType, con
     vsnprintf(buf, sizeof(buf), text, args);
     va_end(args);
 
-    const std::string localized = Localization::Translate(buf);
+    bool translated = false;
+    const std::string localized = Localization::Translate(buf, &translated);
     SDL_strlcpy(buf, localized.c_str(), sizeof(buf));
 
     this->DrawTextToSprite(vm->sprite->sourceFileIndex, vm->sprite->startPixelInclusive.x,
@@ -2173,7 +2183,7 @@ void AnmManager::DrawStringFormat(AnmVm *vm, u32 textColor, u32 outlineType, con
     this->DrawTextToSprite(vm->sprite->sourceFileIndex, x, vm->sprite->startPixelInclusive.y,
                            vm->sprite->textureWidth, vm->sprite->textureHeight, fontWidth,
                            vm->fontHeight, textColor, outlineType, buf, vm->sprite->cols,
-                           vm->sprite->rows);
+                           vm->sprite->rows, translated);
 
     vm->visible = 1;
 }
@@ -2190,7 +2200,8 @@ void AnmManager::DrawStringFormat2(AnmVm *vm, u32 textColor, u32 outlineType, co
     vsnprintf(buf, sizeof(buf), text, args);
     va_end(args);
 
-    const std::string localized = Localization::Translate(buf);
+    bool translated = false;
+    const std::string localized = Localization::Translate(buf, &translated);
     SDL_strlcpy(buf, localized.c_str(), sizeof(buf));
 
     this->DrawTextToSprite(vm->sprite->sourceFileIndex, vm->sprite->startPixelInclusive.x,
@@ -2204,7 +2215,7 @@ void AnmManager::DrawStringFormat2(AnmVm *vm, u32 textColor, u32 outlineType, co
     this->DrawTextToSprite(vm->sprite->sourceFileIndex, x, vm->sprite->startPixelInclusive.y,
                            vm->sprite->textureWidth, vm->sprite->textureHeight, fontWidth,
                            vm->fontHeight, textColor, outlineType, buf, vm->sprite->cols,
-                           vm->sprite->rows);
+                           vm->sprite->rows, translated);
 
     vm->visible = 1;
 }

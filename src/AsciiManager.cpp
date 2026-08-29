@@ -668,11 +668,20 @@ void AsciiManager::AddString(ZunVec3 *pos, const char *text)
     }
 
     AsciiManagerString *curString = &this->strings[this->numStrings];
-    const std::string localized = Localization::Translate(text);
+    bool translated = false;
+    const std::string localized = Localization::Translate(text, &translated);
+    const bool asciiSafe = std::all_of(localized.begin(), localized.end(), [](unsigned char ch) {
+        return ch == '\n' || ch == '\t' || (ch >= 0x20 && ch <= 0x7e);
+    });
+    // ascii.anm indexes one sprite per byte. Feeding UTF-8 Chinese into this
+    // path turns continuation bytes into unrelated global sprite IDs, which
+    // can draw stage cards and character art over the playfield. Keep the
+    // original engine string unless a replacement is strictly single-byte.
+    const char *displayText = translated && asciiSafe ? localized.c_str() : (text ? text : "");
 
     this->numStrings++;
 
-    std::strncpy(curString->text, localized.c_str(), sizeof(curString->text) - 1);
+    std::strncpy(curString->text, displayText, sizeof(curString->text) - 1);
     curString->text[sizeof(curString->text) - 1] = '\0';
     curString->pos = *pos;
     curString->color = this->color;

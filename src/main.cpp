@@ -1,5 +1,6 @@
 #include <SDL3/SDL.h>
 #include <cstdio>
+#include <cstring>
 
 #define SDL_MAIN_USE_CALLBACKS
 #include <SDL3/SDL_main.h>
@@ -12,6 +13,7 @@
 #include "GameErrorContext.hpp"
 #include "GameManager.hpp"
 #include "GameWindow.hpp"
+#include "Localization.hpp"
 #include "MobileDiagnostics.hpp"
 #include "MobileUi.hpp"
 #include "Online.hpp"
@@ -30,6 +32,62 @@
 #endif
 
 static i32 renderRes = RENDER_RESULT_KEEP_RUNNING;
+
+static void ResetSimulationInputState()
+{
+    g_CurFrameRawInput = 0;
+    g_CurFrameGameInput = 0;
+    g_LastFrameRawInput = 0;
+    g_LastFrameGameInput = 0;
+    g_IsEighthFrameOfHeldInput = 0;
+    g_NumOfFramesInputsWereHeld = 0;
+    std::memset(g_CurFrameRawInputs, 0, sizeof(g_CurFrameRawInputs));
+    std::memset(g_CurFrameGameInputs, 0, sizeof(g_CurFrameGameInputs));
+    std::memset(g_LastFrameRawInputs, 0, sizeof(g_LastFrameRawInputs));
+    std::memset(g_LastFrameGameInputs, 0, sizeof(g_LastFrameGameInputs));
+    std::memset(g_CurFrameTouchDx, 0, sizeof(g_CurFrameTouchDx));
+    std::memset(g_CurFrameTouchDy, 0, sizeof(g_CurFrameTouchDy));
+}
+
+static ZunResult RestartEngineForLanguage()
+{
+    MobileDiagnostics::Log("mobile/localization", "full restart begin language=%s",
+                           Localization::GetLanguageName());
+    Touch::CancelTouches();
+    if (g_GameManager.plst.base.magic != 0)
+        ResultScreen::RegisterChain(2);
+    g_Chain.Release();
+    while (g_SoundPlayer.ProcessQueues())
+        ;
+    g_SoundPlayer.Release();
+    SAFE_DELETE(g_AnmManager);
+    MobileUi::Shutdown();
+    Online::Shutdown();
+
+    // Keep the SDL window and GL context, but rebuild every game-owned chain,
+    // texture, font and audio resource. This is the in-process equivalent of
+    // relaunching on iOS, where an app cannot legally start its own process.
+    MobileUi::Initialize();
+    Online::Initialize();
+    if (g_SoundPlayer.InitializeSound() != ZUN_SUCCESS)
+        MobileDiagnostics::Log("mobile/localization", "audio restart failed: %s",
+                               SDL_GetError());
+    Controller::ResetKeyboard();
+    ResetSimulationInputState();
+    g_AnmManager = new AnmManager();
+    const ZunResult result = g_Supervisor.RegisterChain();
+    if (result != ZUN_SUCCESS)
+    {
+        MobileDiagnostics::Log("mobile/localization", "full restart failed=%d", result);
+        return result;
+    }
+    renderRes = RENDER_RESULT_KEEP_RUNNING;
+    g_GameWindow.curFrame = -30;
+    g_GameWindow.ResetAccumulator();
+    MobileDiagnostics::Log("mobile/localization", "full restart complete language=%s",
+                           Localization::GetLanguageName());
+    return ZUN_SUCCESS;
+}
 
 static void OpenFirstAvailableGamepad(const char *reason)
 {
@@ -127,6 +185,8 @@ start:
 
 SDL_AppResult SDL_AppIterate(void *appstate)
 {
+    if (Localization::ConsumeRestartRequest() && RestartEngineForLanguage() != ZUN_SUCCESS)
+        return SDL_APP_FAILURE;
     MobileUi::Update();
     renderRes = g_GameWindow.Render();
     if (renderRes != RENDER_RESULT_KEEP_RUNNING)

@@ -8,12 +8,53 @@ static std::mutex gTextMutex;
 static int gTextField = 0;
 static std::string gTextValue;
 static bool gTextReady = false;
+static bool gPromptVisible = false;
+
+static UIWindow *TH07ActiveWindow()
+{
+    UIApplication *application = [UIApplication sharedApplication];
+    for (UIScene *scene in application.connectedScenes)
+    {
+        if (![scene isKindOfClass:[UIWindowScene class]] ||
+            scene.activationState == UISceneActivationStateUnattached)
+            continue;
+        UIWindowScene *windowScene = (UIWindowScene *)scene;
+        for (UIWindow *window in windowScene.windows)
+        {
+            if (window.isKeyWindow) return window;
+        }
+    }
+    for (UIWindow *window in application.windows)
+    {
+        if (!window.hidden && window.alpha > 0.0) return window;
+    }
+    return nil;
+}
 
 static UIViewController *TH07TopViewController()
 {
-    UIWindow *window = [UIApplication sharedApplication].keyWindow;
+    UIWindow *window = TH07ActiveWindow();
+    if (!window) return nil;
     UIViewController *controller = window.rootViewController;
-    while (controller.presentedViewController) controller = controller.presentedViewController;
+    while (controller)
+    {
+        if (controller.presentedViewController)
+        {
+            controller = controller.presentedViewController;
+            continue;
+        }
+        if ([controller isKindOfClass:[UINavigationController class]])
+        {
+            controller = ((UINavigationController *)controller).visibleViewController;
+            continue;
+        }
+        if ([controller isKindOfClass:[UITabBarController class]])
+        {
+            controller = ((UITabBarController *)controller).selectedViewController;
+            continue;
+        }
+        break;
+    }
     return controller;
 }
 
@@ -24,7 +65,14 @@ extern "C" void TH07_IOS_RequestOnlineText(int field, const char *title, const c
     NSString *initial = [NSString stringWithUTF8String:value ? value : ""];
     dispatch_async(dispatch_get_main_queue(), ^{
         UIViewController *controller = TH07TopViewController();
-        if (!controller || [controller isKindOfClass:[UIAlertController class]]) return;
+        if (!controller || gPromptVisible ||
+            [controller isKindOfClass:[UIAlertController class]])
+        {
+            NSLog(@"[TH07] text prompt unavailable field=%d controller=%@ visible=%d",
+                  field, controller, gPromptVisible);
+            return;
+        }
+        gPromptVisible = true;
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:promptTitle
             message:nil preferredStyle:UIAlertControllerStyleAlert];
         [alert addTextFieldWithConfigurationHandler:^(UITextField *textField) {
@@ -37,15 +85,24 @@ extern "C" void TH07_IOS_RequestOnlineText(int field, const char *title, const c
             // period and alphabetic keys available in the fallback prompt.
             if (field == 1) textField.keyboardType = UIKeyboardTypeURL;
         }];
-        [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+        [alert addAction:[UIAlertAction actionWithTitle:@"Cancel"
+            style:UIAlertActionStyleCancel handler:^(UIAlertAction *action) {
+                (void)action;
+                gPromptVisible = false;
+            }]];
         [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault
             handler:^(UIAlertAction *action) {
                 (void)action;
                 const char *text = alert.textFields.firstObject.text.UTF8String;
-                std::lock_guard<std::mutex> lock(gTextMutex);
-                gTextField = field; gTextValue = text ? text : ""; gTextReady = true;
+                {
+                    std::lock_guard<std::mutex> lock(gTextMutex);
+                    gTextField = field; gTextValue = text ? text : ""; gTextReady = true;
+                }
+                gPromptVisible = false;
             }]];
-        [controller presentViewController:alert animated:YES completion:nil];
+        [controller presentViewController:alert animated:YES completion:^{
+            NSLog(@"[TH07] text prompt presented field=%d", field);
+        }];
     });
 }
 

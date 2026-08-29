@@ -936,6 +936,8 @@ void ActivateSettingsRow(i32 row, f32 x)
 
 void ActivateDeveloperRow(i32 row)
 {
+    MobileDiagnostics::Log("mobile/dev", "tap row=%d gameplay=%d network=%d", row,
+                           IsGameplay(), Online::IsNetworkSession());
     if (row == 4)
     {
         g_DeveloperOpen = false;
@@ -1411,6 +1413,16 @@ void DrawFps()
 void MobileUi::Initialize()
 {
     Localization::Initialize();
+    g_SettingsOpen = false;
+    g_SettingsPerformancePage = false;
+    g_DeveloperOpen = false;
+    g_LayoutEditMode = false;
+    g_MainMenuActive = false;
+    g_MainMenuHome = false;
+    g_DialogueInputActive = false;
+    g_CheatFeedback = nullptr;
+    g_CheatFeedbackUntil = 0;
+    ClearTouchState();
     LoadConfig();
     i32 width, height;
     GetWindowSize(width, height);
@@ -1432,19 +1444,6 @@ void MobileUi::Shutdown()
 void MobileUi::Update()
 {
     const u64 now = SDL_GetTicks();
-    if (Localization::ConsumeRestartRequest())
-    {
-        // iOS cannot relaunch its own process. Reset transient state and the
-        // frame clock so the newly selected font/text is applied immediately.
-        g_SettingsOpen = false;
-        g_SettingsPerformancePage = false;
-        g_DeveloperOpen = false;
-        g_LayoutEditMode = false;
-        MobileUi::CancelTouches();
-        g_GameWindow.ResetAccumulator();
-        MobileDiagnostics::Log("mobile/localization", "language=%s soft restart",
-                               Localization::GetLanguageName());
-    }
     if (!g_FpsWindowStart) g_FpsWindowStart = now;
     ++g_FpsFrames;
     if (now - g_FpsWindowStart >= 1000)
@@ -1589,7 +1588,8 @@ void MobileUi::Draw(i32 drawableWidth, i32 drawableHeight)
                     DrawAction(g_Actions[i], IsActionHeld(i));
                 }
             }
-            if (!g_Config.developerDisabled) DrawToolButton(g_DeveloperButton, "DEV", true);
+            if (!g_Config.developerDisabled && !g_Gui.HasCurrentMsgIdx())
+                DrawToolButton(g_DeveloperButton, "DEV", true);
         }
     }
     if (g_Config.showFps) DrawFps();
@@ -1784,7 +1784,8 @@ bool MobileUi::FingerDown(const SDL_TouchFingerEvent &event)
         AllocateTouch(event.fingerID, TOUCH_PANEL, x, y);
         return true;
     }
-    if (IsGameplay() && !g_Config.developerDisabled && Contains(g_DeveloperButton, x, y))
+    if (IsGameplay() && !g_Gui.HasCurrentMsgIdx() && !g_Config.developerDisabled &&
+        Contains(g_DeveloperButton, x, y))
     {
         g_DeveloperOpen = true;
         CancelTouches();

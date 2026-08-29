@@ -2,7 +2,9 @@
 
 #include <SDL3/SDL_surface.h>
 #include <SDL3_ttf/SDL_ttf.h>
+#include <algorithm>
 #include <string>
+#include <vector>
 
 #include "GameErrorContext.hpp"
 #include "Localization.hpp"
@@ -11,8 +13,63 @@
 #include "inttypes.hpp"
 #include "sj2utf8/sj2utf8.h"
 
-static TTF_Font *g_Font = nullptr;
-static std::string g_FontPath;
+static TTF_Font *g_StockFont = nullptr;
+static TTF_Font *g_ChineseFont = nullptr;
+static bool g_TtfInitialized = false;
+
+struct LocalizedRegion
+{
+    u32 textureId;
+    i32 x;
+    i32 y;
+    i32 width;
+    i32 height;
+    bool localizedFont;
+    std::string text;
+};
+
+static std::vector<LocalizedRegion> g_LocalizedRegions;
+
+static bool IsLocalizedRegionCurrent(GfxTextureHandle texture, i32 x, i32 y, i32 width,
+                                     i32 height, bool localizedFont, const char *text)
+{
+    for (const LocalizedRegion &region : g_LocalizedRegions)
+    {
+        if (region.textureId == texture.id && region.x == x && region.y == y &&
+            region.width == width && region.height == height &&
+            region.localizedFont == localizedFont && region.text == (text ? text : ""))
+            return true;
+    }
+    return false;
+}
+
+static TTF_Font *OpenTextFont(bool localizedFont)
+{
+    if (!g_TtfInitialized)
+    {
+        if (!TTF_Init())
+        {
+            g_GameErrorContext.Log("TTF_Init fail : %s\n", SDL_GetError());
+            return nullptr;
+        }
+        g_TtfInitialized = true;
+    }
+
+    const bool useChineseFont = localizedFont &&
+        Localization::GetLanguage() == Localization::Language::Chinese;
+    TTF_Font **font = useChineseFont ? &g_ChineseFont : &g_StockFont;
+    if (*font) return *font;
+
+    const char *fontName = useChineseFont ? "NotoSansSC.ttf" : "msgothic.ttc";
+    *font = TTF_OpenFont(FileSystem::GetBasePath(fontName).c_str(), 10);
+    if (!*font)
+    {
+        g_GameErrorContext.Log("TTF_OpenFont fail (%s) : %s\n", fontName, SDL_GetError());
+        return nullptr;
+    }
+    TTF_SetFontStyle(*font, TTF_STYLE_BOLD);
+    return *font;
+}
 
 // stolen from
 // https://stackoverflow.com/questions/3404199/how-to-find-out-the-encoding-of-a-file-c-sharp/3404317#3404317
@@ -208,62 +265,44 @@ bool TextHelper::CopyTextToTexture(i32 yPos, i32 spriteWidth, i32 spriteHeight, 
 
 ZunResult TextHelper::CreateTextBuffer()
 {
-    const std::string desiredPath =
-        FileSystem::GetBasePath(Localization::GetLanguage() == Localization::Language::Japanese
-                                    ? "msgothic.ttc"
-                                    : "NotoSansSC.ttf");
-    if (g_Font && g_FontPath == desiredPath)
-    {
-        return ZUN_SUCCESS;
-    }
-
-    if (g_Font)
-    {
-        TTF_CloseFont(g_Font);
-        g_Font = nullptr;
-        g_FontPath.clear();
-    }
-
-    if (!TTF_Init())
-    {
-        g_GameErrorContext.Log("TTF_Init fail : %s\n", SDL_GetError());
-        return ZUN_ERROR;
-    }
-
-    g_Font = TTF_OpenFont(desiredPath.c_str(), 10);
-    if (!g_Font)
-    {
-        g_GameErrorContext.Log("TTF_OpenFont fail : %s\n", SDL_GetError());
-        return ZUN_ERROR;
-    }
-    g_FontPath = desiredPath;
-    TTF_SetFontStyle(g_Font, TTF_STYLE_BOLD);
-    return ZUN_SUCCESS;
+    return OpenTextFont(false) ? ZUN_SUCCESS : ZUN_ERROR;
 }
 
 void TextHelper::ReloadFont()
 {
-    if (!g_Font) return;
-    TTF_CloseFont(g_Font);
-    g_Font = nullptr;
-    g_FontPath.clear();
+    if (g_StockFont) TTF_CloseFont(g_StockFont);
+    if (g_ChineseFont) TTF_CloseFont(g_ChineseFont);
+    g_StockFont = nullptr;
+    g_ChineseFont = nullptr;
     CreateTextBuffer();
 }
 
 void TextHelper::ReleaseTextBuffer()
 {
-    if (g_Font)
-    {
-        TTF_CloseFont(g_Font);
-        g_Font = nullptr;
-    }
-    g_FontPath.clear();
-    TTF_Quit();
+    if (g_StockFont) TTF_CloseFont(g_StockFont);
+    if (g_ChineseFont) TTF_CloseFont(g_ChineseFont);
+    g_StockFont = nullptr;
+    g_ChineseFont = nullptr;
+    if (g_TtfInitialized) TTF_Quit();
+    g_TtfInitialized = false;
+    g_LocalizedRegions.clear();
+}
+
+void TextHelper::InvalidateTexture(GfxTextureHandle texture)
+{
+    if (!texture) return;
+    g_LocalizedRegions.erase(
+        std::remove_if(g_LocalizedRegions.begin(), g_LocalizedRegions.end(),
+                       [texture](const LocalizedRegion &region) {
+                           return region.textureId == texture.id;
+                       }),
+        g_LocalizedRegions.end());
 }
 
 void TextHelper::RenderTextToTextureBold(i32 xPos, i32 yPos, i32 spriteWidth, i32 spriteHeight,
                                          i32 fontHeight, i32 fontWidth, u32 textColor,
-                                         u32 outlineType, char *string, GfxTextureHandle outTexture)
+                                         u32 outlineType, char *string, GfxTextureHandle outTexture,
+                                         bool localizedFont)
 {
     i32 fontSize = fontHeight * 2 - 2;
     if (fontSize <= 0)
@@ -271,12 +310,13 @@ void TextHelper::RenderTextToTextureBold(i32 xPos, i32 yPos, i32 spriteWidth, i3
         return;
     }
 
-    if (CreateTextBuffer() != ZUN_SUCCESS)
+    TTF_Font *font = OpenTextFont(localizedFont);
+    if (!font)
     {
         return;
     }
 
-    TTF_SetFontSize(g_Font, fontSize);
+    TTF_SetFontSize(font, fontSize);
 
     char *convStr = string;
     bool needsFree = false;
@@ -291,7 +331,7 @@ void TextHelper::RenderTextToTextureBold(i32 xPos, i32 yPos, i32 spriteWidth, i3
     }
 
     SDL_Color white = {255, 255, 255, 255};
-    SDL_Surface *textSurf = TTF_RenderText_Blended(g_Font, convStr, 0, white);
+    SDL_Surface *textSurf = TTF_RenderText_Blended(font, convStr, 0, white);
     if (needsFree)
     {
         SDL_free(convStr);
@@ -363,18 +403,23 @@ void TextHelper::RenderTextToTextureBold(i32 xPos, i32 yPos, i32 spriteWidth, i3
 void TextHelper::RenderTextToTextureRegion(i32 xPos, i32 yPos, i32 regionWidth,
                                            i32 regionHeight, i32 fontHeight, i32 fontWidth,
                                            u32 textColor, u32 outlineType, const char *string,
-                                           GfxTextureHandle outTexture)
+                                           GfxTextureHandle outTexture, bool localizedFont)
 {
     if (!outTexture || regionWidth <= 0 || regionHeight <= 0)
+        return;
+
+    if (IsLocalizedRegionCurrent(outTexture, xPos, yPos, regionWidth, regionHeight,
+                                 localizedFont, string))
         return;
 
     (void)fontWidth;
 
     const i32 fontSize = fontHeight * 2 - 2;
-    if (fontSize <= 0 || CreateTextBuffer() != ZUN_SUCCESS)
+    TTF_Font *font = OpenTextFont(localizedFont);
+    if (fontSize <= 0 || !font)
         return;
 
-    TTF_SetFontSize(g_Font, fontSize);
+    TTF_SetFontSize(font, fontSize);
     const char *source = string ? string : "";
     char *convStr = const_cast<char *>(source);
     bool needsFree = false;
@@ -386,7 +431,7 @@ void TextHelper::RenderTextToTextureRegion(i32 xPos, i32 yPos, i32 regionWidth,
     }
 
     SDL_Color white = {255, 255, 255, 255};
-    SDL_Surface *textSurf = TTF_RenderText_Blended(g_Font, convStr, 0, white);
+    SDL_Surface *textSurf = TTF_RenderText_Blended(font, convStr, 0, white);
     if (needsFree)
         SDL_free(convStr);
     if (!textSurf)
@@ -447,6 +492,16 @@ void TextHelper::RenderTextToTextureRegion(i32 xPos, i32 yPos, i32 regionWidth,
     g_Supervisor.gfxDevice->SetTextureSubImage(xPos, yPos, regionWidth, regionHeight,
                                                outSurface->pixels);
     SDL_DestroySurface(outSurface);
+    g_LocalizedRegions.erase(
+        std::remove_if(g_LocalizedRegions.begin(), g_LocalizedRegions.end(),
+                       [=](const LocalizedRegion &region) {
+                           return region.textureId == outTexture.id && region.x == xPos &&
+                                  region.y == yPos && region.width == regionWidth &&
+                                  region.height == regionHeight;
+                       }),
+        g_LocalizedRegions.end());
+    g_LocalizedRegions.push_back({outTexture.id, xPos, yPos, regionWidth, regionHeight,
+                                  localizedFont, string ? string : ""});
 }
 
 i32 TextHelper::GetLogicalStringWidth(const char *str)
