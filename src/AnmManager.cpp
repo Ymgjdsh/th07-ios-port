@@ -2104,7 +2104,8 @@ void AnmManager::DrawTextToSprite(u32 spriteDstIdx, i32 x, i32 y, i32 width, i32
 }
 
 void AnmManager::DrawTextToSpriteRegion(AnmVm *vm, u32 textColor, u32 outlineType,
-                                        const char *strToPrint, bool localizedFont)
+                                        const char *strToPrint, bool localizedFont,
+                                        bool centerHorizontal)
 {
     if (!vm || !vm->sprite || !strToPrint)
         return;
@@ -2127,7 +2128,7 @@ void AnmManager::DrawTextToSpriteRegion(AnmVm *vm, u32 textColor, u32 outlineTyp
     TextHelper::RenderTextToTextureRegion(
         x, y, width, height, vm->fontWidth > 0 ? vm->fontWidth : 15,
         vm->fontHeight > 0 ? vm->fontHeight : 15, textColor, outlineType, strToPrint,
-        this->textures[source], localizedFont);
+        this->textures[source], localizedFont, centerHorizontal);
     vm->visible = 1;
 }
 

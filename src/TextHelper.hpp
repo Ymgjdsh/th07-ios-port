@@ -33,7 +33,11 @@ struct TextHelper
                                           i32 regionHeight, i32 fontHeight, i32 fontWidth,
                                           u32 textColor, u32 outlineType, const char *string,
                                           GfxTextureHandle outTexture,
-                                          bool localizedFont = true);
+                                          bool localizedFont = true,
+                                          bool centerHorizontal = true);
+    static void DrawScreenText(f32 x, f32 y, i32 fontHeight, u32 color,
+                               const char *string, f32 scale = 1.0f,
+                               bool localizedFont = true);
     static i32 GetLogicalStringWidth(const char* str);
 
     SDL_Surface *buffer;

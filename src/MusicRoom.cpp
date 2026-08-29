@@ -6,8 +6,24 @@
 #include "Chain.hpp"
 #include "Controller.hpp"
 #include "FileSystem.hpp"
+#include "Localization.hpp"
 #include "SoundPlayer.hpp"
 #include "Supervisor.hpp"
+
+static void DrawMusicText(AnmVm *vm, u32 textColor, u32 outlineType,
+                          const char *text)
+{
+    if (Localization::GetLanguage() == Localization::Language::Japanese)
+    {
+        AnmManager::DrawVmTextFmt(g_AnmManager, vm, textColor, outlineType,
+                                  "%s", text ? text : "");
+    }
+    else
+    {
+        g_AnmManager->DrawTextToSpriteRegion(vm, textColor, outlineType,
+                                             text ? text : "", true, false);
+    }
+}
 
 ZunResult MusicRoom::CheckInputEnable()
 {
@@ -40,7 +56,7 @@ ZunResult MusicRoom::CheckInputEnable()
 
 i32 MusicRoom::ProcessInput()
 {
-    char local_54[66];
+    char local_54[256];
     i32 i;
 
     if (WAS_PRESSED_RAW(TH_BUTTON_UP))
@@ -109,12 +125,14 @@ i32 MusicRoom::ProcessInput()
         for (i = 0; i < 8; i++)
         {
             memset(local_54, 0, sizeof(local_54));
-            memcpy(local_54, this->trackDescriptors[this->selectedIdx].description[i], 64);
+            SDL_strlcpy(local_54,
+                        this->trackDescriptors[this->selectedIdx].description[i],
+                        sizeof(local_54));
             if (local_54[0] != '\0')
             {
                 this->descriptionSprites[i].active = 1;
-                AnmManager::DrawVmTextFmt(g_AnmManager, this->descriptionSprites + i, 0xffe0c0,
-                                          0x300000, local_54);
+                DrawMusicText(this->descriptionSprites + i, 0xffe0c0, 0x300000,
+                              local_54);
             }
             else
             {
@@ -219,7 +237,7 @@ u32 MusicRoom::OnDraw(MusicRoom *arg)
 
 ZunResult MusicRoom::AddedCallback(MusicRoom *arg)
 {
-    char lineCharBuffer[66];
+    char lineCharBuffer[256];
     char *firstChar;
     i32 charIdx;
     char *curChar;
@@ -254,9 +272,9 @@ ZunResult MusicRoom::AddedCallback(MusicRoom *arg)
             charIdx = 0;
             while (*curChar != '\n' && *curChar != '\r')
             {
-                arg->trackDescriptors[offset].path[charIdx] = *curChar;
+                if (charIdx < (i32)sizeof(arg->trackDescriptors[offset].path) - 1)
+                    arg->trackDescriptors[offset].path[charIdx++] = *curChar;
                 curChar++;
-                charIdx++;
                 if (((uintptr_t)curChar - (uintptr_t)firstChar) >= g_LastFileSize)
                 {
                     goto LAB_0043b195;
@@ -273,9 +291,9 @@ ZunResult MusicRoom::AddedCallback(MusicRoom *arg)
             charIdx = 0;
             while (*curChar != '\n' && *curChar != '\r')
             {
-                arg->trackDescriptors[offset].title[charIdx] = *curChar;
+                if (charIdx < (i32)sizeof(arg->trackDescriptors[offset].title) - 1)
+                    arg->trackDescriptors[offset].title[charIdx++] = *curChar;
                 curChar++;
-                charIdx++;
                 if (((uintptr_t)curChar - (uintptr_t)firstChar) >= g_LastFileSize)
                 {
                     goto LAB_0043b195;
@@ -301,9 +319,10 @@ ZunResult MusicRoom::AddedCallback(MusicRoom *arg)
                 charIdx = 0;
                 while (*curChar != '\n' && *curChar != '\r')
                 {
-                    arg->trackDescriptors[offset].description[lineIdx][charIdx] = *curChar;
+                    if (charIdx < (i32)sizeof(
+                                      arg->trackDescriptors[offset].description[lineIdx]) - 1)
+                        arg->trackDescriptors[offset].description[lineIdx][charIdx++] = *curChar;
                     curChar++;
-                    charIdx++;
                     if (((uintptr_t)curChar - (uintptr_t)firstChar) >= g_LastFileSize)
                     {
                         goto LAB_0043b195;
@@ -326,11 +345,32 @@ ZunResult MusicRoom::AddedCallback(MusicRoom *arg)
     }
 LAB_0043b195:
     arg->numDescriptors = offset + 1;
+    if (Localization::GetLanguage() != Localization::Language::Japanese)
+    {
+        for (i32 track = 0; track < arg->numDescriptors; ++track)
+        {
+            const std::string title = Localization::TranslateMusicTitle(
+                track, arg->trackDescriptors[track].title);
+            SDL_strlcpy(arg->trackDescriptors[track].title, title.c_str(),
+                        sizeof(arg->trackDescriptors[track].title));
+            snprintf(arg->trackDescriptors[track].description[0],
+                     sizeof(arg->trackDescriptors[track].description[0]),
+                     "No.%d %s", track + 1, title.c_str());
+            for (i32 line = 0; line < 7; ++line)
+            {
+                const std::string comment = Localization::TranslateMusicComment(
+                    track, line, "");
+                SDL_strlcpy(arg->trackDescriptors[track].description[line + 1],
+                            comment.c_str(),
+                            sizeof(arg->trackDescriptors[track].description[line + 1]));
+            }
+        }
+    }
     for (offset = 0; offset < arg->numDescriptors; offset++)
     {
         g_AnmManager->SetAnmIdxAndExecuteScript(&arg->titleSprites[offset], offset + 2305);
-        AnmManager::DrawVmTextFmt(g_AnmManager, arg->titleSprites + offset, 0xc0e0ff, 0x302080,
-                                  arg->trackDescriptors[offset].title);
+        DrawMusicText(arg->titleSprites + offset, 0xc0e0ff, 0x302080,
+                      arg->trackDescriptors[offset].title);
         arg->titleSprites[offset].pos.x = 93.0f;
         arg->titleSprites[offset].pos.y = (f32)((offset + 1) * 18) + 104.0f - 20.0f;
         arg->titleSprites[offset].pos.z = 0.0f;
@@ -340,12 +380,14 @@ LAB_0043b195:
     {
         g_AnmManager->SetAnmIdxAndExecuteScript(&arg->descriptionSprites[offset], offset + 1799);
         memset(lineCharBuffer, 0, sizeof(lineCharBuffer));
-        memcpy(lineCharBuffer, arg->trackDescriptors[arg->selectedIdx].description[offset], 64);
+        SDL_strlcpy(lineCharBuffer,
+                    arg->trackDescriptors[arg->selectedIdx].description[offset],
+                    sizeof(lineCharBuffer));
         if (*lineCharBuffer != '\0')
         {
             arg->descriptionSprites[offset].active = 1;
-            AnmManager::DrawVmTextFmt(g_AnmManager, arg->descriptionSprites + offset, 0xffe0c0,
-                                      0x300000, (char *)&lineCharBuffer);
+            DrawMusicText(arg->descriptionSprites + offset, 0xffe0c0, 0x300000,
+                          lineCharBuffer);
         }
         else
         {

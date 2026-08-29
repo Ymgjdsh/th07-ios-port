@@ -29,6 +29,8 @@ required = {
     "tools/publish_github.ps1": 1,
     "ios/OnlineLauncher.mm": 1,
     "ios/test_online_protocol.cpp": 1,
+    "src/ContentLocalization.cpp": 1,
+    "tools/generate_content_localization.py": 1,
     "assets/th07.dat": 23_829_135,
     "assets/thbgm.dat": 444_516_656,
     "assets/msgothic.ttc": 1_000_000,
@@ -64,7 +66,7 @@ with open(cmake_path, "r", encoding="utf-8") as stream:
     cmake_source = stream.read()
 
 for marker in (
-    'set(TH07_IOS_BUILD "46"',
+    'set(TH07_IOS_BUILD "47"',
     'XCODE_ATTRIBUTE_LLVM_LTO "YES_THIN"',
     'set(SDL_GPU OFF CACHE BOOL "" FORCE)',
     'set(SDL_RENDER ON CACHE BOOL "" FORCE)',
@@ -127,6 +129,12 @@ for marker in ("CMake.app/Contents/bin", "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC
     if marker not in ios_build_source:
         print("error: iOS build script marker missing:", marker)
         failed = True
+if "IOS_BUILD=${IOS_BUILD:-47}" not in ios_build_source:
+    print("error: iOS build script does not default to build 47")
+    failed = True
+if "[int]$IosBuild = 47" not in remote_build_source:
+    print("error: remote Mac build script does not default to build 47")
+    failed = True
 if failed:
     sys.exit(2)
 print("ok: incremental SSH Mac build automation")
@@ -474,7 +482,66 @@ for relative in (os.path.join("src", "EffectManager.cpp"),
         failed = True
 if failed:
     sys.exit(2)
-print("ok: Build 46 pause label mapping, language restart, localization safety and online markers")
+print("ok: Build 47 pause label mapping, language restart, localization safety and online markers")
+
+with open(os.path.join(root, "src", "ContentLocalization.cpp"), "r", encoding="utf-8") as stream:
+    content_localization_source = stream.read()
+with open(os.path.join(root, "src", "Gui.cpp"), "r", encoding="utf-8") as stream:
+    gui_source = stream.read()
+with open(os.path.join(root, "src", "MusicRoom.cpp"), "r", encoding="utf-8") as stream:
+    music_room_source = stream.read()
+with open(os.path.join(root, "src", "TextHelper.cpp"), "r", encoding="utf-8") as stream:
+    text_helper_source = stream.read()
+with open(os.path.join(root, "tools", "generate_content_localization.py"), "r", encoding="utf-8") as stream:
+    localization_generator_source = stream.read()
+
+dialogue_entry_count = content_localization_source.count("    {") - 20
+for marker in (
+        "std::string TranslateDialogue",
+        "std::string TranslateMusicTitle",
+        "std::string TranslateMusicComment",
+        '"春眠不觉晓，"',
+        '"was it?"'):
+    if marker not in content_localization_source:
+        print("error: generated content localization marker missing:", marker)
+        failed = True
+if dialogue_entry_count < 1000:
+    print("error: generated dialogue table is unexpectedly incomplete:", dialogue_entry_count)
+    failed = True
+for marker in (
+        "args->dialogue.textLine,",
+        "GetDialogueTranslationOccurrence",
+        "DrawTextToSpriteRegion"):
+    if marker not in gui_source:
+        print("error: runtime dialogue localization marker missing:", marker)
+        failed = True
+for marker in (
+        "TranslateMusicTitle",
+        "TranslateMusicComment",
+        "DrawMusicText"):
+    if marker not in music_room_source:
+        print("error: Music Room localization marker missing:", marker)
+        failed = True
+for marker in (
+        "DrawScreenText",
+        "FitFontToRegion",
+        "if (!*source)",
+        "SetTextureSubImage(xPos, yPos, regionWidth, regionHeight"):
+    if marker not in text_helper_source:
+        print("error: fitted localized text rendering marker missing:", marker)
+        failed = True
+for marker in (
+        "load_pbg4_entries",
+        "load_message_instructions",
+        'value.get("lines", ())',
+        "instruction[\"occurrence\"]",
+        "instruction[\"line\"]"):
+    if marker not in localization_generator_source:
+        print("error: dialogue generator mapping marker missing:", marker)
+        failed = True
+if failed:
+    sys.exit(2)
+print("ok: 8-stage physical-line dialogue, Music Room and fitted text localization")
 
 with open(os.path.join(root, "src", "ResultScreen.cpp"), "r", encoding="utf-8") as stream:
     result_source = stream.read()

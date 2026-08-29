@@ -142,7 +142,8 @@ struct AnmManager
                           i32 fontHeight, u32 textColor, u32 outlineType, char *strToPrint,
                           f32 scaleY, f32 scaleX, bool localizedFont = false);
     void DrawTextToSpriteRegion(AnmVm *vm, u32 textColor, u32 outlineType,
-                                const char *strToPrint, bool localizedFont = true);
+                                const char *strToPrint, bool localizedFont = true,
+                                bool centerHorizontal = true);
     ZunResult DrawTriangleStrip(AnmVm *vm, VertexTex1DiffuseXyzrhw *vertices, i32 count);
     static void DrawVmTextFmt(AnmManager *manager, AnmVm *vm, u32 textColor, u32 outlineType,
                               const char *str, ...);

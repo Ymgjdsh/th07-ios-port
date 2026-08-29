@@ -23,6 +23,7 @@
 #include "ScreenEffect.hpp"
 #include "SoundPlayer.hpp"
 #include "Supervisor.hpp"
+#include "TextHelper.hpp"
 #include "ZunResult.hpp"
 #include "dxutil.hpp"
 
@@ -2228,7 +2229,9 @@ i32 MainMenu::DrawReplayMenu()
     AnmVm *vm;
 
     vm = &this->vmHead[134];
-    AsciiManager::AddFormatText(&g_AsciiManager, &vm->pos, "No.   Name       Date  Player   Rank");
+    if (Localization::GetLanguage() != Localization::Language::Chinese)
+        AsciiManager::AddFormatText(&g_AsciiManager, &vm->pos,
+                                    "No.   Name       Date  Player   Rank");
     replayAmount = this->chosenReplay - this->chosenReplay % 15;
     for (i = replayAmount + 15; replayAmount < i; replayAmount++)
     {
@@ -2260,7 +2263,9 @@ i32 MainMenu::DrawReplayMenu()
         AsciiManager::AddFormatText(&g_AsciiManager, &vm->pos, "       %2.3f%%",
                                     (f64)this->currentReplay->data.slowdownRate);
         vm = &this->vmHead[150];
-        AsciiManager::AddFormatText(&g_AsciiManager, &vm->pos, "Stage    LastScore");
+        if (Localization::GetLanguage() != Localization::Language::Chinese)
+            AsciiManager::AddFormatText(&g_AsciiManager, &vm->pos,
+                                        "Stage    LastScore");
         replayAmount = this->chosenReplay - this->chosenReplay % 15;
         for (i = 0; i < 7; i++, replayAmount++)
         {
@@ -2333,7 +2338,9 @@ i32 MainMenu::DrawPracticeMenu()
     g_AsciiManager.color = 0xffffffff;
     g_AsciiManager.isSelected = 0;
     vm = &this->vmHead[131];
-    AsciiManager::AddFormatText(&g_AsciiManager, &vm->pos, "Stage    HI-Score");
+    if (Localization::GetLanguage() != Localization::Language::Chinese)
+        AsciiManager::AddFormatText(&g_AsciiManager, &vm->pos,
+                                    "Stage    HI-Score");
     local_1c = vm->pos;
     local_1c.y += 16.0f;
     local_10 = g_GameManager.clrd[g_GameManager.character * 2 + g_GameManager.shotType]
@@ -2498,6 +2505,28 @@ u32 MainMenu::OnDraw(MainMenu *arg)
         g_AsciiManager.scale = previousScale;
         g_AsciiManager.isSelected = previousSelected;
         g_AsciiManager.isGui = previousGui;
+    }
+    if (Localization::GetLanguage() == Localization::Language::Chinese)
+    {
+        if (arg->gameState == STATE_SELECT_REPLAY)
+        {
+            const ZunVec3 &header = arg->vmHead[134].pos;
+            TextHelper::DrawScreenText(header.x, header.y, 15, 0xffffffff,
+                                       "编号  名称      日期  角色    难度");
+            if ((arg->menuSubState == 2 || arg->menuSubState == 3) &&
+                arg->currentReplay != NULL)
+            {
+                const ZunVec3 &stageHeader = arg->vmHead[150].pos;
+                TextHelper::DrawScreenText(stageHeader.x, stageHeader.y, 15,
+                                           0xffffffff, "关卡    最终得分");
+            }
+        }
+        else if (arg->gameState == STATE_SELECT_PRACTICE_STAGE)
+        {
+            const ZunVec3 &header = arg->vmHead[131].pos;
+            TextHelper::DrawScreenText(header.x, header.y, 15, 0xffffffff,
+                                       "关卡    最高得分");
+        }
     }
     return CHAIN_CALLBACK_RESULT_CONTINUE;
 }

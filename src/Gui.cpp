@@ -15,6 +15,7 @@
 #include "GameManager.hpp"
 #include "GameWindow.hpp"
 #include "ItemManager.hpp"
+#include "Localization.hpp"
 #include "Player.hpp"
 #include "Online.hpp"
 #include "SoundPlayer.hpp"
@@ -35,6 +36,22 @@ Gui g_Gui;
 ChainElem g_GuiCalcChain;
 
 ChainElem g_GuiDrawChain;
+
+static i32 GetDialogueTranslationOccurrence(const GuiMsgVm &msg,
+                                             const MsgRawInstr *current, u8 opcode)
+{
+    const MsgRawInstr *instruction = reinterpret_cast<const MsgRawInstr *>(
+        reinterpret_cast<const u8 *>(msg.msgFile) + msg.msgFile->offsets[msg.currentMsgIdx]);
+    i32 occurrence = 0;
+    while (instruction != current)
+    {
+        if (instruction->time == current->time && instruction->opcode == opcode)
+            ++occurrence;
+        instruction = reinterpret_cast<const MsgRawInstr *>(
+            reinterpret_cast<const u8 *>(&instruction->args) + instruction->argsize);
+    }
+    return occurrence;
+}
 
 i32 Gui::IsStageFinished()
 {
@@ -873,10 +890,32 @@ ZunResult GuiImpl::RunMsg()
             this->msg.dialogueLines[args->dialogue.textLine].fontHeight = (u8)this->msg.fontSize;
             this->msg.dialogueLines[args->dialogue.textLine].fontWidth =
                 this->msg.dialogueLines[args->dialogue.textLine].fontHeight;
-            AnmManager::DrawVmTextFmt(
-                g_AnmManager, &this->msg.dialogueLines[args->dialogue.textLine],
-                this->msg.textColorsA[args->dialogue.textColor],
-                this->msg.textColorsB[args->dialogue.textColor], args->dialogue.text);
+            {
+                bool translated = false;
+                const i32 occurrence = GetDialogueTranslationOccurrence(
+                    this->msg, this->msg.curInstr, MSG_DIALOGUE);
+                const std::string localized = Localization::TranslateDialogue(
+                    g_GameManager.currentStage, this->msg.currentMsgIdx,
+                    this->msg.curInstr->time, MSG_DIALOGUE, occurrence,
+                    args->dialogue.textLine,
+                    args->dialogue.text, &translated);
+                if (translated)
+                {
+                    g_AnmManager->DrawTextToSpriteRegion(
+                        &this->msg.dialogueLines[args->dialogue.textLine],
+                        this->msg.textColorsA[args->dialogue.textColor],
+                        this->msg.textColorsB[args->dialogue.textColor],
+                        localized.c_str(), true, false);
+                }
+                else
+                {
+                    AnmManager::DrawVmTextFmt(
+                        g_AnmManager, &this->msg.dialogueLines[args->dialogue.textLine],
+                        this->msg.textColorsA[args->dialogue.textColor],
+                        this->msg.textColorsB[args->dialogue.textColor], "%s",
+                        args->dialogue.text);
+                }
+            }
             this->msg.framesElapsedDuringPause = 0;
             break;
         case MSG_PAUSE:
@@ -932,10 +971,31 @@ ZunResult GuiImpl::RunMsg()
             args = &this->msg.curInstr->args;
             g_AnmManager->SetAnmIdxAndExecuteScript(&this->msg.introLines[args->dialogue.textLine],
                                                     args->dialogue.textLine + 1794);
-            g_AnmManager->DrawStringFormat(this->msg.introLines + args->dialogue.textLine,
-                                           this->msg.textColorsA[args->dialogue.textColor],
-                                           this->msg.textColorsB[args->dialogue.textColor],
-                                           args->dialogue.text);
+            {
+                bool translated = false;
+                const i32 occurrence = GetDialogueTranslationOccurrence(
+                    this->msg, this->msg.curInstr, MSG_TEXT_INTRODUCE);
+                const std::string localized = Localization::TranslateDialogue(
+                    g_GameManager.currentStage, this->msg.currentMsgIdx,
+                    this->msg.curInstr->time, MSG_TEXT_INTRODUCE, occurrence,
+                    args->dialogue.textLine, args->dialogue.text, &translated);
+                if (translated)
+                {
+                    g_AnmManager->DrawTextToSpriteRegion(
+                        this->msg.introLines + args->dialogue.textLine,
+                        this->msg.textColorsA[args->dialogue.textColor],
+                        this->msg.textColorsB[args->dialogue.textColor],
+                        localized.c_str(), true, true);
+                }
+                else
+                {
+                    g_AnmManager->DrawStringFormat(
+                        this->msg.introLines + args->dialogue.textLine,
+                        this->msg.textColorsA[args->dialogue.textColor],
+                        this->msg.textColorsB[args->dialogue.textColor], "%s",
+                        args->dialogue.text);
+                }
+            }
             this->msg.framesElapsedDuringPause = 0;
             break;
         case MSG_STAGERESULTS:

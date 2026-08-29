@@ -25,4 +25,11 @@ void SetTitlePageActive(bool active);
 // table. `translated` lets the renderer select a localized font only for text
 // that was actually replaced, preserving stock English and stage text.
 std::string Translate(const char *text, bool *translated = nullptr);
+std::string TranslateDialogue(int stage, int script, int time, int opcode,
+                              int occurrence, int line, const char *fallback,
+                              bool *translated = nullptr);
+std::string TranslateMusicTitle(int track, const char *fallback,
+                                bool *translated = nullptr);
+std::string TranslateMusicComment(int track, int line, const char *fallback,
+                                  bool *translated = nullptr);
 } // namespace Localization

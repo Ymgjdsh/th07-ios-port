@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "AnmManager.hpp"
 #include "GameErrorContext.hpp"
 #include "Localization.hpp"
 #include "Supervisor.hpp"
@@ -25,19 +26,72 @@ struct LocalizedRegion
     i32 width;
     i32 height;
     bool localizedFont;
+    bool centerHorizontal;
     std::string text;
 };
 
 static std::vector<LocalizedRegion> g_LocalizedRegions;
 
+struct ScreenTextTexture
+{
+    std::string text;
+    i32 fontSize;
+    bool localizedFont;
+    GfxTextureHandle texture;
+    i32 width;
+    i32 height;
+};
+
+static std::vector<ScreenTextTexture> g_ScreenTextTextures;
+
+static i32 GetRenderFontSize(i32 fontHeight, bool localizedFont)
+{
+    const i32 stockSize = fontHeight * 2 - 2;
+    if (!localizedFont)
+        return stockSize;
+    // Noto Sans SC has a smaller apparent glyph body than the stock font.
+    return (stockSize * 118 + 50) / 100;
+}
+
+static void FitFontToRegion(TTF_Font *font, const char *text, i32 &fontSize,
+                            i32 maxWidth, i32 maxHeight)
+{
+    for (; fontSize > 10; --fontSize)
+    {
+        TTF_SetFontSize(font, fontSize);
+        i32 width = 0;
+        i32 height = 0;
+        if (!TTF_GetStringSize(font, text, 0, &width, &height) ||
+            (width <= maxWidth && height <= maxHeight))
+            return;
+    }
+    TTF_SetFontSize(font, fontSize);
+}
+
+static void ClearScreenTextTextures()
+{
+    if (g_Supervisor.gfxDevice)
+    {
+        for (const ScreenTextTexture &entry : g_ScreenTextTextures)
+        {
+            if (entry.texture)
+                g_Supervisor.gfxDevice->DeleteTexture(entry.texture);
+        }
+    }
+    g_ScreenTextTextures.clear();
+}
+
 static bool IsLocalizedRegionCurrent(GfxTextureHandle texture, i32 x, i32 y, i32 width,
-                                     i32 height, bool localizedFont, const char *text)
+                                     i32 height, bool localizedFont,
+                                     bool centerHorizontal, const char *text)
 {
     for (const LocalizedRegion &region : g_LocalizedRegions)
     {
         if (region.textureId == texture.id && region.x == x && region.y == y &&
             region.width == width && region.height == height &&
-            region.localizedFont == localizedFont && region.text == (text ? text : ""))
+            region.localizedFont == localizedFont &&
+            region.centerHorizontal == centerHorizontal &&
+            region.text == (text ? text : ""))
             return true;
     }
     return false;
@@ -270,6 +324,7 @@ ZunResult TextHelper::CreateTextBuffer()
 
 void TextHelper::ReloadFont()
 {
+    ClearScreenTextTextures();
     if (g_StockFont) TTF_CloseFont(g_StockFont);
     if (g_ChineseFont) TTF_CloseFont(g_ChineseFont);
     g_StockFont = nullptr;
@@ -279,6 +334,7 @@ void TextHelper::ReloadFont()
 
 void TextHelper::ReleaseTextBuffer()
 {
+    ClearScreenTextTextures();
     if (g_StockFont) TTF_CloseFont(g_StockFont);
     if (g_ChineseFont) TTF_CloseFont(g_ChineseFont);
     g_StockFont = nullptr;
@@ -304,7 +360,7 @@ void TextHelper::RenderTextToTextureBold(i32 xPos, i32 yPos, i32 spriteWidth, i3
                                          u32 outlineType, char *string, GfxTextureHandle outTexture,
                                          bool localizedFont)
 {
-    i32 fontSize = fontHeight * 2 - 2;
+    i32 fontSize = GetRenderFontSize(fontHeight, localizedFont);
     if (fontSize <= 0)
     {
         return;
@@ -315,8 +371,6 @@ void TextHelper::RenderTextToTextureBold(i32 xPos, i32 yPos, i32 spriteWidth, i3
     {
         return;
     }
-
-    TTF_SetFontSize(font, fontSize);
 
     char *convStr = string;
     bool needsFree = false;
@@ -329,6 +383,10 @@ void TextHelper::RenderTextToTextureBold(i32 xPos, i32 yPos, i32 spriteWidth, i3
             needsFree = true;
         }
     }
+
+    const i32 maxWidth = std::max(1, spriteWidth * 2 - xPos * 2 - 6);
+    const i32 maxHeight = std::max(1, fontHeight * 2 + 2);
+    FitFontToRegion(font, convStr, fontSize, maxWidth, maxHeight);
 
     SDL_Color white = {255, 255, 255, 255};
     SDL_Surface *textSurf = TTF_RenderText_Blended(font, convStr, 0, white);
@@ -403,24 +461,48 @@ void TextHelper::RenderTextToTextureBold(i32 xPos, i32 yPos, i32 spriteWidth, i3
 void TextHelper::RenderTextToTextureRegion(i32 xPos, i32 yPos, i32 regionWidth,
                                            i32 regionHeight, i32 fontHeight, i32 fontWidth,
                                            u32 textColor, u32 outlineType, const char *string,
-                                           GfxTextureHandle outTexture, bool localizedFont)
+                                           GfxTextureHandle outTexture, bool localizedFont,
+                                           bool centerHorizontal)
 {
     if (!outTexture || regionWidth <= 0 || regionHeight <= 0)
         return;
 
     if (IsLocalizedRegionCurrent(outTexture, xPos, yPos, regionWidth, regionHeight,
-                                 localizedFont, string))
+                                 localizedFont, centerHorizontal, string))
         return;
+
+    const char *source = string ? string : "";
+    if (!*source)
+    {
+        SDL_Surface *clearSurface = SDL_CreateSurface(regionWidth, regionHeight,
+                                                      SDL_PIXELFORMAT_RGBA32);
+        if (!clearSurface)
+            return;
+        SDL_FillSurfaceRect(clearSurface, NULL, 0);
+        g_Supervisor.gfxDevice->BindTexture(outTexture);
+        g_Supervisor.gfxDevice->SetTextureSubImage(xPos, yPos, regionWidth, regionHeight,
+                                                   clearSurface->pixels);
+        SDL_DestroySurface(clearSurface);
+        g_LocalizedRegions.erase(
+            std::remove_if(g_LocalizedRegions.begin(), g_LocalizedRegions.end(),
+                           [=](const LocalizedRegion &region) {
+                               return region.textureId == outTexture.id && region.x == xPos &&
+                                      region.y == yPos && region.width == regionWidth &&
+                                      region.height == regionHeight;
+                           }),
+            g_LocalizedRegions.end());
+        g_LocalizedRegions.push_back({outTexture.id, xPos, yPos, regionWidth, regionHeight,
+                                      localizedFont, centerHorizontal, ""});
+        return;
+    }
 
     (void)fontWidth;
 
-    const i32 fontSize = fontHeight * 2 - 2;
+    i32 fontSize = GetRenderFontSize(fontHeight, localizedFont);
     TTF_Font *font = OpenTextFont(localizedFont);
     if (fontSize <= 0 || !font)
         return;
 
-    TTF_SetFontSize(font, fontSize);
-    const char *source = string ? string : "";
     char *convStr = const_cast<char *>(source);
     bool needsFree = false;
     if (!IsUtf8(source))
@@ -429,6 +511,9 @@ void TextHelper::RenderTextToTextureRegion(i32 xPos, i32 yPos, i32 regionWidth,
         convStr = SDL_strdup(tmp.c_str());
         needsFree = true;
     }
+
+    FitFontToRegion(font, convStr, fontSize, regionWidth * 2 - 8,
+                    regionHeight * 2 - 8);
 
     SDL_Color white = {255, 255, 255, 255};
     SDL_Surface *textSurf = TTF_RenderText_Blended(font, convStr, 0, white);
@@ -455,7 +540,9 @@ void TextHelper::RenderTextToTextureRegion(i32 xPos, i32 yPos, i32 regionWidth,
     }
 
     SDL_SetSurfaceBlendMode(textSurf, SDL_BLENDMODE_BLEND);
-    const i32 textX = textSurf->w < bufferWidth ? (bufferWidth - textSurf->w) / 2 : 0;
+    const i32 textX = centerHorizontal && textSurf->w < bufferWidth
+                          ? (bufferWidth - textSurf->w) / 2
+                          : 2;
     const i32 textY = textSurf->h < bufferHeight ? (bufferHeight - textSurf->h) / 2 : 0;
 
     SDL_SetSurfaceColorMod(textSurf, 0, 0, 0);
@@ -501,7 +588,84 @@ void TextHelper::RenderTextToTextureRegion(i32 xPos, i32 yPos, i32 regionWidth,
                        }),
         g_LocalizedRegions.end());
     g_LocalizedRegions.push_back({outTexture.id, xPos, yPos, regionWidth, regionHeight,
-                                  localizedFont, string ? string : ""});
+                                  localizedFont, centerHorizontal, string ? string : ""});
+}
+
+void TextHelper::DrawScreenText(f32 x, f32 y, i32 fontHeight, u32 color,
+                                const char *string, f32 scale, bool localizedFont)
+{
+    if (!string || !*string || scale <= 0.0f || !g_Supervisor.gfxDevice)
+        return;
+
+    TTF_Font *font = OpenTextFont(localizedFont);
+    if (!font)
+        return;
+    const i32 fontSize = GetRenderFontSize(fontHeight, localizedFont);
+
+    ScreenTextTexture *cached = nullptr;
+    for (ScreenTextTexture &entry : g_ScreenTextTextures)
+    {
+        if (entry.text == string && entry.fontSize == fontSize &&
+            entry.localizedFont == localizedFont)
+        {
+            cached = &entry;
+            break;
+        }
+    }
+    if (!cached)
+    {
+        TTF_SetFontSize(font, fontSize);
+        SDL_Color white = {255, 255, 255, 255};
+        SDL_Surface *rendered = TTF_RenderText_Blended(font, string, 0, white);
+        if (!rendered)
+            return;
+        SDL_Surface *rgba = SDL_ConvertSurface(rendered, SDL_PIXELFORMAT_RGBA32);
+        SDL_DestroySurface(rendered);
+        if (!rgba)
+            return;
+
+        ScreenTextTexture entry = {};
+        entry.text = string;
+        entry.fontSize = fontSize;
+        entry.localizedFont = localizedFont;
+        entry.width = rgba->w;
+        entry.height = rgba->h;
+        entry.texture = g_Supervisor.gfxDevice->CreateTexture();
+        g_Supervisor.gfxDevice->BindTexture(entry.texture);
+        g_Supervisor.gfxDevice->SetTextureImage(entry.width, entry.height, PIXEL_RGBA,
+                                                PIXEL_UNSIGNED_BYTE, rgba->pixels);
+        SDL_DestroySurface(rgba);
+        g_ScreenTextTextures.push_back(entry);
+        cached = &g_ScreenTextTextures.back();
+    }
+
+    const f32 width = cached->width * 0.5f * scale;
+    const f32 height = cached->height * 0.5f * scale;
+    VertexTex1DiffuseXyzrhw vertices[4] = {};
+    vertices[0].pos = ZunVec3(x, y, 0.0f);
+    vertices[1].pos = ZunVec3(x + width, y, 0.0f);
+    vertices[2].pos = ZunVec3(x, y + height, 0.0f);
+    vertices[3].pos = ZunVec3(x + width, y + height, 0.0f);
+    vertices[0].textureUV = {0.0f, 0.0f};
+    vertices[1].textureUV = {1.0f, 0.0f};
+    vertices[2].textureUV = {0.0f, 1.0f};
+    vertices[3].textureUV = {1.0f, 1.0f};
+    for (VertexTex1DiffuseXyzrhw &vertex : vertices)
+    {
+        vertex.w = 1.0f;
+        vertex.color.color = color;
+    }
+
+    g_AnmManager->Flush();
+    g_Supervisor.gfxDevice->BindTexture(cached->texture);
+    g_Supervisor.gfxDevice->SetBlendMode(BLEND_ALPHA, BLEND_ALPHA);
+    g_Supervisor.gfxDevice->SetTextureArg(TEX_ARG_DIFFUSE);
+    g_Supervisor.gfxDevice->SetColorOp(COMPONENT_ALPHA, COLOR_OP_MODULATE);
+    g_Supervisor.gfxDevice->SetColorOp(COMPONENT_RGB, COLOR_OP_MODULATE);
+    g_Supervisor.gfxDevice->DrawPrimitiveUP(PRIM_TRIANGLE_STRIP, 2, vertices,
+                                            sizeof(VertexTex1DiffuseXyzrhw));
+    // Direct drawing bypasses AnmManager's cached texture binding.
+    g_AnmManager->currentTexture = GfxTextureHandle();
 }
 
 i32 TextHelper::GetLogicalStringWidth(const char *str)
