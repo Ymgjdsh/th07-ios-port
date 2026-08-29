@@ -5,8 +5,8 @@ param(
     [string]$KeyPath = "$env:USERPROFILE\.ssh\th07_mac",
     [string]$RemoteFolder = "th07-build",
     [string]$XcodeApp = "/Applications/Xcode.app",
-    [string]$IosVersion = "0.4.0",
-    [int]$IosBuild = 41,
+    [string]$IosVersion = "0.5.0",
+    [int]$IosBuild = 43,
     [string]$GitHubRepo = "https://github.com/Ymgjdsh/th07-ios-port.git",
     [switch]$SkipGitHubBackup
 )

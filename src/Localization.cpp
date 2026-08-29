@@ -14,6 +14,7 @@ constexpr unsigned char kConfigVersion = 1;
 
 Localization::Language g_Language = Localization::Language::Japanese;
 bool g_RestartRequested = false;
+bool g_TitlePageActive = false;
 
 struct LanguageConfig
 {
@@ -117,6 +118,7 @@ void Initialize()
 {
     g_Language = Language::Japanese;
     g_RestartRequested = false;
+    g_TitlePageActive = false;
     const std::string path = FileSystem::GetPrefPath("language.cfg");
     FILE *file = std::fopen(path.c_str(), "rb");
     if (file)
@@ -183,9 +185,15 @@ bool ConsumeRestartRequest()
     return requested;
 }
 
+void SetTitlePageActive(bool active)
+{
+    g_TitlePageActive = active;
+}
+
 std::string Translate(const char *text)
 {
-    if (g_Language == Language::Japanese) return text ? text : "";
+    if (g_TitlePageActive || g_Language == Language::Japanese)
+        return text ? text : "";
     return TranslateKnownPhrases(text, g_Language);
 }
 } // namespace Localization
