@@ -2270,8 +2270,8 @@ u32 ResultScreen::OnDraw(ResultScreen *arg)
         for (i32 n = 0; n < 9; ++n)
         {
             if (arg->vms[n].sprite)
-                AnmManager::DrawVmTextFmt(g_AnmManager, arg->vms + n, 0xffffff, 0,
-                                          "%s", localizedLabels[n]);
+                g_AnmManager->DrawTextToSpriteRegion(arg->vms + n, 0xffffff, 0,
+                                                     localizedLabels[n]);
         }
     }
     for (i = 0; i < 41; i++, vm++)

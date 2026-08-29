@@ -2101,6 +2101,28 @@ void AnmManager::DrawTextToSprite(u32 spriteDstIdx, i32 x, i32 y, i32 width, i32
                                         strToPrint, this->textures[spriteDstIdx]);
 }
 
+void AnmManager::DrawTextToSpriteRegion(AnmVm *vm, u32 textColor, u32 outlineType,
+                                        const char *strToPrint)
+{
+    if (!vm || !vm->sprite || !strToPrint)
+        return;
+
+    const i32 x = (i32)vm->sprite->startPixelInclusive.x;
+    const i32 y = (i32)vm->sprite->startPixelInclusive.y;
+    const i32 width = (i32)(vm->sprite->endPixelInclusive.x -
+                            vm->sprite->startPixelInclusive.x);
+    const i32 height = (i32)(vm->sprite->endPixelInclusive.y -
+                             vm->sprite->startPixelInclusive.y);
+    if (width <= 0 || height <= 0 || vm->sprite->sourceFileIndex < 0)
+        return;
+
+    TextHelper::RenderTextToTextureRegion(
+        x, y, width, height, vm->fontWidth > 0 ? vm->fontWidth : 15,
+        vm->fontHeight > 0 ? vm->fontHeight : 15, textColor, outlineType, strToPrint,
+        this->textures[vm->sprite->sourceFileIndex]);
+    vm->visible = 1;
+}
+
 void AnmManager::DrawVmTextFmt(AnmManager *manager, AnmVm *vm, u32 textColor, u32 outlineType,
                                const char *str, ...)
 {

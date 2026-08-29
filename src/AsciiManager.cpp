@@ -58,7 +58,7 @@ static void DrawLocalizedMenuText(AnmVm *vm, const char *chinese, const char *en
     if (Localization::GetLanguage() == Localization::Language::Japanese || !vm || !vm->sprite)
         return;
     const char *text = Localization::GetLanguage() == Localization::Language::Chinese ? chinese : english;
-    AnmManager::DrawVmTextFmt(g_AnmManager, vm, 0xffffff, 0, "%s", text);
+    g_AnmManager->DrawTextToSpriteRegion(vm, 0xffffff, 0, text);
 }
 
 void IncrementCapped(u32 *param, u32 cap)

@@ -360,6 +360,95 @@ void TextHelper::RenderTextToTextureBold(i32 xPos, i32 yPos, i32 spriteWidth, i3
                                  outTexture);
 }
 
+void TextHelper::RenderTextToTextureRegion(i32 xPos, i32 yPos, i32 regionWidth,
+                                           i32 regionHeight, i32 fontHeight, i32 fontWidth,
+                                           u32 textColor, u32 outlineType, const char *string,
+                                           GfxTextureHandle outTexture)
+{
+    if (!outTexture || regionWidth <= 0 || regionHeight <= 0)
+        return;
+
+    (void)fontWidth;
+
+    const i32 fontSize = fontHeight * 2 - 2;
+    if (fontSize <= 0 || CreateTextBuffer() != ZUN_SUCCESS)
+        return;
+
+    TTF_SetFontSize(g_Font, fontSize);
+    const char *source = string ? string : "";
+    char *convStr = const_cast<char *>(source);
+    bool needsFree = false;
+    if (!IsUtf8(source))
+    {
+        std::string tmp = sj2utf8(source);
+        convStr = SDL_strdup(tmp.c_str());
+        needsFree = true;
+    }
+
+    SDL_Color white = {255, 255, 255, 255};
+    SDL_Surface *textSurf = TTF_RenderText_Blended(g_Font, convStr, 0, white);
+    if (needsFree)
+        SDL_free(convStr);
+    if (!textSurf)
+        return;
+
+    // Render at 2x resolution to match the existing text path, then scale
+    // back into the exact atlas sprite rectangle before uploading it.
+    const i32 bufferWidth = regionWidth * 2;
+    const i32 bufferHeight = regionHeight * 2;
+    if (bufferWidth <= 0 || bufferHeight <= 0 || bufferWidth > 4096 || bufferHeight > 512)
+    {
+        SDL_DestroySurface(textSurf);
+        return;
+    }
+
+    TextHelper textHelper;
+    if (!textHelper.AllocateBuffer(bufferWidth, bufferHeight))
+    {
+        SDL_DestroySurface(textSurf);
+        return;
+    }
+
+    SDL_SetSurfaceBlendMode(textSurf, SDL_BLENDMODE_BLEND);
+    const i32 textX = textSurf->w < bufferWidth ? (bufferWidth - textSurf->w) / 2 : 0;
+    const i32 textY = textSurf->h < bufferHeight ? (bufferHeight - textSurf->h) / 2 : 0;
+
+    SDL_SetSurfaceColorMod(textSurf, 0, 0, 0);
+    const i32 outlineDx[4] = {4, 0, 2, 2};
+    const i32 outlineDy[4] = {2, 2, 0, 4};
+    for (i32 i = 0; i < 4; ++i)
+    {
+        SDL_Rect dst = {textX + outlineDx[i], textY + outlineDy[i], textSurf->w,
+                        textSurf->h};
+        SDL_BlitSurface(textSurf, NULL, textHelper.buffer, &dst);
+    }
+
+    const u8 r = (textColor >> 16) & 0xFF;
+    const u8 g = (textColor >> 8) & 0xFF;
+    const u8 b = textColor & 0xFF;
+    SDL_SetSurfaceColorMod(textSurf, r, g, b);
+    SDL_Rect textDst = {textX + 2, textY + 2, textSurf->w, textSurf->h};
+    SDL_BlitSurface(textSurf, NULL, textHelper.buffer, &textDst);
+    SDL_DestroySurface(textSurf);
+
+    textHelper.InvertAlpha(0, 0, bufferWidth, bufferHeight,
+                           (u32)(outlineType == 0xffffffff));
+    SDL_Surface *outSurface = SDL_CreateSurface(regionWidth, regionHeight,
+                                                SDL_PIXELFORMAT_RGBA32);
+    if (!outSurface)
+        return;
+    SDL_FillSurfaceRect(outSurface, NULL, 0);
+    SDL_Rect srcRect = {0, 0, bufferWidth, bufferHeight};
+    SDL_Rect dstRect = {0, 0, regionWidth, regionHeight};
+    SDL_StretchSurface(textHelper.buffer, &srcRect, outSurface, &dstRect,
+                       SDL_SCALEMODE_LINEAR);
+
+    g_Supervisor.gfxDevice->BindTexture(outTexture);
+    g_Supervisor.gfxDevice->SetTextureSubImage(xPos, yPos, regionWidth, regionHeight,
+                                               outSurface->pixels);
+    SDL_DestroySurface(outSurface);
+}
+
 i32 TextHelper::GetLogicalStringWidth(const char *str)
 {
     if (!IsUtf8(str))

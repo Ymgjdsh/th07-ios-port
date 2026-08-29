@@ -24,6 +24,13 @@ struct TextHelper
     static void RenderTextToTextureBold(i32 xPos, i32 yPos, i32 spriteWidth, i32 spriteHeight,
                                         i32 fontHeight, i32 fontWidth, u32 textColor,
                                         u32 outlineType, char *string, GfxTextureHandle outTexture);
+    // Render into an isolated sprite rectangle and upload exactly that
+    // rectangle. This is used for localized menu labels stored in ANM
+    // texture atlases; it must not touch neighbouring atlas sprites.
+    static void RenderTextToTextureRegion(i32 xPos, i32 yPos, i32 regionWidth,
+                                          i32 regionHeight, i32 fontHeight, i32 fontWidth,
+                                          u32 textColor, u32 outlineType, const char *string,
+                                          GfxTextureHandle outTexture);
     static i32 GetLogicalStringWidth(const char* str);
 
     SDL_Surface *buffer;
