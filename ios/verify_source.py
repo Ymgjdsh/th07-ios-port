@@ -64,7 +64,7 @@ with open(cmake_path, "r", encoding="utf-8") as stream:
     cmake_source = stream.read()
 
 for marker in (
-    'set(TH07_IOS_BUILD "45"',
+    'set(TH07_IOS_BUILD "46"',
     'XCODE_ATTRIBUTE_LLVM_LTO "YES_THIN"',
     'set(SDL_GPU OFF CACHE BOOL "" FORCE)',
     'set(SDL_RENDER ON CACHE BOOL "" FORCE)',
@@ -393,6 +393,8 @@ online_markers = {
     os.path.join("src", "AsciiManager.cpp"): (
         "asciiSafe",
         "Feeding UTF-8 Chinese into this",
+        'menuSprites + 2, "返回标题", "QUIT TO TITLE"',
+        'menuSprites + 3, "重新开始", "RETRY"',
     ),
     os.path.join("src", "main.cpp"): (
         "RestartEngineForLanguage",
@@ -472,7 +474,7 @@ for relative in (os.path.join("src", "EffectManager.cpp"),
         failed = True
 if failed:
     sys.exit(2)
-print("ok: Build 45 language restart, localization safety, DEV input and online markers")
+print("ok: Build 46 pause label mapping, language restart, localization safety and online markers")
 
 with open(os.path.join(root, "src", "ResultScreen.cpp"), "r", encoding="utf-8") as stream:
     result_source = stream.read()

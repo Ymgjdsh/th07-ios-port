@@ -1279,8 +1279,11 @@ void PauseMenu::OnDraw()
         // texture regions for localized builds so the Japanese glyphs are
         // replaced rather than covered by a second overlay.
         DrawLocalizedMenuText(this->menuSprites + 1, "继续游戏", "CONTINUE");
-        DrawLocalizedMenuText(this->menuSprites + 2, "重新开始", "RETRY");
-        DrawLocalizedMenuText(this->menuSprites + 3, "返回标题", "QUIT TO TITLE");
+        // Pause state 2 transitions to the title (state 9); state 3 restarts
+        // the stage (state 10). The retry-after-death menu uses the reverse
+        // sprite order, so these labels intentionally differ from OnDraw below.
+        DrawLocalizedMenuText(this->menuSprites + 2, "返回标题", "QUIT TO TITLE");
+        DrawLocalizedMenuText(this->menuSprites + 3, "重新开始", "RETRY");
         DrawLocalizedMenuText(this->menuSprites + 5, "是", "YES");
         DrawLocalizedMenuText(this->menuSprites + 6, "否", "NO");
         if ((g_Supervisor.flags >> 1 & 1) != 0 && this->curState != 0)
