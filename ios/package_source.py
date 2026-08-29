@@ -16,9 +16,9 @@ args = parser.parse_args()
 
 root = os.path.abspath(args.root)
 output = os.path.abspath(args.output)
-excluded_roots = {".git", ".agents", "__pycache__", "dist"}
+excluded_roots = {".git", ".agents", "__pycache__", "dist", "_msg_extract"}
 excluded_prefixes = ("build", "package-build", "_verify")
-excluded_suffixes = (".obj", ".exe", ".pdb", ".ilk", ".pyc", ".zip")
+excluded_suffixes = (".obj", ".exe", ".pdb", ".ilk", ".pyc", ".zip", ".dat")
 private_suffixes = (".local.psd1", ".pem", ".key", ".p12", ".pfx", ".mobileprovision")
 
 files = []

@@ -14,6 +14,7 @@
 #include "Stage.hpp"
 #include "Supervisor.hpp"
 #include "TextHelper.hpp"
+#include "Localization.hpp"
 #include "ZunMath.hpp"
 #include "graphics/ZunGraphics.hpp"
 #include "utils.hpp"
@@ -2113,10 +2114,13 @@ void AnmManager::DrawVmTextFmt(AnmManager *manager, AnmVm *vm, u32 textColor, u3
     vsnprintf(text, sizeof(text), str, args);
     va_end(args);
 
+    const std::string localized = Localization::Translate(text);
+
     manager->DrawTextToSprite(vm->sprite->sourceFileIndex, vm->sprite->startPixelInclusive.x,
                               vm->sprite->startPixelInclusive.y, vm->sprite->textureWidth,
                               vm->sprite->textureHeight, fontWidth, vm->fontHeight, textColor,
-                              outlineType, text, vm->sprite->cols, vm->sprite->rows);
+                              outlineType, const_cast<char *>(localized.c_str()),
+                              vm->sprite->cols, vm->sprite->rows);
 
     vm->visible = 1;
 }
@@ -2132,6 +2136,9 @@ void AnmManager::DrawStringFormat(AnmVm *vm, u32 textColor, u32 outlineType, con
     va_start(args, text);
     vsnprintf(buf, sizeof(buf), text, args);
     va_end(args);
+
+    const std::string localized = Localization::Translate(buf);
+    SDL_strlcpy(buf, localized.c_str(), sizeof(buf));
 
     this->DrawTextToSprite(vm->sprite->sourceFileIndex, vm->sprite->startPixelInclusive.x,
                            vm->sprite->startPixelInclusive.y, vm->sprite->textureWidth,
@@ -2160,6 +2167,9 @@ void AnmManager::DrawStringFormat2(AnmVm *vm, u32 textColor, u32 outlineType, co
     va_start(args, text);
     vsnprintf(buf, sizeof(buf), text, args);
     va_end(args);
+
+    const std::string localized = Localization::Translate(buf);
+    SDL_strlcpy(buf, localized.c_str(), sizeof(buf));
 
     this->DrawTextToSprite(vm->sprite->sourceFileIndex, vm->sprite->startPixelInclusive.x,
                            vm->sprite->startPixelInclusive.y, vm->sprite->textureWidth,

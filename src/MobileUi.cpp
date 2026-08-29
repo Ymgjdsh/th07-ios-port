@@ -13,6 +13,7 @@
 #include "GameWindow.hpp"
 #include "Gui.hpp"
 #include "MobileDiagnostics.hpp"
+#include "Localization.hpp"
 #include "Online.hpp"
 #include "OnlineTextInputIOS.hpp"
 #include "ResultScreen.hpp"
@@ -807,8 +808,8 @@ i32 SettingsRowAt(f32 x, f32 y)
 {
     const Rect panel = PanelRect();
     const f32 top = panel.y + panel.h * 0.145f;
-    const i32 count = g_SettingsPerformancePage ? 8 : 10;
-    const f32 rowHeight = panel.h * (g_SettingsPerformancePage ? 0.104f : 0.084f);
+    const i32 count = g_SettingsPerformancePage ? 9 : 10;
+    const f32 rowHeight = panel.h * (g_SettingsPerformancePage ? 0.092f : 0.084f);
     if (x < panel.x || x > panel.x + panel.w || y < top || y >= top + rowHeight * count)
     {
         return -1;
@@ -820,7 +821,7 @@ Rect SettingsRowRect(i32 row)
 {
     const Rect panel = PanelRect();
     const f32 top = panel.y + panel.h * 0.145f;
-    const f32 rowHeight = panel.h * (g_SettingsPerformancePage ? 0.104f : 0.084f);
+    const f32 rowHeight = panel.h * (g_SettingsPerformancePage ? 0.092f : 0.084f);
     return {panel.x + panel.w * 0.06f, top + row * rowHeight,
             panel.w * 0.88f, rowHeight * 0.76f};
 }
@@ -883,9 +884,12 @@ void ActivateSettingsRow(i32 row, f32 x)
             if (g_Config.developerDisabled) g_DeveloperOpen = false;
             break;
         case 6:
+            Localization::CycleLanguage();
+            return;
+        case 7:
             TH07_IOS_RequestOnlineText(4, "Enter Cheat Code", "");
             return;
-        case 7: g_SettingsOpen = false; break;
+        case 8: g_SettingsOpen = false; break;
         default: return;
         }
         MarkConfigDirty();
@@ -1244,15 +1248,15 @@ void DrawSettingsPanel()
     static const char *controlLabels[10] = {"CONTROL", "BUTTONS", "BUTTON SIZE", "DRAG SENS",
                                              "OPACITY", "Z TOGGLE", "S TOGGLE", "AUTO BOMB",
                                              "EDIT LAYOUT", "CLOSE"};
-    static const char *performanceLabels[8] = {"LOW EFFECTS", "NO BACKGROUND", "SHOW FPS",
-                                               "BGM", "SFX", "DEVELOPER MODE",
+    static const char *performanceLabels[9] = {"LOW EFFECTS", "NO BACKGROUND", "SHOW FPS",
+                                               "BGM", "SFX", "DEVELOPER MODE", "LANGUAGE",
                                                "INPUT CHEAT CODE", "CLOSE"};
     const Rect panel = PanelRect();
     DrawPanelBackground(panel, g_SettingsPerformancePage ? "PERFECT CHERRY PERFORMANCE" :
                                                           "PERFECT CHERRY CONTROLS");
     const f32 top = panel.y + panel.h * 0.145f;
-    const i32 count = g_SettingsPerformancePage ? 8 : 10;
-    const f32 rowHeight = panel.h * (g_SettingsPerformancePage ? 0.104f : 0.084f);
+    const i32 count = g_SettingsPerformancePage ? 9 : 10;
+    const f32 rowHeight = panel.h * (g_SettingsPerformancePage ? 0.092f : 0.084f);
     const f32 textScale = std::max(1.2f, std::min(panel.w, panel.h) * 0.0045f);
     for (i32 row = 0; row < count; ++row)
     {
@@ -1275,7 +1279,8 @@ void DrawSettingsPanel()
             case 3: SDL_strlcpy(value, g_Config.bgmEnabled ? "ON" : "OFF", sizeof(value)); break;
             case 4: SDL_strlcpy(value, g_Config.sfxEnabled ? "ON" : "OFF", sizeof(value)); break;
             case 5: SDL_strlcpy(value, g_Config.developerDisabled ? "OFF" : "ON", sizeof(value)); break;
-            case 6: SDL_strlcpy(value, "OPEN", sizeof(value)); break;
+            case 6: SDL_strlcpy(value, Localization::GetLanguageName(), sizeof(value)); break;
+            case 7: SDL_strlcpy(value, "OPEN", sizeof(value)); break;
             }
         }
         else
@@ -1405,6 +1410,7 @@ void DrawFps()
 
 void MobileUi::Initialize()
 {
+    Localization::Initialize();
     LoadConfig();
     i32 width, height;
     GetWindowSize(width, height);
@@ -1426,6 +1432,19 @@ void MobileUi::Shutdown()
 void MobileUi::Update()
 {
     const u64 now = SDL_GetTicks();
+    if (Localization::ConsumeRestartRequest())
+    {
+        // iOS cannot relaunch its own process. Reset transient state and the
+        // frame clock so the newly selected font/text is applied immediately.
+        g_SettingsOpen = false;
+        g_SettingsPerformancePage = false;
+        g_DeveloperOpen = false;
+        g_LayoutEditMode = false;
+        MobileUi::CancelTouches();
+        g_GameWindow.ResetAccumulator();
+        MobileDiagnostics::Log("mobile/localization", "language=%s soft restart",
+                               Localization::GetLanguageName());
+    }
     if (!g_FpsWindowStart) g_FpsWindowStart = now;
     ++g_FpsFrames;
     if (now - g_FpsWindowStart >= 1000)

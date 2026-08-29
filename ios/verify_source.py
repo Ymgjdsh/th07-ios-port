@@ -32,6 +32,7 @@ required = {
     "assets/th07.dat": 23_829_135,
     "assets/thbgm.dat": 444_516_656,
     "assets/msgothic.ttc": 1_000_000,
+    "assets/NotoSansSC.ttf": 1_000_000,
     "vendored/SDL/CMakeLists.txt": 1,
     "vendored/SDL_image/CMakeLists.txt": 1,
     "vendored/SDL_ttf/CMakeLists.txt": 1,
@@ -46,10 +47,10 @@ for relative, expected in required.items():
         failed = True
         continue
     size = os.path.getsize(path)
-    if expected > 1 and relative != "assets/msgothic.ttc" and size != expected:
+    if expected > 1 and relative not in ("assets/msgothic.ttc", "assets/NotoSansSC.ttf") and size != expected:
         print("error: unexpected size", relative, size, "expected", expected)
         failed = True
-    elif relative == "assets/msgothic.ttc" and size < expected:
+    elif relative in ("assets/msgothic.ttc", "assets/NotoSansSC.ttf") and size < expected:
         print("error: font looks incomplete", relative, size)
         failed = True
     else:
@@ -92,7 +93,8 @@ with open(os.path.join(root, "ios", "build_ios.sh"), "r", encoding="utf-8") as s
     ios_build_source = stream.read()
 for marker in (
     'parser.add_argument("--exclude-assets"',
-    'excluded_roots = {".git", ".agents", "__pycache__", "dist"}',
+    'excluded_roots = {".git", ".agents", "__pycache__", "dist", "_msg_extract"}',
+    '".dat")',
 ):
     if marker not in package_source:
         print("error: remote source packaging marker missing:", marker)
@@ -116,6 +118,7 @@ for marker in (
     "users.noreply.github.com",
     "git push --atomic",
     "Source-only upload list",
+    "|dat|",
 ):
     if marker not in github_publish_source:
         print("error: safe GitHub publishing marker missing:", marker)

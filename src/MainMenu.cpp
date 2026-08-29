@@ -17,6 +17,7 @@
 #include "GameManager.hpp"
 #include "MobileDiagnostics.hpp"
 #include "MobileUi.hpp"
+#include "Localization.hpp"
 #include "Online.hpp"
 #include "ReplayManager.hpp"
 #include "ScreenEffect.hpp"
@@ -54,6 +55,13 @@ const char *g_CharacterAndShottypeReplayStrings[6] = {
 i16 g_LastJoystickInput = 32;
 i32 g_OnlineP1Character = 0;
 i32 g_OnlineP1Shot = 0;
+
+static void DrawLocalizedMenuText(AnmVm *vm, const char *text)
+{
+    if (Localization::GetLanguage() == Localization::Language::Japanese || !vm || !vm->sprite)
+        return;
+    AnmManager::DrawVmTextFmt(g_AnmManager, vm, 0xfff0e0, 0x300000, "%s", text);
+}
 
 const char *g_KeyConfigStrings[12] = {
     "ショット、決定ボタンを設定します",
@@ -2442,6 +2450,49 @@ u32 MainMenu::OnDraw(MainMenu *arg)
 
     g_AnmManager->SetTexture(0);
     g_AnmManager->CopySurfaceToBackBuffer(0, 0, 0, 0, 0);
+    if (Localization::GetLanguage() != Localization::Language::Japanese && arg->vmHead)
+    {
+        // Main-menu labels are baked into title01.anm. Re-render into each
+        // original sprite's texture slot so the localized label replaces the
+        // source pixels and inherits the stock cursor/animation geometry.
+        static const char *mainLabels[] = {"START GAME", "EXTRA", "PRACTICE", "REPLAY",
+                                           "SCORE", "MUSIC ROOM", "OPTIONS", "QUIT"};
+        static const char *mainLabelsZh[] = {"开始游戏", "EXTRA", "练习模式", "回放",
+                                             "分数记录", "音乐室", "设置", "退出"};
+        static const char *optionLabels[] = {"LIVES", "COLOR DEPTH", "BGM", "SFX",
+                                             "DISPLAY", "SLOW MODE", "DEFAULTS", "KEY CONFIG",
+                                             "BACK"};
+        static const char *optionLabelsZh[] = {"残机", "色深", "BGM", "音效", "显示",
+                                               "降速模式", "恢复默认", "按键设置", "返回"};
+        static const char *keyLabels[] = {"SHOOT", "BOMB", "FOCUS", "SKIP", "PAUSE", "UP",
+                                          "DOWN", "LEFT", "RIGHT", "SHOOT FOCUS", "DEFAULTS", "BACK"};
+        static const char *keyLabelsZh[] = {"射击", "炸弹", "低速", "跳过", "暂停", "上",
+                                            "下", "左", "右", "射击低速", "恢复默认", "返回"};
+        const char *const *labels = Localization::GetLanguage() == Localization::Language::Chinese
+                                  ? mainLabelsZh
+                                  : mainLabels;
+        if (arg->gameState == STATE_PRE_INPUT)
+        {
+            for (i32 n = 0; n < 8; ++n)
+                DrawLocalizedMenuText(arg->vmHead + n + 1, labels[n]);
+        }
+        else if (arg->gameState == STATE_OPTIONS)
+        {
+            const char *const *optionText = Localization::GetLanguage() == Localization::Language::Chinese
+                                          ? optionLabelsZh
+                                          : optionLabels;
+            for (i32 n = 0; n < 9; ++n)
+                DrawLocalizedMenuText(arg->vmHead + n + 9, optionText[n]);
+        }
+        else if (arg->gameState == STATE_KEY_CONFIG)
+        {
+            const char *const *keyText = Localization::GetLanguage() == Localization::Language::Chinese
+                                       ? keyLabelsZh
+                                       : keyLabels;
+            for (i32 n = 0; n < 12; ++n)
+                DrawLocalizedMenuText(arg->vmHead + n + 35, keyText[n]);
+        }
+    }
     switch (arg->gameState)
     {
     case STATE_SELECT_REPLAY:

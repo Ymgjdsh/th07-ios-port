@@ -2,14 +2,17 @@
 
 #include <SDL3/SDL_surface.h>
 #include <SDL3_ttf/SDL_ttf.h>
+#include <string>
 
 #include "GameErrorContext.hpp"
+#include "Localization.hpp"
 #include "Supervisor.hpp"
 #include "graphics/ZunGraphics.hpp"
 #include "inttypes.hpp"
 #include "sj2utf8/sj2utf8.h"
 
 static TTF_Font *g_Font = nullptr;
+static std::string g_FontPath;
 
 // stolen from
 // https://stackoverflow.com/questions/3404199/how-to-find-out-the-encoding-of-a-file-c-sharp/3404317#3404317
@@ -205,9 +208,20 @@ bool TextHelper::CopyTextToTexture(i32 yPos, i32 spriteWidth, i32 spriteHeight, 
 
 ZunResult TextHelper::CreateTextBuffer()
 {
-    if (g_Font)
+    const std::string desiredPath =
+        FileSystem::GetBasePath(Localization::GetLanguage() == Localization::Language::Japanese
+                                    ? "msgothic.ttc"
+                                    : "NotoSansSC.ttf");
+    if (g_Font && g_FontPath == desiredPath)
     {
         return ZUN_SUCCESS;
+    }
+
+    if (g_Font)
+    {
+        TTF_CloseFont(g_Font);
+        g_Font = nullptr;
+        g_FontPath.clear();
     }
 
     if (!TTF_Init())
@@ -216,20 +230,34 @@ ZunResult TextHelper::CreateTextBuffer()
         return ZUN_ERROR;
     }
 
-    g_Font = TTF_OpenFont(FileSystem::GetBasePath("msgothic.ttc").c_str(), 10);
+    g_Font = TTF_OpenFont(desiredPath.c_str(), 10);
     if (!g_Font)
     {
         g_GameErrorContext.Log("TTF_OpenFont fail : %s\n", SDL_GetError());
         return ZUN_ERROR;
     }
+    g_FontPath = desiredPath;
     TTF_SetFontStyle(g_Font, TTF_STYLE_BOLD);
     return ZUN_SUCCESS;
 }
 
-void TextHelper::ReleaseTextBuffer()
+void TextHelper::ReloadFont()
 {
+    if (!g_Font) return;
     TTF_CloseFont(g_Font);
     g_Font = nullptr;
+    g_FontPath.clear();
+    CreateTextBuffer();
+}
+
+void TextHelper::ReleaseTextBuffer()
+{
+    if (g_Font)
+    {
+        TTF_CloseFont(g_Font);
+        g_Font = nullptr;
+    }
+    g_FontPath.clear();
     TTF_Quit();
 }
 

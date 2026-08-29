@@ -11,6 +11,7 @@
 #include "Controller.hpp"
 #include "FileSystem.hpp"
 #include "GameManager.hpp"
+#include "Localization.hpp"
 #include "GameWindow.hpp"
 #include "MobileDiagnostics.hpp"
 #include "Rng.hpp"
@@ -2258,6 +2259,21 @@ u32 ResultScreen::OnDraw(ResultScreen *arg)
     g_Supervisor.viewport.height = 480;
     g_Supervisor.gfxDevice->SetViewport(g_Supervisor.viewport);
     g_AnmManager->CopySurfaceToBackBuffer(0, 0, 0, 0, 0);
+    if (Localization::GetLanguage() != Localization::Language::Japanese)
+    {
+        static const char *labels[] = {"EASY", "NORMAL", "HARD", "LUNATIC", "EXTRA",
+                                       "PHANTASM", "SPELL CARDS", "STATISTICS", "BACK"};
+        static const char *labelsZh[] = {"简单", "普通", "困难", "疯狂", "EXTRA", "PHANTASM",
+                                         "符卡记录", "统计", "返回"};
+        const char *const *localizedLabels =
+            Localization::GetLanguage() == Localization::Language::Chinese ? labelsZh : labels;
+        for (i32 n = 0; n < 9; ++n)
+        {
+            if (arg->vms[n].sprite)
+                AnmManager::DrawVmTextFmt(g_AnmManager, arg->vms + n, 0xffffff, 0,
+                                          "%s", localizedLabels[n]);
+        }
+    }
     for (i = 0; i < 41; i++, vm++)
     {
         pos = vm->pos;

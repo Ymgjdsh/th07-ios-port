@@ -31,6 +31,7 @@ set(SOURCES
     src/Gui.cpp
     src/ItemManager.cpp
     src/MainMenu.cpp
+    src/Localization.cpp
     src/MobileDiagnostics.cpp
     src/MobileUi.cpp
     src/MultiplayerResources.cpp
@@ -104,7 +105,8 @@ if(APPLE)
     set_source_files_properties(src/SoundPlayer.cpp PROPERTIES LANGUAGE OBJCXX)
     set(APP_RESOURCES "${CMAKE_SOURCE_DIR}/assets/th07.dat"
                       "${CMAKE_SOURCE_DIR}/assets/thbgm.dat"
-                      "${CMAKE_SOURCE_DIR}/assets/msgothic.ttc")
+                      "${CMAKE_SOURCE_DIR}/assets/msgothic.ttc"
+                      "${CMAKE_SOURCE_DIR}/assets/NotoSansSC.ttf")
 
 if(NOT TH_EXTERNAL_ASSETS)
     target_sources(${TH_EXEC_NAME} PRIVATE ${APP_RESOURCES})

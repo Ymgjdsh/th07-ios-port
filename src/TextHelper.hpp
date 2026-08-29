@@ -19,6 +19,7 @@ struct TextHelper
                            i32 fontWidth, GfxTextureHandle outTexture);
 
     static ZunResult CreateTextBuffer();
+    static void ReloadFont();
     static void ReleaseTextBuffer();
     static void RenderTextToTextureBold(i32 xPos, i32 yPos, i32 spriteWidth, i32 spriteHeight,
                                         i32 fontHeight, i32 fontWidth, u32 textColor,

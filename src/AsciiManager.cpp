@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstring>
+#include <string>
 
 #include "AnmIdx.hpp"
 #include "AnmManager.hpp"
@@ -13,6 +15,7 @@
 #include "Gui.hpp"
 #include "MobileDiagnostics.hpp"
 #include "MobileUi.hpp"
+#include "Localization.hpp"
 #include "Online.hpp"
 #include "Player.hpp"
 #include "SoundPlayer.hpp"
@@ -48,6 +51,14 @@ PauseMenu::PauseMenu()
 
 RetryMenu::RetryMenu()
 {
+}
+
+static void DrawLocalizedMenuText(AnmVm *vm, const char *chinese, const char *english)
+{
+    if (Localization::GetLanguage() == Localization::Language::Japanese || !vm || !vm->sprite)
+        return;
+    const char *text = Localization::GetLanguage() == Localization::Language::Chinese ? chinese : english;
+    AnmManager::DrawVmTextFmt(g_AnmManager, vm, 0xffffff, 0, "%s", text);
 }
 
 void IncrementCapped(u32 *param, u32 cap)
@@ -657,14 +668,12 @@ void AsciiManager::AddString(ZunVec3 *pos, const char *text)
     }
 
     AsciiManagerString *curString = &this->strings[this->numStrings];
-    if (strlen(text) >= sizeof(curString->text))
-    {
-        return;
-    }
+    const std::string localized = Localization::Translate(text);
 
     this->numStrings++;
 
-    strcpy(curString->text, text);
+    std::strncpy(curString->text, localized.c_str(), sizeof(curString->text) - 1);
+    curString->text[sizeof(curString->text) - 1] = '\0';
     curString->pos = *pos;
     curString->color = this->color;
     curString->scale.x = this->scale.x;
@@ -1257,6 +1266,14 @@ void PauseMenu::OnDraw()
         g_Supervisor.viewport.width = (u32)g_GameManager.arcadeRegionSize.x;
         g_Supervisor.viewport.height = (u32)g_GameManager.arcadeRegionSize.y;
         g_Supervisor.gfxDevice->SetViewport(g_Supervisor.viewport);
+        // Pause labels are baked into the stock ANM sprites. Rewrite the same
+        // texture regions for localized builds so the Japanese glyphs are
+        // replaced rather than covered by a second overlay.
+        DrawLocalizedMenuText(this->menuSprites + 1, "继续游戏", "CONTINUE");
+        DrawLocalizedMenuText(this->menuSprites + 2, "重新开始", "RETRY");
+        DrawLocalizedMenuText(this->menuSprites + 3, "返回标题", "QUIT TO TITLE");
+        DrawLocalizedMenuText(this->menuSprites + 5, "是", "YES");
+        DrawLocalizedMenuText(this->menuSprites + 6, "否", "NO");
         if ((g_Supervisor.flags >> 1 & 1) != 0 && this->curState != 0)
         {
             AnmVm local_25c = this->menuBackground;
@@ -1497,6 +1514,8 @@ void RetryMenu::OnDraw()
         g_Supervisor.viewport.width = g_GameManager.arcadeRegionSize.x;
         g_Supervisor.viewport.height = g_GameManager.arcadeRegionSize.y;
         g_Supervisor.gfxDevice->SetViewport(g_Supervisor.viewport);
+        DrawLocalizedMenuText(this->menuSprites + 2, "重新开始", "RETRY");
+        DrawLocalizedMenuText(this->menuSprites + 3, "返回标题", "QUIT TO TITLE");
         if ((g_Supervisor.flags >> 1 & 1) != 0 && (this->curState != 0 || 2 < this->numFrames))
         {
             g_AnmManager->DrawNoRotation(&this->menuBackground);

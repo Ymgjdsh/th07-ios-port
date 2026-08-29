@@ -99,7 +99,7 @@ finally {
 }
 if ($sourceUploadExit -ne 0) { throw "Source upload failed." }
 
-$assets = @("th07.dat", "thbgm.dat", "msgothic.ttc")
+$assets = @("th07.dat", "thbgm.dat", "msgothic.ttc", "NotoSansSC.ttf")
 foreach ($asset in $assets) {
     $localAsset = Join-Path $root "assets\$asset"
     if (-not (Test-Path -LiteralPath $localAsset)) { throw "Missing asset: $localAsset" }
@@ -132,6 +132,7 @@ mkdir -p "`$BASE/th07-ios14-port/assets"
 ln -sfn "`$BASE/assets/th07.dat" "`$BASE/th07-ios14-port/assets/th07.dat"
 ln -sfn "`$BASE/assets/thbgm.dat" "`$BASE/th07-ios14-port/assets/thbgm.dat"
 ln -sfn "`$BASE/assets/msgothic.ttc" "`$BASE/th07-ios14-port/assets/msgothic.ttc"
+ln -sfn "`$BASE/assets/NotoSansSC.ttf" "`$BASE/th07-ios14-port/assets/NotoSansSC.ttf"
 chmod +x "`$BASE/th07-ios14-port"/ios/*.sh "`$BASE/th07-ios14-port"/ios/*.py
 "@ -replace "`r`n", "; " -replace "`n", "; "
 

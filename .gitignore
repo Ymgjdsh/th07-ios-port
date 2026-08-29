@@ -21,6 +21,7 @@ android/app/src/main/res/mipmap-mdpi/ic_launcher.png
 
 # Local build products and generated files
 /dist/
+/_msg_extract/
 /build*/
 /package-build*/
 /_verify*/

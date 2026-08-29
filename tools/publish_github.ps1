@@ -56,7 +56,7 @@ if ($LASTEXITCODE -ne 0) { throw "Could not inspect staged files." }
 $forbiddenPaths = @($stagedFiles | Where-Object {
     $_ -match '(^|/)(assets|dist|DerivedData|xcuserdata|build[^/]*)/' -or
     $_ -match '(?i)(^|/)(\.env($|\.)|id_(rsa|ed25519)(\.pub)?$|authorized_keys$|credentials?($|\.)|secrets?($|\.)|.*\.local\.(psd1|json|ya?ml|toml)$)' -or
-    $_ -match '(?i)\.(ipa|zip|obj|o|pyc|log|pem|key|p12|pfx|mobileprovision|xcuserstate)$'
+    $_ -match '(?i)\.(ipa|zip|obj|o|pyc|log|dat|pem|key|p12|pfx|mobileprovision|xcuserstate)$'
 })
 if ($forbiddenPaths.Count -gt 0) {
     throw "Refusing to publish forbidden local, generated, or sensitive paths: $($forbiddenPaths -join ', ')"
